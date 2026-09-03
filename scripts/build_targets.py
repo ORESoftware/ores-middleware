@@ -40,6 +40,25 @@ def copy_if_present(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
+def assert_output_is_self_contained(output: Path) -> None:
+    """Reject broken links and links that escape a zed-pkg target root."""
+
+    root = output.resolve(strict=True)
+    for path in sorted(output.rglob("*")):
+        if not path.is_symlink():
+            continue
+        relative = path.relative_to(output)
+        try:
+            resolved = path.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise ValueError(f"build output contains broken symlink: {relative}") from exc
+        if not resolved.is_relative_to(root):
+            raise ValueError(
+                "build output symlink escapes target root: "
+                f"{relative} -> {resolved} (root {root})"
+            )
+
+
 def build_rust() -> None:
     output = reset_output("rust")
     run([
@@ -91,9 +110,12 @@ def build_gleam() -> None:
 def build_elixir() -> None:
     output = reset_output("elixir")
     source = ROOT / "src/elixir"
+    # Mix creates links from _build/lib/<dependency>/src into MIX_DEPS_PATH.
+    # Keeping both roots under target/elixir makes the compiled package
+    # self-contained for zed-pkg copy-mode installation.
     environment = {
         "MIX_BUILD_PATH": str(output / "_build"),
-        "MIX_DEPS_PATH": str(source / "deps"),
+        "MIX_DEPS_PATH": str(output / "deps"),
     }
     run(["mix", "deps.get"], cwd=source, env=environment)
     run(["mix", "compile", "--warnings-as-errors"], cwd=source, env=environment)
@@ -145,6 +167,7 @@ def main() -> int:
         parser.error(str(exc))
     for language in selected:
         BUILDERS[language]()
+        assert_output_is_self_contained(TARGET / language)
         print(f"built target/{language}")
     return 0
 
