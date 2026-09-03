@@ -4,12 +4,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-  applyMutations,
   executeOperationPlan,
   REQUIRED_SEQUENCE,
   validatePlanSemantics,
   validateSourceBindings,
 } from "../../scripts/lib/function-body-contracts.mjs";
+import { applyJsonPointerMutations } from "../../scripts/lib/json-pointer-mutations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const plan = await readJson("contracts/function-bodies/operation-boundary.plan.json");
@@ -79,11 +79,35 @@ test("unsafe operation and error names normalize to bounded low-cardinality valu
 
 for (const testCase of negativeCases.semanticCases) {
   test(`semantic mutation stops evaluation: ${testCase.name}`, () => {
-    const candidate = applyMutations(plan, testCase.mutations);
+    const candidate = applyJsonPointerMutations(plan, testCase.mutations);
     const codes = new Set(validatePlanSemantics(candidate).map((finding) => finding.code));
     for (const expected of testCase.expectedCodes) assert.equal(codes.has(expected), true, `${testCase.name}: missing ${expected}; got ${JSON.stringify([...codes])}`);
   });
 }
+
+test("JSON Pointer mutations target the requested array rather than its parent object", () => {
+  const candidate = applyJsonPointerMutations(plan, [
+    {op: "swap", path: "/steps", value: [3, 5]},
+  ]);
+  assert.equal(candidate.steps[3].opcode, "invoke-operation");
+  assert.equal(candidate.steps[5].opcode, "enter-failure-boundary");
+  assert.equal(plan.steps[3].opcode, "enter-failure-boundary");
+});
+
+test("mutation engine rejects traversal, invalid indexes, and non-array swaps", () => {
+  assert.throws(
+    () => applyJsonPointerMutations(plan, [{op: "set", path: "/steps/99/opcode", value: "invoke-operation"}]),
+    /out of range|does not exist/,
+  );
+  assert.throws(
+    () => applyJsonPointerMutations(plan, [{op: "delete", path: "/missing", value: null}]),
+    /does not exist/,
+  );
+  assert.throws(
+    () => applyJsonPointerMutations(plan, [{op: "swap", path: "/function", value: [0, 1]}]),
+    /not an array/,
+  );
+});
 
 test("every language binds every pseudocode step to reviewed source witnesses", async () => {
   const result = await validateSourceBindings(root, plan, bindings);
