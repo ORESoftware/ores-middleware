@@ -1,0 +1,94 @@
+name: generated-runtime-convergence
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "19 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generated-runtime-convergence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+
+      - name: Install Go 1.25.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25.0"
+          cache: false
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+
+      - name: Install pinned BEAM toolchains
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          elixir-version: "1.18.4"
+          gleam-version: "1.18.1"
+          rebar3-version: "3.24.0"
+
+      - name: Install exact workspace dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+
+      - name: Generate both independent authority lanes
+        run: npm run contracts:polyglot-generate
+
+      - name: Execute TypeSpec and JSON Schema artifacts in six native runtimes
+        run: node scripts/generated_runtime_matrix.mjs
+
+      - name: Assert complete fail-closed receipt
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schema == "ores.generated-runtime-convergence-report/v1"
+            and .status == "passed"
+            and .zeroUnexplainedFindings == true
+            and (.witnesses | length) == 12
+            and ([.witnesses[].state] | all(. == "executed"))
+            and (.discrepancies | length) == 0
+          ' target/generated-runtime-convergence/receipt.json
+
+      - name: Upload runtime witnesses, raw logs, and generated artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: generated-runtime-convergence-${{ github.run_id }}
+          path: |
+            target/generated-runtime-convergence/**/*
+            target/schema-convergence/receipt.json
+            target/schema-convergence/typespec/{typescript,rust,golang,gleam,elixir,erlang}/**/*
+            target/schema-convergence/json-schema-openapi/{typescript,rust,golang,gleam,elixir,erlang}/**/*
+          if-no-files-found: error
+          retention-days: 90
