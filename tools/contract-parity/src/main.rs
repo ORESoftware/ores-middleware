@@ -36,7 +36,11 @@ fn parse_args() -> Result<(PathBuf, Option<PathBuf>), String> {
 
 fn report_path(root: &Path, explicit: Option<PathBuf>, has_findings: bool) -> PathBuf {
     if let Some(path) = explicit {
-        return if path.is_absolute() { path } else { root.join(path) };
+        return if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        };
     }
     let folder = if has_findings {
         "target/discrepancies"
@@ -58,11 +62,17 @@ fn main() -> ExitCode {
 
     let discrepancies = match run(&root) {
         Ok(findings) => findings,
-        Err(error) => vec![Discrepancy::new("contract-check-failure", error.to_string())],
+        Err(error) => vec![Discrepancy::new(
+            "contract-check-failure",
+            error.to_string(),
+        )],
     };
     let output = report_path(&root, explicit_report, !discrepancies.is_empty());
     if let Err(error) = write_report(&output, &discrepancies) {
-        eprintln!("failed to write parity report {}: {error}", output.display());
+        eprintln!(
+            "failed to write parity report {}: {error}",
+            output.display()
+        );
         return ExitCode::from(1);
     }
 

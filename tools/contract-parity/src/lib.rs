@@ -1,6 +1,6 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -89,10 +89,9 @@ fn normalize_tsp_type(type_name: &str, pattern: Option<String>) -> Result<Value>
             "type": "object",
             "additionalProperties": {"type": "string"}
         })),
-        _ if pattern.is_some() => Err(format!(
-            "@pattern is only supported on string properties, got {type_name}"
-        )
-        .into()),
+        _ if pattern.is_some() => {
+            Err(format!("@pattern is only supported on string properties, got {type_name}").into())
+        }
         _ if Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$")?.is_match(type_name) => {
             Ok(json!({"ref": type_name}))
         }
@@ -121,7 +120,9 @@ fn parse_tsp_model(source: &str, name: &str) -> Result<Value> {
         }
         if line.starts_with('@') {
             if pending_pattern.is_some() {
-                return Err(format!("multiple decorators before a property in model {name}").into());
+                return Err(
+                    format!("multiple decorators before a property in model {name}").into(),
+                );
             }
             pending_pattern = parse_pattern_decorator(line)?;
             if pending_pattern.is_none() {
@@ -292,7 +293,9 @@ fn check_topology(topology: &Value) -> Vec<Discrepancy> {
         ));
     }
 
-    if topology.get("onUnexplainedMismatch").and_then(Value::as_str)
+    if topology
+        .get("onUnexplainedMismatch")
+        .and_then(Value::as_str)
         != Some("STOPPED_FOR_EVALUATION")
     {
         discrepancies.push(Discrepancy::new(
@@ -305,12 +308,10 @@ fn check_topology(topology: &Value) -> Vec<Discrepancy> {
 
 pub fn run(root: &Path) -> Result<Vec<Discrepancy>> {
     let tsp = fs::read_to_string(root.join("contracts/docs-serving.tsp"))?;
-    let schema: Value = serde_json::from_slice(&fs::read(
-        root.join("contracts/docs-serving.schema.json"),
-    )?)?;
-    let topology: Value = serde_json::from_slice(&fs::read(
-        root.join("contracts/authority-topology.json"),
-    )?)?;
+    let schema: Value =
+        serde_json::from_slice(&fs::read(root.join("contracts/docs-serving.schema.json"))?)?;
+    let topology: Value =
+        serde_json::from_slice(&fs::read(root.join("contracts/authority-topology.json"))?)?;
 
     let mut discrepancies = check_topology(&topology);
     for name in ["DocsRepresentation", "DocsAction"] {
@@ -347,7 +348,10 @@ pub fn write_report(path: &Path, discrepancies: &[Discrepancy]) -> Result<()> {
         "zeroUnexplainedFindings": discrepancies.is_empty(),
         "discrepancies": discrepancies
     });
-    fs::write(path, format!("{}\n", serde_json::to_string_pretty(&report)?))?;
+    fs::write(
+        path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )?;
     Ok(())
 }
 
@@ -409,7 +413,11 @@ mod tests {
             .push(Value::String("accept".to_owned()));
         fs::write(&path, serde_json::to_vec_pretty(&schema).unwrap()).unwrap();
         let findings = run(temp.path()).expect("parity run");
-        assert!(findings.iter().any(|item| item.detail.contains("model DocsRequest")));
+        assert!(
+            findings
+                .iter()
+                .any(|item| item.detail.contains("model DocsRequest"))
+        );
     }
 
     #[test]
@@ -420,6 +428,10 @@ mod tests {
         topology["prohibitedAuthorityEdges"] = json!([]);
         fs::write(&path, serde_json::to_vec_pretty(&topology).unwrap()).unwrap();
         let findings = run(temp.path()).expect("parity run");
-        assert!(findings.iter().any(|item| item.kind == "authority-topology"));
+        assert!(
+            findings
+                .iter()
+                .any(|item| item.kind == "authority-topology")
+        );
     }
 }
