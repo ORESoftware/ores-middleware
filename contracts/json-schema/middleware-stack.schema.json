@@ -185,6 +185,7 @@
             "type": "object",
             "properties": {
               "keyBy": {
+                "type": "array",
                 "items": { "enum": ["ip", "ip-prefix", "route", "method"] },
                 "contains": { "enum": ["ip", "ip-prefix"] },
                 "minContains": 1
