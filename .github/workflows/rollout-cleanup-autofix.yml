@@ -1,0 +1,68 @@
+name: rollout-cleanup-autofix
+
+on:
+  push:
+    branches: [feat/cross-language-middleware-contract-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/cross-language-middleware-contract-v1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Make caller cleanup cover retries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/rust-server-rollout.yml')
+          text = path.read_text()
+          old = '''          workflow=.github/workflows/ores-middleware-rollout.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$SOURCE" "$MANIFEST" docs/ores-middleware.md .gitignore
+'''
+          new = '''          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$SOURCE" "$MANIFEST" docs/ores-middleware.md .gitignore
+'''
+          if old not in text:
+              raise SystemExit('expected workflow cleanup prelude was not found')
+          text = text.replace(old, new, 1)
+          old = '''          git rm "$workflow"
+          git diff --cached --check
+'''
+          new = '''          while IFS= read -r -d '' workflow; do
+            git rm "$workflow"
+          done < <(find .github/workflows -maxdepth 1 -type f \
+            -name 'ores-middleware-rollout*.yml' -print0)
+          git diff --cached --check
+'''
+          if old not in text:
+              raise SystemExit('expected single-workflow removal was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --manifest-path src/rust/Cargo.toml --all
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+          python3 scripts/test-rollout-rust-server.py
+      - name: Commit verified cleanup behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/rollout-cleanup-autofix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/rust-server-rollout.yml src/rust/Cargo.lock
+          git rm .github/workflows/rollout-cleanup-autofix.yml
+          git commit -m 'fix(ci): remove all rollout workflow controls after success'
+          git push origin HEAD:feat/cross-language-middleware-contract-v1
