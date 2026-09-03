@@ -6,6 +6,8 @@ on:
       - fix/den-3959-no-asymmetric-orm-gate
     paths:
       - .github/workflows/den-3959-orm-data-plane-proof-once.yml
+      - scripts/orm_data_plane_gate.py
+      - scripts/test_orm_data_plane_gate.py
 
 permissions:
   contents: read
