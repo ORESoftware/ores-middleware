@@ -118,8 +118,8 @@ def validate(root: Path) -> list[str]:
     if installed_smoke_path.is_file():
         installed_smoke = installed_smoke_path.read_text(encoding="utf-8")
         for required_text in (
-            "scripts/cross_translate.py",
-            "target/package",
+            "cross_translate.py",
+            'target_root / "package"',
             "Rust/TypeScript/Go descriptor parity",
             "Gleam/Elixir/Erlang runtime probes",
         ):
