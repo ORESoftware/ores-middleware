@@ -14,93 +14,149 @@ const validDirectory = path.join(root, "contracts/rate-limit-v2/fixtures/valid")
 const invalidDirectory = path.join(root, "contracts/rate-limit-v2/fixtures/invalid");
 const receiptPath = path.join(root, "target/rate-limit-v2/receipt.json");
 
-const [typespec, schemaText] = await Promise.all([
-  fs.readFile(typespecPath, "utf8"),
-  fs.readFile(schemaPath, "utf8"),
-]);
-const schema = JSON.parse(schemaText);
+await main();
 
-assert(
-  typespec.includes("Independently authored rate-limit policy authority"),
-  "TypeSpec authority marker is missing",
-);
-assert(
-  schema.description?.includes("Independently authored JSON Schema authority"),
-  "JSON Schema authority marker is missing",
-);
-assert(
-  schema.$schema === "https://json-schema.org/draft/2020-12/schema",
-  "JSON Schema must declare Draft 2020-12",
-);
-
-const enumPairs = [
-  ["RateLimitAlgorithmV2", "rateLimitAlgorithmV2"],
-  ["RateLimitConsistency", "rateLimitConsistency"],
-  ["RateLimitEnforcementMode", "rateLimitEnforcementMode"],
-  ["RateLimitFailureMode", "rateLimitFailureMode"],
-  ["RateLimitLayer", "rateLimitLayer"],
-  ["OperationClass", "operationClass"],
-];
-
-const enumReceipt = {};
-for (const [typespecName, schemaName] of enumPairs) {
-  const left = parseTypeSpecEnum(typespec, typespecName);
-  const right = [...schema.$defs[schemaName].enum].sort();
-  assertEqualSets(left, right, `${typespecName}/${schemaName}`);
-  enumReceipt[typespecName] = left;
+async function main() {
+  try {
+    const receipt = await validateContracts();
+    await writeReceipt(receipt);
+    console.log(JSON.stringify(receipt));
+  } catch (error) {
+    const detail = describeError(error);
+    const receipt = {
+      schema: "ores.middleware.rate-limit-v2-contract-gate/v1",
+      status: "stopped_for_evaluation",
+      zeroUnexplainedFindings: false,
+      authorities: {
+        typeSpec: path.relative(root, typespecPath),
+        jsonSchema: path.relative(root, schemaPath),
+        relationship: "independent-peers",
+      },
+      findings: [
+        {
+          code: "contract-gate-failed",
+          state: "unexplained",
+          detail,
+        },
+      ],
+    };
+    await writeReceipt(receipt);
+    console.error(detail);
+    process.exitCode = 1;
+  }
 }
 
-const typespecProperties = parseTypeSpecModelProperties(typespec, "RateLimitPolicyV2");
-const schemaProperties = Object.keys(schema.properties).sort();
-assertEqualSets(typespecProperties, schemaProperties, "RateLimitPolicyV2 properties");
+async function validateContracts() {
+  const [typespec, schemaText] = await Promise.all([
+    fs.readFile(typespecPath, "utf8"),
+    fs.readFile(schemaPath, "utf8"),
+  ]);
+  const schema = JSON.parse(schemaText);
 
-for (const forbidden of [
-  "email",
-  "ip",
-  "subject",
-  "tenant",
-  "user",
-  "rawIdentity",
-  "bearerToken",
-  "cookie",
-]) {
   assert(
-    !schemaProperties.includes(forbidden),
-    `raw identity field ${forbidden} is forbidden in rate-limit policy contracts`,
+    typespec.includes("Independently authored rate-limit policy authority"),
+    "TypeSpec authority marker is missing",
   );
+  assert(
+    schema.description?.includes("Independently authored JSON Schema authority"),
+    "JSON Schema authority marker is missing",
+  );
+  assert(
+    schema.$schema === "https://json-schema.org/draft/2020-12/schema",
+    "JSON Schema must declare Draft 2020-12",
+  );
+
+  const enumPairs = [
+    ["RateLimitAlgorithmV2", "rateLimitAlgorithmV2"],
+    ["RateLimitConsistency", "rateLimitConsistency"],
+    ["RateLimitEnforcementMode", "rateLimitEnforcementMode"],
+    ["RateLimitFailureMode", "rateLimitFailureMode"],
+    ["RateLimitLayer", "rateLimitLayer"],
+    ["OperationClass", "operationClass"],
+  ];
+
+  const enumReceipt = {};
+  for (const [typespecName, schemaName] of enumPairs) {
+    const left = parseTypeSpecEnum(typespec, typespecName);
+    const definition = schema.$defs?.[schemaName];
+    assert(
+      definition && Array.isArray(definition.enum),
+      `JSON Schema enum ${schemaName} is missing`,
+    );
+    const right = [...definition.enum].sort();
+    assertEqualSets(left, right, `${typespecName}/${schemaName}`);
+    enumReceipt[typespecName] = left;
+  }
+
+  const typespecProperties = parseTypeSpecModelProperties(typespec, "RateLimitPolicyV2");
+  const schemaPropertyObject = schema.properties;
+  assert(
+    schemaPropertyObject && typeof schemaPropertyObject === "object",
+    "JSON Schema RateLimitPolicyV2 properties are missing",
+  );
+  const schemaProperties = Object.keys(schemaPropertyObject).sort();
+  assertEqualSets(typespecProperties, schemaProperties, "RateLimitPolicyV2 properties");
+
+  for (const forbidden of [
+    "email",
+    "ip",
+    "subject",
+    "tenant",
+    "user",
+    "rawIdentity",
+    "bearerToken",
+    "cookie",
+  ]) {
+    assert(
+      !schemaProperties.includes(forbidden),
+      `raw identity field ${forbidden} is forbidden in rate-limit policy contracts`,
+    );
+  }
+
+  const ajv = new Ajv2020({
+    allErrors: true,
+    strict: true,
+    validateFormats: true,
+  });
+  addFormats(ajv);
+  const validate = ajv.compile(schema);
+
+  const validResults = await validateDirectory(
+    validDirectory,
+    true,
+    validate,
+    ajv,
+  );
+  const invalidResults = await validateDirectory(
+    invalidDirectory,
+    false,
+    validate,
+    ajv,
+  );
+
+  return {
+    schema: "ores.middleware.rate-limit-v2-contract-gate/v1",
+    status: "passed",
+    zeroUnexplainedFindings: true,
+    authorities: {
+      typeSpec: path.relative(root, typespecPath),
+      jsonSchema: path.relative(root, schemaPath),
+      relationship: "independent-peers",
+    },
+    enums: enumReceipt,
+    properties: schemaProperties,
+    validFixtures: validResults,
+    invalidFixtures: invalidResults,
+    findings: [],
+  };
 }
 
-const ajv = new Ajv2020({
-  allErrors: true,
-  strict: true,
-  validateFormats: true,
-});
-addFormats(ajv);
-const validate = ajv.compile(schema);
+async function writeReceipt(receipt) {
+  await fs.mkdir(path.dirname(receiptPath), { recursive: true });
+  await fs.writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+}
 
-const validResults = await validateDirectory(validDirectory, true);
-const invalidResults = await validateDirectory(invalidDirectory, false);
-
-const receipt = {
-  schema: "ores.middleware.rate-limit-v2-contract-gate/v1",
-  status: "passed",
-  zeroUnexplainedFindings: true,
-  authorities: {
-    typeSpec: path.relative(root, typespecPath),
-    jsonSchema: path.relative(root, schemaPath),
-    relationship: "independent-peers",
-  },
-  enums: enumReceipt,
-  properties: schemaProperties,
-  validFixtures: validResults,
-  invalidFixtures: invalidResults,
-};
-
-await fs.mkdir(path.dirname(receiptPath), { recursive: true });
-await fs.writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
-console.log(JSON.stringify(receipt));
-
-async function validateDirectory(directory, expectedValidity) {
+async function validateDirectory(directory, expectedValidity, validate, ajv) {
   const names = (await fs.readdir(directory))
     .filter((name) => name.endsWith(".json"))
     .sort();
@@ -148,6 +204,11 @@ function assertEqualSets(left, right, label) {
     JSON.stringify(left) === JSON.stringify(right),
     `${label} parity mismatch: TypeSpec=${JSON.stringify(left)} JSON Schema=${JSON.stringify(right)}`,
   );
+}
+
+function describeError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replaceAll(root, ".").slice(0, 2000);
 }
 
 function assert(condition, message) {
