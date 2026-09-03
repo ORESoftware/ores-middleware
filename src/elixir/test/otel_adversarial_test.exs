@@ -10,7 +10,6 @@ defmodule OresMiddleware.OTelAdversarialTest do
   setup do
     previous_context = Context.current()
     previous_metadata = Logger.metadata()
-    previous_log_context = NextLoggers.current_context()
 
     Context.clear()
     Logger.reset_metadata([])
@@ -24,11 +23,6 @@ defmodule OresMiddleware.OTelAdversarialTest do
 
       Logger.reset_metadata(previous_metadata)
       NextLoggers.restore_context(log_restore)
-
-      if previous_log_context != %{} do
-        token = NextLoggers.put_context(previous_log_context)
-        NextLoggers.restore_context(token)
-      end
     end)
 
     :ok
@@ -97,7 +91,7 @@ defmodule OresMiddleware.OTelAdversarialTest do
       end
 
       assert Context.current() == outer_context
-      assert Logger.metadata() == outer_metadata
+      assert Map.new(Logger.metadata()) == Map.new(outer_metadata)
       assert NextLoggers.current_context() == outer_log_context
     after
       NextLoggers.restore_context(restore_token)
