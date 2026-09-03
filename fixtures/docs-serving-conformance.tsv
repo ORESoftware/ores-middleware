@@ -1,0 +1,32 @@
+# name	method	path	accept	format	runtime_digest	docs_digest	action	status	representation	head_only
+unknown_get	GET	/health	-	-	-	-	pass	-	-	false
+unknown_post	POST	/health	-	-	-	-	pass	-	-	false
+html_default	GET	/docs/api	-	-	-	-	serve	200	html	false
+html_head	HEAD	/api/docs	-	-	-	-	serve	200	html	true
+html_post	POST	/api-docs	-	-	-	-	method-not-allowed	405	-	false
+catalog_path	GET	/api/docs.json	-	-	-	-	serve	200	catalog	false
+catalog_alias	GET	/api-docs.json	-	-	-	-	serve	200	catalog	false
+hyper_schema_path	GET	/hyper-schema.json	-	-	-	-	serve	200	hyper-schema	false
+generic_accept_openapi	GET	/docs/api	application/vnd.oai.openapi+json	-	-	-	serve	200	openapi	false
+generic_accept_openapi_alias	GET	/docs/api	application/openapi+json	-	-	-	serve	200	openapi	false
+generic_accept_json	GET	/docs/api	application/json	-	-	-	serve	200	catalog	false
+generic_format_openrpc	GET	/docs/api	application/json	openrpc	-	-	serve	200	openrpc	false
+generic_format_connect	GET	/docs/api	application/vnd.ores.connect+json	connect	-	-	serve	200	connect	false
+generic_bad_format	GET	/docs/api	*/*	yaml	-	-	not-acceptable	406	-	false
+fixed_format_conflict	GET	/openapi.json	application/json	openrpc	-	-	not-acceptable	406	-	false
+fixed_accept_conflict	GET	/openapi.json	text/html	-	-	-	not-acceptable	406	-	false
+fixed_broad_json	GET	/openrpc.json	application/json	-	-	-	serve	200	openrpc	false
+accept_quality_order	GET	/docs/api	text/html;q=0.2, application/openrpc+json;q=0.9	-	-	-	serve	200	openrpc	false
+accept_zero_then_wildcard	GET	/docs/api	application/openrpc+json;q=0, */*;q=0.5	-	-	-	serve	200	html	false
+accept_only_zero	GET	/docs/api	text/html;q=0	-	-	-	not-acceptable	406	-	false
+query_component_ignored	GET	/openapi.json?download=1	application/json	-	-	-	serve	200	openapi	false
+digest_match	GET	/openapi.json	application/json	-	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	serve	200	openapi	false
+digest_mismatch	GET	/openapi.json	application/json	-	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb	stopped-for-evaluation	503	-	false
+expected_digest_missing_docs	GET	/openapi.json	application/json	-	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	-	stopped-for-evaluation	503	-	false
+invalid_docs_digest	GET	/openapi.json	application/json	-	-	xyz	stopped-for-evaluation	503	-	false
+docs_digest_without_runtime	GET	/connect.json	application/json	-	-	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	serve	200	connect	false
+lowercase_method	get	/openrpc.json	application/json	-	-	-	serve	200	openrpc	false
+trailing_slash_not_normalized	GET	/openapi.json/	application/json	-	-	-	pass	-	-	false
+application_wildcard	GET	/connect.json	application/*	-	-	-	serve	200	connect	false
+explicit_html_conflicting_accept	GET	/docs/api	application/json	html	-	-	not-acceptable	406	-	false
+unknown_accept_generic	GET	/docs/api	image/png	-	-	-	not-acceptable	406	-	false

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/docs-serving/v1.json",
+  "title": "ORES routing-neutral docs-serving contract",
+  "description": "Independent JSON Schema/OpenAPI-lane authority paired with docs-serving.tsp; neither source is generated from the other.",
+  "oneOf": [
+    { "$ref": "#/$defs/DocsRequest" },
+    { "$ref": "#/$defs/DocsDecision" }
+  ],
+  "$defs": {
+    "DocsRepresentation": {
+      "type": "string",
+      "enum": [
+        "html",
+        "catalog",
+        "openapi",
+        "openrpc",
+        "connect",
+        "hyper-schema"
+      ]
+    },
+    "DocsAction": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "serve",
+        "method-not-allowed",
+        "not-acceptable",
+        "stopped-for-evaluation"
+      ]
+    },
+    "DocsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path"],
+      "properties": {
+        "method": { "type": "string" },
+        "path": { "type": "string" },
+        "accept": { "type": "string" },
+        "format": { "type": "string" },
+        "runtimeContractDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "docsContractDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "DocsDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "headOnly", "headers"],
+      "properties": {
+        "action": { "$ref": "#/$defs/DocsAction" },
+        "status": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "representation": { "$ref": "#/$defs/DocsRepresentation" },
+        "headOnly": { "type": "boolean" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    }
+  }
+}
