@@ -79,9 +79,9 @@ All downstream PRs:
 | 17 | hypesiege | `hypesiege-admin-web-server.rs` | [#4](https://github.com/hypesiege/hypesiege-admin-web-server.rs/pull/4) | `8bcf7891de62` | PASS |
 | 18 | quaestor-ledger | `quaestor-admin-web-server.rs` | [#4](https://github.com/quaestor-ledger/quaestor-admin-web-server.rs/pull/4) | `b09378bfba76` | PASS |
 | 19 | daedalus-fab | `daedalus-admin-web-server.rs` | [#4](https://github.com/daedalus-fab/daedalus-admin-web-server.rs/pull/4) | `e165e5209d54` | PASS |
-| 20 | sonus-auris | `sonus-auris-admin-web-server.rs` | [#5](https://github.com/sonus-auris/sonus-auris-admin-web-server.rs/pull/5) | `3fc4c9fb5ce5` | PASS: `rust`; `rust-health-contract` release-build step running at initial audit |
+| 20 | sonus-auris | `sonus-auris-admin-web-server.rs` | [#5](https://github.com/sonus-auris/sonus-auris-admin-web-server.rs/pull/5) | `3fc4c9fb5ce5` | PASS (2 workflows) |
 
-**Rollout total:** 20 servers across 11 GitHub organizations.
+**Rollout total:** 20 servers across 11 GitHub organizations. **Workflow audit:** 20/20 PASS.
 
 ## Deployment gate
 
@@ -105,4 +105,5 @@ A service must not infer trusted proxy behavior merely from forwarded headers. I
 - [x] Compile-time and runtime conformance workflow across every language.
 - [x] Middleware installed at the live router boundary of 20 servers.
 - [x] Rollout spans 11 organizations, exceeding the 6-organization requirement.
-- [ ] Merge downstream drafts after deployment policy review and all final workflow checks are green.
+- [x] All 20 downstream repository workflows passed.
+- [ ] Merge downstream drafts after deployment TLS/trusted-proxy policy review.
