@@ -1,0 +1,30 @@
+name: gleam-format-preview
+
+on:
+  push:
+    branches:
+      - test/request-logging-adversarial-2026-09-03
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: '27'
+          gleam-version: '1.18.1'
+      - name: Emit exact formatted test source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/gleam
+          gleam format test/otel_adversarial_test.gleam
+          printf 'FORMATTED_SOURCE_BASE64='
+          base64 -w0 test/otel_adversarial_test.gleam
+          printf '\n'
