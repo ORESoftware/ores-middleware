@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ipnet::IpNet;
 use uuid::Uuid;
 
 use crate::{
@@ -16,6 +15,7 @@ use crate::{
         InMemoryTokenBucket, NoopSyncObserver, RequestMetadata, ResponseMetadata,
         TracingTelemetry,
     },
+    net::cidr_contains,
 };
 
 #[derive(Debug, Clone)]
@@ -300,10 +300,7 @@ fn peer_is_trusted(remote_ip: Option<&str>, cidrs: &[String]) -> bool {
     let Some(ip) = remote_ip.and_then(|value| value.parse::<IpAddr>().ok()) else {
         return false;
     };
-    cidrs
-        .iter()
-        .filter_map(|cidr| cidr.parse::<IpNet>().ok())
-        .any(|network| network.contains(&ip))
+    cidrs.iter().any(|cidr| cidr_contains(cidr, ip))
 }
 
 fn valid_token(value: &str) -> bool {
