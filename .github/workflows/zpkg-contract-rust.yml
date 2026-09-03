@@ -1,0 +1,79 @@
+name: zpkg-contract-rust
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-middleware-zpkg-contract-rust-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typed-authority:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt,clippy
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Format, lint, and test the typed authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+          cargo clippy --manifest-path tools/contract-parity/Cargo.toml \
+            --bin zpkg_contract_check -- -D warnings
+          cargo test --manifest-path tools/contract-parity/Cargo.toml \
+            --bin zpkg_contract_check
+
+      - name: Compare direct Rust and Python compatibility receipts
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/zpkg-contract-cargo
+        run: |
+          set -euo pipefail
+          mkdir -p target/zpkg-contract
+          cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml \
+            --bin zpkg_contract_check -- \
+            --root "$GITHUB_WORKSPACE" \
+            --receipt target/zpkg-contract/rust.json
+          python3 scripts/check_zpkg.py \
+            --root "$GITHUB_WORKSPACE" \
+            --receipt target/zpkg-contract/python-shim.json
+          cmp -s target/zpkg-contract/rust.json target/zpkg-contract/python-shim.json
+          jq -e '
+            .schema == "ores.zpkg-contract-audit/v1" and
+            .status == "passed" and
+            .zeroUnexplainedFindings == true and
+            (.findings | length) == 0
+          ' target/zpkg-contract/rust.json
+          sha256sum target/zpkg-contract/*.json > target/zpkg-contract/SHA256SUMS
+
+      - name: Upload deterministic authority receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zpkg-contract-rust-${{ github.run_id }}
+          path: target/zpkg-contract/
+          if-no-files-found: error
+          retention-days: 90

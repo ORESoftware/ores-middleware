@@ -1,205 +1,159 @@
 #!/usr/bin/env python3
-"""Validate the repository's zed-pkg polyglot publication contract."""
+"""Compatibility shim for the typed Rust Zed repository-contract authority."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import tomllib
+import os
+import subprocess
+import tempfile
 from pathlib import Path
+from typing import Any
 
-EXPECTED_TARGETS = {
-    "repository": (".", "none", None),
-    "rust": ("src/rust", "rust", "ores-middleware-rust"),
-    "typescript": ("src/ts", "node", "ores-middleware-typescript"),
-    "golang": ("src/golang", "go", "ores-middleware-golang"),
-    "gleam": ("src/gleam", "none", "ores-middleware-gleam"),
-    "elixir": ("src/elixir", "none", "ores-middleware-elixir"),
-    "erlang": ("src/erlang", "none", "ores-middleware-erlang"),
-}
-EXPECTED_OUTPUTS = {
-    "target/rust",
-    "target/ts",
-    "target/golang",
-    "target/gleam",
-    "target/elixir",
-    "target/erlang",
-    "target/package",
-}
-EXPECTED_FLOWS = {
-    "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
-    "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
-}
-POLYGLOT_COMMAND = (
-    "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml "
-    "--bin persistence_codegen -- --output-root target/schema-convergence "
-    "--report target/schema-convergence/receipt.json"
-)
-EXPECTED_ZED_TEST_SCRIPT = (
-    "python3 scripts/audit.py --receipt target/audit/receipt.json && "
-    "npm run contracts:polyglot-generate && npm run contracts:generated-check"
-)
-EXPECTED_INSTALLED_SMOKE_TEST = (
-    'python3 "$ZED_PKG_TEST_TARGET/target/package/scripts/installed_package_smoke.py" '
-    '--root "$ZED_PKG_TEST_TARGET"'
-)
-EXPECTED_WORKSPACE_SCRIPTS = {
-    "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
-    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
-    "contracts:cross-translate": "python3 scripts/cross_translate.py",
-    "contracts:polyglot-generate": POLYGLOT_COMMAND,
-    "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
-    "persistence:check": "python3 scripts/orm_matrix_gate.py",
-    "zpkg:check": "python3 scripts/check_zpkg.py",
-}
+ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = ROOT / "tools" / "contract-parity" / "Cargo.toml"
+BINARY = "zpkg_contract_check"
+
+
+def _command(root: Path, receipt: Path) -> list[str]:
+    return [
+        "cargo",
+        "run",
+        "--quiet",
+        "--manifest-path",
+        str(MANIFEST),
+        "--bin",
+        BINARY,
+        "--",
+        "--root",
+        str(root),
+        "--receipt",
+        str(receipt),
+    ]
+
+
+def _run(root: Path, receipt: Path) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment.setdefault(
+        "CARGO_TARGET_DIR",
+        str(root / "target" / "repository-control" / "zpkg-contract-check"),
+    )
+    return subprocess.run(
+        _command(root, receipt),
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _read_receipt(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return {
+            "status": "failed",
+            "findings": [
+                {
+                    "code": "rust_receipt_unavailable",
+                    "path": str(path),
+                    "detail": str(error),
+                }
+            ],
+        }
+    return value if isinstance(value, dict) else {
+        "status": "failed",
+        "findings": [
+            {
+                "code": "rust_receipt_invalid",
+                "path": str(path),
+                "detail": "Rust checker receipt must be a JSON object",
+            }
+        ],
+    }
+
+
+def _finding_text(item: Any) -> str:
+    if not isinstance(item, dict):
+        return f"invalid Rust finding: {item!r}"
+    code = item.get("code", "unknown")
+    path = item.get("path", ".zpkg.toml")
+    detail = item.get("detail", "missing detail")
+    return f"{code} {path}: {detail}"
 
 
 def validate(root: Path) -> list[str]:
-    errors: list[str] = []
-    manifest = tomllib.loads((root / ".zpkg.toml").read_text(encoding="utf-8"))
-    package = manifest.get("package", {})
-    if package.get("org") != "oresoftware" or package.get("name") != "ores-middleware":
-        errors.append("package identity must be oresoftware/ores-middleware")
-    if "language" in package:
-        errors.append("package.language must remain unset for a polyglot repository")
-
-    # Zed 0.2.3 uses a closed ScriptsSection with exactly one supported hook:
-    # `test`. Richer repository commands remain in package.json and Justfile.
-    scripts = manifest.get("scripts", {})
-    if set(scripts) != {"test"}:
-        errors.append(
-            "Zed 0.2.3 [scripts] must contain exactly the supported test hook"
-        )
-    if scripts.get("test") != EXPECTED_ZED_TEST_SCRIPT:
-        errors.append(f"scripts.test must be {EXPECTED_ZED_TEST_SCRIPT!r}")
-
-    targets = manifest.get("targets", {})
-    if set(targets) != set(EXPECTED_TARGETS):
-        errors.append(f"targets must be exactly {sorted(EXPECTED_TARGETS)}, got {sorted(targets)}")
-    names: set[str] = set()
-    for key, (directory, adapter, name) in EXPECTED_TARGETS.items():
-        actual = targets.get(key, {})
-        if actual.get("dir") != directory:
-            errors.append(f"targets.{key}.dir must be {directory!r}")
-        if actual.get("adapter") != adapter:
-            errors.append(f"targets.{key}.adapter must be {adapter!r}")
-        if name is None:
-            if "name" in actual:
-                errors.append("targets.repository must publish under package.name and omit name")
-        elif actual.get("name") != name:
-            errors.append(f"targets.{key}.name must be {name!r}")
-        elif name in names:
-            errors.append(f"duplicate target package name {name!r}")
-        else:
-            names.add(name)
-        if directory != "." and not (root / directory).is_dir():
-            errors.append(f"target directory does not exist: {directory}")
-
-    build = manifest.get("build", {})
-    if build.get("command") != "python3 scripts/build_targets.py":
-        errors.append("build.command must use the checked-in polyglot build orchestrator")
-    outputs = set(build.get("outputs", []))
-    if outputs != EXPECTED_OUTPUTS:
-        errors.append(f"build.outputs mismatch: expected {sorted(EXPECTED_OUTPUTS)}, got {sorted(outputs)}")
-
-    workspace = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    workspace_scripts = workspace.get("scripts", {})
-    for name, expected in EXPECTED_WORKSPACE_SCRIPTS.items():
-        if workspace_scripts.get(name) != expected:
-            errors.append(f"package.json scripts.{name} must be {expected!r}")
-
-    compare_command = workspace_scripts.get("contracts:compare", "")
-    for required_fragment in (
-        "contracts:polyglot-generate",
-        "contracts:generated-check",
-        "contracts:cross-translate",
-    ):
-        if required_fragment not in compare_command:
-            errors.append(
-                f"package.json scripts.contracts:compare must execute {required_fragment}"
+    root = root.resolve()
+    with tempfile.TemporaryDirectory(prefix="ores-zpkg-check-") as temporary:
+        receipt = Path(temporary) / "receipt.json"
+        try:
+            completed = _run(root, receipt)
+        except OSError as error:
+            return [f"unable to execute typed Rust zpkg checker: {error}"]
+        report = _read_receipt(receipt)
+        findings = [_finding_text(item) for item in report.get("findings", [])]
+        if completed.returncode == 0 and report.get("status") == "passed" and not findings:
+            return []
+        if completed.returncode not in {0, 2}:
+            output = (completed.stderr or completed.stdout).strip()
+            findings.append(
+                f"typed Rust zpkg checker exited {completed.returncode}: {output or 'no output'}"
             )
-
-    required_paths = (
-        "tools/contract-parity/src/bin/persistence_codegen.rs",
-        "scripts/validate-generated-polyglot.mjs",
-        "scripts/orm_matrix_gate.py",
-        "scripts/test_orm_matrix_gate.py",
-        "scripts/orm_catalog_gate.py",
-        "scripts/subprocess_capture.py",
-        "scripts/build_targets.py",
-        "scripts/cross_translate.py",
-        "scripts/installed_package_smoke.py",
-        ".github/workflows/persistence-convergence.yml",
-        ".github/workflows/zed-release-acceptance.yml",
-    )
-    for required_path in required_paths:
-        if not (root / required_path).is_file():
-            errors.append(f"missing required convergence/package gate file: {required_path}")
-
-    smoke_test = manifest.get("publish", {}).get("smoke_test", "")
-    if smoke_test != EXPECTED_INSTALLED_SMOKE_TEST:
-        errors.append(
-            "publish.smoke_test must execute the installed build-output closure, "
-            f"expected {EXPECTED_INSTALLED_SMOKE_TEST!r}, got {smoke_test!r}"
-        )
-    installed_smoke_path = root / "scripts/installed_package_smoke.py"
-    if installed_smoke_path.is_file():
-        installed_smoke = installed_smoke_path.read_text(encoding="utf-8")
-        for required_text in (
-            "cross_translate.py",
-            'target_root / "package"',
-            "Rust/TypeScript/Go descriptor parity",
-            "Gleam/Elixir/Erlang runtime probes",
-        ):
-            if required_text not in installed_smoke:
-                errors.append(
-                    f"installed package smoke test must retain {required_text!r}"
-                )
-
-    topology = json.loads((root / "contracts/authority-topology.json").read_text(encoding="utf-8"))
-    authorities = {
-        item.get("id")
-        for item in topology.get("authorities", [])
-        if item.get("kind") == "human-authored" and item.get("topLevel") is True
-    }
-    if authorities != {"typespec", "json-schema-openapi"}:
-        errors.append("authority topology must retain TypeSpec and JSON Schema/OpenAPI as top-level peers")
-    if topology.get("flows") != EXPECTED_FLOWS:
-        errors.append("authority topology flow mismatch")
-    gates = set(topology.get("convergenceGates", []))
-    required_gates = {
-        "cross-translation-witnesses",
-        "round-trip-witnesses",
-        "sql-catalog-readback-when-applicable",
-        "diesel-seaorm-catalog-parity-when-applicable",
-    }
-    if not required_gates.issubset(gates):
-        errors.append(
-            "authority topology must require translation, round-trip, SQL catalog, "
-            "and Diesel/SeaORM gates"
-        )
-    if topology.get("onUnexplainedMismatch") != "STOPPED_FOR_EVALUATION":
-        errors.append("unexplained mismatches must stop for evaluation")
-    return errors
+        if not findings:
+            findings.append(
+                f"typed Rust zpkg checker returned status {report.get('status')!r}"
+            )
+        return findings
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--receipt", type=Path)
     args = parser.parse_args()
-    errors = validate(args.root.resolve())
-    if errors:
-        print("invalid .zpkg.toml:")
-        for item in errors:
-            print(f"- {item}")
+    root = args.root.resolve()
+
+    if args.receipt is None:
+        with tempfile.TemporaryDirectory(prefix="ores-zpkg-check-") as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            try:
+                completed = _run(root, receipt)
+            except OSError as error:
+                print(f"unable to execute typed Rust zpkg checker: {error}")
+                return 1
+            report = _read_receipt(receipt)
+    else:
+        receipt = args.receipt.resolve()
+        try:
+            completed = _run(root, receipt)
+        except OSError as error:
+            print(f"unable to execute typed Rust zpkg checker: {error}")
+            return 1
+        report = _read_receipt(receipt)
+
+    findings = [_finding_text(item) for item in report.get("findings", [])]
+    if completed.returncode == 0 and report.get("status") == "passed" and not findings:
+        print(
+            ".zpkg.toml polyglot contract passed through the typed Rust authority: "
+            "repository + rust + typescript + golang + gleam + elixir + erlang + "
+            "installed closure + peer-authority gates"
+        )
+        return 0
+
+    print("invalid .zpkg.toml:")
+    for item in findings:
+        print(f"- {item}")
+    if completed.returncode not in {0, 2}:
+        output = (completed.stderr or completed.stdout).strip()
+        print(
+            f"- typed Rust zpkg checker exited {completed.returncode}: "
+            f"{output or 'no output'}"
+        )
         return 1
-    print(
-        ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
-        "golang + gleam + elixir + erlang + installed build-output smoke + "
-        "independent TypeSpec/JSON-Schema generation + bidirectional witnesses + "
-        "four-way Diesel/SeaORM database-backed convergence"
-    )
-    return 0
+    return 2
 
 
 if __name__ == "__main__":
