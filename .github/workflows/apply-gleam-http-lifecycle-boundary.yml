@@ -1,0 +1,100 @@
+name: apply-gleam-http-lifecycle-boundary
+
+on:
+  push:
+    branches:
+      - agent/gleam-http-lifecycle-boundary-20260903
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-gleam-http-lifecycle-boundary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/gleam-http-lifecycle-boundary-20260903
+          fetch-depth: 0
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+          gleam-version: "1.18.1"
+          rebar3-version: latest
+
+      - name: Normalize the staged test helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path(".agent-patches/apply_gleam_lifecycle.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              'import gleam/list\nimport gleeunit',
+              'import gleam/list\nimport gleam/string\nimport gleeunit',
+              1,
+          )
+          text = text.replace("string_contains(", "string.contains(")
+          final_block = text.rfind('\nreplace_once(\n    "src/gleam/test/ores_middleware_test.gleam",')
+          if final_block < 0:
+              raise SystemExit("missing final staged test helper block")
+          text = text[:final_block]
+          text += '''\n\nwith Path("src/gleam/test/ores_middleware_test.gleam").open("a", encoding="utf-8") as handle:\n    handle.write(\n        '\\n@external(erlang, "operation_boundary_test_ffi", "raise")\\n'\n        'fn raise() -> Nil\\n'\n    )\n'''
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Apply exact source transformations
+        run: python3 .agent-patches/apply_gleam_lifecycle.py
+
+      - name: Format and test Gleam package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/gleam
+          gleam format src/ores_middleware.gleam test/ores_middleware_test.gleam
+
+          max_attempts=4
+          for attempt in $(seq 1 "$max_attempts"); do
+            log_file="$(mktemp)"
+            set +e
+            gleam test 2>&1 | tee "$log_file"
+            status="${PIPESTATUS[0]}"
+            set -e
+            if [[ "$status" -eq 0 ]]; then
+              rm -f "$log_file"
+              break
+            fi
+            if ! grep -Eqi 'HTTP error|A HTTP request failed|error sending request for url|connection (reset|refused)|temporary failure|timed out|timeout|TLS|unexpected EOF|failed to lookup address information|DNS' "$log_file"; then
+              rm -f "$log_file"
+              exit "$status"
+            fi
+            if [[ "$attempt" -eq "$max_attempts" ]]; then
+              rm -f "$log_file"
+              exit "$status"
+            fi
+            rm -f "$log_file"
+            sleep $((attempt * 10))
+          done
+
+      - name: Commit verified source-only result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .agent-patches/apply_gleam_lifecycle.py
+          rmdir .agent-patches 2>/dev/null || true
+          rm -f .github/workflows/apply-gleam-http-lifecycle-boundary.yml
+          git diff --check
+          git config user.name "ores-gh-bot"
+          git config user.email "ores-gh-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(gleam): contain the full HTTP middleware lifecycle"
+          git push origin HEAD:agent/gleam-http-lifecycle-boundary-20260903
