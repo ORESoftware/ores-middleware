@@ -104,17 +104,7 @@ jobs:
           elixir-version: '1.18'
           gleam-version: '1.18.1'
           rebar3-version: 'latest'
-      - name: Format, emit, and test Gleam hardening suite
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd src/gleam
-          gleam format test/otel_adversarial_test.gleam
-          printf 'FORMATTED_SOURCE_BASE64='
-          base64 -w0 test/otel_adversarial_test.gleam
-          printf '\n'
-          gleam format --check src test
-          gleam test
+      - run: cd src/gleam && gleam format --check src test && gleam test
       - run: cd src/gleam && gleam run -m ores_middleware_contractcheck | jq -e '.language == "gleam"'
       - run: cd src/elixir && mix deps.get && mix test
       - run: cd src/elixir && MIX_ENV=test mix run --no-compile --no-deps-check --no-start -e 'IO.puts(OresMiddleware.descriptor_json())' | jq -e '.language == "elixir"'
