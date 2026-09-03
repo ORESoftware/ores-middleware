@@ -109,10 +109,7 @@ fn layered_rate_limit_enums_match_between_peer_authorities() {
         ("RateLimitAlgorithm", "rateLimitAlgorithm"),
         ("RateLimitLayer", "rateLimitLayer"),
         ("RateLimitFailureMode", "rateLimitFailureMode"),
-        (
-            "RateLimitKeyDerivationMode",
-            "rateLimitKeyDerivationMode",
-        ),
+        ("RateLimitKeyDerivationMode", "rateLimitKeyDerivationMode"),
         ("RateLimitDecisionKind", "rateLimitDecisionKind"),
         ("RateLimitDecisionSource", "rateLimitDecisionSource"),
     ] {
