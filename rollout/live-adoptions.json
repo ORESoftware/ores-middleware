@@ -1,0 +1,327 @@
+{
+  "defaults": {
+    "adapter": "axum",
+    "conclusion": "success",
+    "defaultBranch": "main",
+    "documentationPath": "docs/ores-middleware.md",
+    "manifestPath": "Cargo.toml",
+    "temporaryRolloutControls": []
+  },
+  "deploymentState": "not-asserted",
+  "evidenceClass": "current-default-branch",
+  "minimums": {
+    "organizations": 6,
+    "repositories": 20
+  },
+  "repositories": [
+    {
+      "evidence": {
+        "head": "f42d76c7e4fe9d81e0012a18bb851cf7df20fbe7",
+        "merge": "fe7b0fd84a9328a133b3a4795362a1d866855c65",
+        "pr": 6,
+        "workflow": "rust"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "3FA-app/3fa-admin-api-server.rs",
+      "runtime": {
+        "merge": "340c3ef3b3a268ea83e2dd77e81747f89fe6c2e4",
+        "pr": 5
+      },
+      "sourcePath": "src/server.rs"
+    },
+    {
+      "evidence": {
+        "head": "00a068bdccdb35ddbd8fc01c054c48778a0cdaec",
+        "merge": "58370377997e537dcfc7f0e6069a569dfda594d3",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "canonical-cloud/canonical-admin-api-server.rs",
+      "runtime": {
+        "merge": "bd9ac797d0c5d98b2a0c317d5ae4cdc75a0e6436",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "3ee7153de6e53325577eb4737de047c51f2483bc",
+        "merge": "ee75c0da618fea3397fa6197d672688224ddea7b",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "athlet-o/athleto-admin-api-server.rs",
+      "runtime": {
+        "merge": "9305f3249decd37fdcf1430d408a0295ac7796fe",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "38ea122910265fd88bdd6510cec335e10556f3db",
+        "merge": "7d492e62220dcb8829e7b848a5b766e40af9850d",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "declarative-migrations/declmig-admin-api-server.rs",
+      "runtime": {
+        "merge": "7029db29a14045b35ecce0cb75ec06935da8b452",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "d6f9fa50e64aadae10f73fb9e1e6625f0831a47a",
+        "merge": "407bab91b6e64a483ce0d59756f118969b83a831",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "opto-sync/opto-sync-admin-api-server.rs",
+      "runtime": {
+        "merge": "dd947b910e2930827bbce9c24b769b569937a402",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "84a4afaffcd024088253832cc8d16df10bfe6f11",
+        "merge": "e6be0d8789a13755b2bc9157ed973278596a0b06",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "voxletra/vxl-admin-api-server.rs",
+      "runtime": {
+        "merge": "31d68732f81f88a86515fec1667d09b9b1d77335",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "8805a2b1cabd3ffbeea2835232056a4457e67d72",
+        "merge": "581ae1435e1be5d902a1f14b3ac9e3486e2e0371",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "hypesiege/hypesiege-admin-api-server.rs",
+      "runtime": {
+        "merge": "d10fad17c0d389827c1311142fbcdfc8b534a99d",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "597ec671152d2b2dd73a2fa64566c919c8cfcda2",
+        "merge": "408f97ca60579d88974324151168e165589114b5",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "quaestor-ledger/quaestor-admin-api-server.rs",
+      "runtime": {
+        "merge": "708e71c414c448d7bbf5abbe90f4b91d183f9c1e",
+        "pr": 4
+      },
+      "sourcePath": "src/server.rs"
+    },
+    {
+      "evidence": {
+        "head": "b59c767053d55f711bf51368b09baa1182b84091",
+        "merge": "fa961925e4ab6a4f12198e60aeba6e0f3f27ed27",
+        "pr": 6,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "daedalus-fab/daedalus-admin-api-server.rs",
+      "runtime": {
+        "merge": "0b5dba95352d21a43cd989bc5d24d3a96d8f191c",
+        "pr": 5
+      },
+      "sourcePath": "src/server.rs"
+    },
+    {
+      "evidence": {
+        "head": "15fee72ddc9fa851ae8a28ba773a3194f89941e4",
+        "merge": "242a38bf589341efb0464be754f32e115fac5db3",
+        "pr": 7,
+        "workflow": "Rust Health Contract, Reusable Rust Server CI"
+      },
+      "middlewareRevision": "a9491ebe150fa0de9b15b5d6be9d00d8b13c464b",
+      "repository": "sonus-auris/sonus-auris-admin-api-server.rs",
+      "runtime": {
+        "merge": "cce337479d097d1a730fa1bc53805458d67c853b",
+        "pr": 6
+      },
+      "sourcePath": "src/http/ores_middleware.rs"
+    },
+    {
+      "evidence": {
+        "head": "40c4f6106c076b00647e28dd427aaaa0e6f4f393",
+        "merge": "e34259ae74b22f244c1fa18bd9779190aba08616",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "praxonne/praxonne-admin-api-server.rs",
+      "runtime": {
+        "merge": "5dc23f0d95607b3f244392c777c25d23ac21c5d8",
+        "pr": 4
+      },
+      "sourcePath": "src/server.rs"
+    },
+    {
+      "evidence": {
+        "head": "5a55a47cff20eac7b653f168399e4693abf3dd6d",
+        "merge": "eac6334675964ef6d48a1902bf057a84c3cf88e6",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "athlet-o/athleto-admin-web-server.rs",
+      "runtime": {
+        "merge": "8ff6425199e78fcac16486f1eceb996e19ba2982",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "52da48764e11624d91f18ab474c103f6391c3edd",
+        "merge": "94ae0a04d3b512a98b6d6fb5f87ac0fdbec96738",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "canonical-cloud/canonical-admin-web-server.rs",
+      "runtime": {
+        "merge": "552de8934cde9020ccc6b3c0009ad5d238673922",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "f63e31842dff8cb76f3cd6332d438bee342e1dbe",
+        "merge": "f1b119f600c11c497bb1c71a61178334ab545a4c",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "declarative-migrations/declmig-admin-web-server.rs",
+      "runtime": {
+        "merge": "5cc74a7973020da591d0c97056e7cb964a6c863e",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "943dc438c790f701eb9f649c7184860f08a22a80",
+        "merge": "c07406d640dada0960ae45bc92cca4c6eaa98695",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "opto-sync/opto-sync-admin-web-server.rs",
+      "runtime": {
+        "merge": "7055c3a755cd09f01248ae978379502720a03e82",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "913c70b1adf6411317d03a79243fcced65c9e56b",
+        "merge": "1a4d3d44622fec3ce79d935c502fd41a4ac65456",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "voxletra/vxl-admin-web-server.rs",
+      "runtime": {
+        "merge": "0c26b6780ba791ebd24df315c9aab6593832ac16",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "99199680571389116df3b5cd65f76168af31817a",
+        "merge": "91e2da44826b761f5b630857e324b574d4690c96",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "hypesiege/hypesiege-admin-web-server.rs",
+      "runtime": {
+        "merge": "d2f197e654d8b79a94c3454dae6329aa54e1f884",
+        "pr": 4
+      },
+      "sourcePath": "src/main.rs"
+    },
+    {
+      "evidence": {
+        "head": "d8e113746b8839b0abcfd3c845848cf4c8202a30",
+        "merge": "022a9bf404b401a737d188a5a9a444bb8ef790af",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "quaestor-ledger/quaestor-admin-web-server.rs",
+      "runtime": {
+        "merge": "114f9383cd900738e23e51b4ffe37393e30d141e",
+        "pr": 4
+      },
+      "sourcePath": "src/server.rs"
+    },
+    {
+      "evidence": {
+        "head": "509fa608614177615a666ceed1bd1e883a6f9b49",
+        "merge": "2482a7905dc758d3406f92caff78d3c4e15a6831",
+        "pr": 5,
+        "workflow": "rust-health-contract"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "daedalus-fab/daedalus-admin-web-server.rs",
+      "runtime": {
+        "merge": "43312ce1ad9a14b2d4f4fce8e9bb098f536e0cf5",
+        "pr": 4
+      },
+      "sourcePath": "src/server.rs"
+    },
+    {
+      "evidence": {
+        "head": "5b00be3e28d499b98e30cfb60c8972f1ce983c12",
+        "merge": "fab0e747bfa7559871cda1edbac35cd51313db88",
+        "pr": 6,
+        "workflow": "Rust Health Contract, Reusable Rust Server CI"
+      },
+      "middlewareRevision": "84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3",
+      "repository": "sonus-auris/sonus-auris-admin-web-server.rs",
+      "runtime": {
+        "merge": "94a23fa314cfa58a23c9d3a102b55d930317db17",
+        "pr": 5
+      },
+      "sourcePath": "src/server.rs"
+    }
+  ],
+  "schema": "ores.middleware.live-rollout/v1",
+  "summary": {
+    "adapterFamilies": {
+      "axum": 20
+    },
+    "organizations": 11,
+    "repositories": 20
+  },
+  "verifiedAt": "2026-09-03"
+}
