@@ -16,6 +16,10 @@
     "./docs-serving": {
       "types": "./dist/docs-serving.d.ts",
       "import": "./dist/docs-serving.js"
+    },
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "import": "./dist/otel.js"
     }
   },
   "scripts": {
@@ -25,6 +29,9 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@oresoftware/next-loggers": "git+https://github.com/ores-otel/ores.otel.log.git#b55271c047be761c4711d87cbd500a49eefda3d9"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
