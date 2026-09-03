@@ -52,9 +52,11 @@ pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
         .filter(|(key, _)| key.starts_with("otel."))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let trace_ids = (!context.trace_id.is_empty())
-        .then(|| vec![context.trace_id.clone()])
-        .unwrap_or_default();
+    let trace_ids = if context.trace_id.is_empty() {
+        Vec::new()
+    } else {
+        vec![context.trace_id.clone()]
+    };
 
     LogContext {
         logged_in_user,

@@ -1,0 +1,15 @@
+{
+  "policyId": "mutation-v2",
+  "operationClass": "mutation",
+  "algorithm": "gcra",
+  "consistency": "strict",
+  "enforcementMode": "audit",
+  "failureMode": "fail-closed",
+  "layer": "application",
+  "capacity": 20,
+  "windowMs": 60000,
+  "maximumOvershoot": 0,
+  "localDenyCacheEntries": 10000,
+  "coordinatorRequired": true,
+  "keyVersion": "v1"
+}

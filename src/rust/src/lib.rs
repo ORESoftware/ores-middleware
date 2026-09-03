@@ -7,11 +7,13 @@ mod context;
 pub mod docs_serving;
 pub mod frameworks;
 mod integrations;
+pub mod middleware_order;
 mod net;
 pub mod operation;
 pub mod otel;
 mod pipeline;
 pub mod rate_limit;
+pub mod rate_limit_v2;
 
 use std::collections::BTreeMap;
 
@@ -30,6 +32,10 @@ pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
 };
+pub use middleware_order::{
+    rate_limit_posture, validate_middleware_order, MiddlewareStage, OperationClass,
+    OrderViolation, RateLimitConsistency, RateLimitPosture, DEFAULT_MIDDLEWARE_ORDER,
+};
 pub use operation::{
     run_operation_boundary, run_operation_boundary_with_cancellation,
     run_operation_boundary_with_timeout, OperationDescriptor, OperationFailure,
@@ -42,6 +48,10 @@ pub use rate_limit::{
     RateLimitAlgorithm, RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource,
     RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer,
     RateLimitPrincipal, RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver,
+};
+pub use rate_limit_v2::{
+    RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError,
+    RateLimitPolicyV2, RateLimitPolicyViolation,
 };
 
 pub const CONTRACT_VERSION: &str = "1.0.0";
