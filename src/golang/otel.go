@@ -200,6 +200,12 @@ func (log RequestLog) Fatal(values ...any) error {
 	return log.logger.FatalContext(log.ctx, values...).Send()
 }
 
+func emitOresRequestLog(ctx context.Context, event *nextloggers.Event, phase string) {
+	if err := event.Send(); err != nil {
+		slog.WarnContext(ctx, "ores request log failed", "phase", phase, "error", err)
+	}
+}
+
 // WrapWithOresLogger composes the portable stack with ores-otel. It runs after
 // authentication, creates a child pinned to request/user/tenant identifiers,
 // and places both the child and immutable log context on request.Context().
@@ -224,18 +230,53 @@ func (s *Stack) WrapWithOresLogger(root *nextloggers.Logger, next http.Handler) 
 			"url.path":            request.URL.Path,
 		}
 
-		if err := logger.InfoContext(ctx, "request handler started").AddFields(fields).Send(); err != nil {
-			slog.WarnContext(ctx, "ores request log failed", "phase", "started", "error", err)
-		}
+		emitOresRequestLog(ctx, logger.InfoContext(ctx, "request handler started").AddFields(fields), "started")
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				if err := logger.ErrorContext(ctx, "request handler panic").AddFields(fields).Send(); err != nil {
-					slog.WarnContext(ctx, "ores request log failed", "phase", "panic", "error", err)
-				}
+				emitOresRequestLog(
+					ctx,
+					logger.ErrorContext(ctx, "request handler panic").AddFields(map[string]any{
+						"http.request.method": request.Method,
+						"url.path":            request.URL.Path,
+						"request.outcome":     "panic",
+					}),
+					"panic",
+				)
 				panic(recovered)
 			}
-			if err := logger.InfoContext(ctx, "request handler completed").AddFields(fields).Send(); err != nil {
-				slog.WarnContext(ctx, "ores request log failed", "phase", "completed", "error", err)
+
+			switch {
+			case errors.Is(ctx.Err(), context.DeadlineExceeded):
+				emitOresRequestLog(
+					ctx,
+					logger.ErrorContext(ctx, "request handler timed out").AddFields(map[string]any{
+						"http.request.method":       request.Method,
+						"url.path":                  request.URL.Path,
+						"http.response.status_code": http.StatusGatewayTimeout,
+						"request.outcome":           "timeout",
+					}),
+					"timeout",
+				)
+			case errors.Is(ctx.Err(), context.Canceled):
+				emitOresRequestLog(
+					ctx,
+					logger.WarnContext(ctx, "request handler cancelled").AddFields(map[string]any{
+						"http.request.method": request.Method,
+						"url.path":            request.URL.Path,
+						"request.outcome":     "cancelled",
+					}),
+					"cancelled",
+				)
+			default:
+				emitOresRequestLog(
+					ctx,
+					logger.InfoContext(ctx, "request handler completed").AddFields(map[string]any{
+						"http.request.method": request.Method,
+						"url.path":            request.URL.Path,
+						"request.outcome":     "completed",
+					}),
+					"completed",
+				)
 			}
 		}()
 
