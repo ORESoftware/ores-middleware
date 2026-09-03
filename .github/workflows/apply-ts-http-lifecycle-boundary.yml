@@ -35,11 +35,21 @@ jobs:
 
           path = Path(".agent-patches/apply_ts_lifecycle.py")
           text = path.read_text(encoding="utf-8")
-          old = ''''''    await dependencies.telemetry?.started(context, request);\n    let response: Response;\n    try {\n      response = await runWithContext(context, () =>\n        withDeadline(config.settings.timeoutMs, () => next(request))\n      );\n    } catch (error) {\n      response = error instanceof DeadlineError\n        ? problem(504, "deadline_exceeded", "request deadline exceeded")\n        : problem(500, "internal_error", "request handler failed");\n    }''','''
-          new = ''''''    await dependencies.telemetry?.started(context, request);\n    let response: Response;\n    try {\n      response = await runWithContext(context, () => withDeadline(config.settings.timeoutMs, () => next(request)));\n    } catch (error) {\n      response = error instanceof DeadlineError ? problem(504, "deadline_exceeded", "request deadline exceeded") : problem(500, "internal_error", "request handler failed");\n    }''','''
-          if text.count(old) != 1:
-              raise SystemExit("expected one stale handler guard in patch script")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          substitutions = [
+              (
+                  r'''      response = await runWithContext(context, () =>\n        withDeadline(config.settings.timeoutMs, () => next(request))\n      );''',
+                  r'''      response = await runWithContext(context, () => withDeadline(config.settings.timeoutMs, () => next(request)));''',
+              ),
+              (
+                  r'''      response = error instanceof DeadlineError\n        ? problem(504, "deadline_exceeded", "request deadline exceeded")\n        : problem(500, "internal_error", "request handler failed");''',
+                  r'''      response = error instanceof DeadlineError ? problem(504, "deadline_exceeded", "request deadline exceeded") : problem(500, "internal_error", "request handler failed");''',
+              ),
+          ]
+          for old, new in substitutions:
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one stale layout fragment: {old[:80]!r}")
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
           PY
 
       - name: Apply exact source transformations
