@@ -244,8 +244,9 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     let response = await withDeadline(config.settings.timeoutMs, () => next(request));
 
     response = await attachEtag(request, response);
-    response = attachHeaders(config, context, response);
     response = maybeCompress(config, request, response);
+    // Observers and persistence consume the semantic response before
+    // request-specific security and correlation headers are finalized.
     const durationMs = Math.max(0, now() - started);
     await dependencies.telemetry?.finished(context, request, response.clone(), durationMs);
     if (dependencies.captureSchema) await dependencies.captureSchema(request.clone(), response.clone());
@@ -265,18 +266,20 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
         reportFailure: dependencies.operationFailureReporter
       }
     );
-    return authenticatedOutcome.ok
+    const response = authenticatedOutcome.ok
       ? authenticatedOutcome.value
-      : operationFailureResponse(config, context, authenticatedOutcome.failure);
+      : operationFailureResponse(authenticatedOutcome.failure);
+    return attachHeaders(config, context, response);
       },
       {
         context: operationContextFromRequestContext(context),
         reportFailure: dependencies.operationFailureReporter
       }
     );
-    return preAuthOutcome.ok
+    const response = preAuthOutcome.ok
       ? preAuthOutcome.value
-      : operationFailureResponse(config, context, preAuthOutcome.failure);
+      : operationFailureResponse(preAuthOutcome.failure);
+    return attachHeaders(config, context, response);
   };
 }
 
@@ -369,27 +372,35 @@ function validTraceparent(value: string | null): string | undefined {
   return `${version}-${traceId}-${spanId}-${flags}`;
 }
 
-function operationFailureResponse(
-  config: MiddlewareConfig,
-  context: RequestContext,
-  failure: OperationFailure
-): Response {
-  const response = failure.kind === "deadline_exceeded"
+function operationFailureResponse(failure: OperationFailure): Response {
+  return failure.kind === "deadline_exceeded"
     ? problem(504, "deadline_exceeded", "request deadline exceeded")
     : failure.kind === "cancelled"
       ? problem(499, "request_cancelled", "request was cancelled")
       : problem(500, "internal_error", "request processing failed");
-  return attachHeaders(config, context, response);
 }
 
 function problem(status: number, code: string, detail: string): Response { return Response.json({ type: `urn:ores:middleware:${code}`, title: code, status, detail }, { status, headers: { "content-type": "application/problem+json" } }); }
+function mergeVary(headers: Headers, ...tokens: string[]): void {
+  const existing = headers.get("vary");
+  if (existing?.trim() === "*") return;
+  const values = new Map<string, string>();
+  for (const value of [...(existing?.split(",") ?? []), ...tokens]) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (!values.has(key)) values.set(key, key);
+  }
+  if (values.size > 0) headers.set("vary", [...values.values()].join(", "));
+  else headers.delete("vary");
+}
 function attachHeaders(config: MiddlewareConfig, context: RequestContext, response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set(config.settings.requestIdHeader, context.requestId);
   const responseTraceparent = validTraceparent(headers.get("traceparent"));
   if (responseTraceparent) headers.set("traceparent", responseTraceparent);
   else headers.delete("traceparent");
-  headers.append("vary", "accept, accept-encoding");
+  mergeVary(headers, "accept", "accept-encoding");
   if (config.settings.securityHeaders.enabled) {
     headers.set("x-content-type-options", "nosniff"); headers.set("x-frame-options", config.settings.securityHeaders.frameOptions); headers.set("referrer-policy", "strict-origin-when-cross-origin"); headers.set("strict-transport-security", `max-age=${config.settings.securityHeaders.hstsMaxAgeSeconds}; includeSubDomains`);
     if (config.settings.securityHeaders.contentSecurityPolicy) headers.set("content-security-policy", config.settings.securityHeaders.contentSecurityPolicy);
@@ -409,6 +420,6 @@ function maybeCompress(config: MiddlewareConfig, request: Request, response: Res
   if (!config.settings.compression.enabled || !response.body || typeof CompressionStream === "undefined") return response;
   const length = Number(response.headers.get("content-length") ?? "0");
   if (!Number.isFinite(length) || length < config.settings.compression.minimumBytes || !request.headers.get("accept-encoding")?.includes("gzip")) return response;
-  const headers = new Headers(response.headers); headers.delete("content-length"); headers.set("content-encoding", "gzip"); headers.append("vary", "accept-encoding");
+  const headers = new Headers(response.headers); headers.delete("content-length"); headers.set("content-encoding", "gzip"); mergeVary(headers, "accept-encoding");
   return new Response(response.body.pipeThrough(new CompressionStream("gzip")), { status: response.status, statusText: response.statusText, headers });
 }
