@@ -98,10 +98,10 @@ export function nodeRequestContext(request: object): RequestContext | undefined 
     : nodeRequestContexts.get(request);
 }
 
-/** Fast request-object lookup of the ores-otel request child logger. */
+/** Fast request-object lookup of this package's ores-otel request child logger. */
 export function nodeRequestLogger<T = unknown>(request: object): T | undefined {
   const carrier = request as Record<PropertyKey, unknown>;
-  const direct = carrier[nodeRequestLoggerSymbol] ?? carrier.oresLog ?? carrier.log;
+  const direct = carrier[nodeRequestLoggerSymbol] ?? carrier.oresLog;
   return (direct ?? nodeRequestLoggers.get(request)) as T | undefined;
 }
 
