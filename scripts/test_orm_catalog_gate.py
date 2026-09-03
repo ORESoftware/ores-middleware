@@ -7,6 +7,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from scripts.orm_catalog_gate import (
+    ALLOWED_CATALOG_SCHEMAS,
     DIESEL_VERSION,
     SEA_ORM_VERSION,
     diesel_rust_type,
@@ -117,6 +118,17 @@ class OrmCatalogGateTests(unittest.TestCase):
         with patch("scripts.orm_matrix_gate.main", return_value=17) as matrix_main:
             self.assertEqual(main(), 17)
         matrix_main.assert_called_once_with()
+
+    def test_catalog_schema_allowlist_is_exact(self) -> None:
+        self.assertEqual(
+            ALLOWED_CATALOG_SCHEMAS,
+            {
+                "typespec_lane",
+                "json_schema_lane",
+                "typespec_data_plane",
+                "json_schema_data_plane",
+            },
+        )
 
 
 if __name__ == "__main__":

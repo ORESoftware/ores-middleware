@@ -568,8 +568,18 @@ def validate_catalog(
     )
 
 
+ALLOWED_CATALOG_SCHEMAS = frozenset(
+    {
+        "typespec_lane",
+        "json_schema_lane",
+        "typespec_data_plane",
+        "json_schema_data_plane",
+    }
+)
+
+
 def apply_lane(database_url: str, schema: str, sql: str) -> None:
-    if schema not in {"typespec_lane", "json_schema_lane"}:
+    if schema not in ALLOWED_CATALOG_SCHEMAS:
         raise ValueError(f"unsupported catalog schema {schema!r}")
     psql(
         database_url,

@@ -77,6 +77,10 @@ class OrmDataPlaneGateTests(unittest.TestCase):
         self.assertIn('"postgres"', cargo)
         self.assertIn('"sqlx-postgres"', cargo)
         self.assertIn('"runtime-tokio-rustls"', cargo)
+        self.assertIn(
+    'tinyvec = { version = "=1.13.0", default-features = false, features = ["std"] }',
+    cargo,
+)
 
     def test_generated_source_contains_four_real_row_paths(self) -> None:
         source = render_rust_data_plane(self.typespec_model, self.json_model)
