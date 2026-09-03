@@ -185,7 +185,7 @@ test("malformed correlation identifiers are replaced and unsafe claims are dropp
   assert.match(requestId, /^[A-Za-z0-9._-]{1,128}$/);
   assert.match(traceId, /^[0-9a-f]{32}$/);
   assert.equal(response.headers.get("x-request-id"), requestId);
-  assert.equal(response.headers.get("traceparent"), `00-${traceId}-0000000000000000-01`);
+  assert.equal(response.headers.get("traceparent"), null);
 
   const record = records.find((candidate) => candidate.message === "malformed context replaced");
   assert.equal(record?.fields["baggage.otel.vendor"], "allowed");

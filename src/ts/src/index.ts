@@ -294,12 +294,47 @@ function withDeadline<T>(timeoutMs: number, operation: () => Promise<T>): Promis
 }
 function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function validToken(value: string | null): string | undefined { return value && value.length <= 128 && /^[A-Za-z0-9._-]+$/.test(value) ? value : undefined; }
-function parseTraceId(value: string | null): string | undefined { const part = value?.split("-")[1]; return part && /^[0-9a-fA-F]{32}$/.test(part) ? part.toLowerCase() : undefined; }
+function parseTraceId(value: string | null): string | undefined {
+  const part = value?.split("-")[1]?.toLowerCase();
+  return part &&
+    /^[0-9a-f]{32}$/.test(part) &&
+    part !== "00000000000000000000000000000000"
+    ? part
+    : undefined;
+}
+
+function validTraceparent(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const parts = value.split("-");
+  if (parts.length !== 4) return undefined;
+
+  const version = parts[0]?.toLowerCase();
+  const traceId = parts[1]?.toLowerCase();
+  const spanId = parts[2]?.toLowerCase();
+  const flags = parts[3]?.toLowerCase();
+  if (
+    version !== "00" ||
+    !traceId ||
+    !/^[0-9a-f]{32}$/.test(traceId) ||
+    traceId === "00000000000000000000000000000000" ||
+    !spanId ||
+    !/^[0-9a-f]{16}$/.test(spanId) ||
+    spanId === "0000000000000000" ||
+    !flags ||
+    !/^[0-9a-f]{2}$/.test(flags)
+  ) {
+    return undefined;
+  }
+  return `${version}-${traceId}-${spanId}-${flags}`;
+}
+
 function problem(status: number, code: string, detail: string): Response { return Response.json({ type: `urn:ores:middleware:${code}`, title: code, status, detail }, { status, headers: { "content-type": "application/problem+json" } }); }
 function attachHeaders(config: MiddlewareConfig, context: RequestContext, response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set(config.settings.requestIdHeader, context.requestId);
-  headers.set("traceparent", `00-${context.traceId}-0000000000000000-01`);
+  const responseTraceparent = validTraceparent(headers.get("traceparent"));
+  if (responseTraceparent) headers.set("traceparent", responseTraceparent);
+  else headers.delete("traceparent");
   headers.append("vary", "accept, accept-encoding");
   if (config.settings.securityHeaders.enabled) {
     headers.set("x-content-type-options", "nosniff"); headers.set("x-frame-options", config.settings.securityHeaders.frameOptions); headers.set("referrer-policy", "strict-origin-when-cross-origin"); headers.set("strict-transport-security", `max-age=${config.settings.securityHeaders.hstsMaxAgeSeconds}; includeSubDomains`);

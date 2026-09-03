@@ -203,7 +203,11 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		}
 		applySecurityHeaders(s.config, headers)
 		headers.Set(s.config.Settings.RequestIDHeader, value.RequestID)
-		headers.Set("Traceparent", "00-"+value.TraceID+"-0000000000000000-01")
+		if traceparent := validTraceparent(headers.Get("Traceparent")); traceparent != "" {
+			headers.Set("Traceparent", traceparent)
+		} else {
+			headers.Del("Traceparent")
+		}
 		headers.Add("Vary", "Accept")
 		if shouldGzip(s.config, request, headers, body) {
 			var output bytes.Buffer
@@ -318,11 +322,37 @@ func parseTraceID(value string) string {
 	if len(parts) < 2 || len(parts[1]) != 32 {
 		return ""
 	}
-	if _, err := hex.DecodeString(parts[1]); err != nil {
+	traceID := strings.ToLower(parts[1])
+	if traceID == strings.Repeat("0", 32) {
 		return ""
 	}
-	return strings.ToLower(parts[1])
+	if _, err := hex.DecodeString(traceID); err != nil {
+		return ""
+	}
+	return traceID
 }
+
+func validTraceparent(value string) string {
+	parts := strings.Split(value, "-")
+	if len(parts) != 4 || strings.ToLower(parts[0]) != "00" {
+		return ""
+	}
+	traceID := strings.ToLower(parts[1])
+	spanID := strings.ToLower(parts[2])
+	flags := strings.ToLower(parts[3])
+	if len(traceID) != 32 || traceID == strings.Repeat("0", 32) ||
+		len(spanID) != 16 || spanID == strings.Repeat("0", 16) ||
+		len(flags) != 2 {
+		return ""
+	}
+	for _, part := range []string{traceID, spanID, flags} {
+		if _, err := hex.DecodeString(part); err != nil {
+			return ""
+		}
+	}
+	return strings.Join([]string{"00", traceID, spanID, flags}, "-")
+}
+
 func acceptsAny(accept string, supported []string) bool {
 	if accept == "" || accept == "*/*" {
 		return true

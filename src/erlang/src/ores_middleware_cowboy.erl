@@ -34,10 +34,7 @@ execute(Req0, Env0) ->
             Security = maps:get(security_headers, maps:get(settings, Config)),
             ResponseHeaders0 = #{
                 maps:get(request_id_header, maps:get(settings, Config)) =>
-                    maps:get(request_id, Context),
-                <<"traceparent">> =>
-                    <<"00-", (maps:get(trace_id, Context))/binary,
-                      "-0000000000000000-01">>
+                    maps:get(request_id, Context)
             },
             ResponseHeaders = case maps:get(enabled, Security) of
                 true -> ResponseHeaders0#{

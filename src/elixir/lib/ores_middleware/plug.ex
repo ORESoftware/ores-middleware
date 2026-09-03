@@ -7,6 +7,9 @@ defmodule OresMiddleware.Plug do
 
   alias OresMiddleware.{Context, Stack}
 
+  @zero_trace_id String.duplicate("0", 32)
+  @zero_span_id String.duplicate("0", 16)
+
   @impl true
   def init(opts) do
     config = Keyword.get_lazy(opts, :config, fn -> OresMiddleware.default_config(Keyword.get(opts, :service_name, "ores-service")) end)
@@ -195,7 +198,13 @@ defmodule OresMiddleware.Plug do
     conn
   end
 
-  defp attach_correlation(conn, config, context), do: conn |> put_resp_header(config.settings.requestIdHeader, context.request_id) |> put_resp_header("traceparent", "00-#{context.trace_id}-0000000000000000-01") |> update_resp_header("vary", "accept", &(&1 <> ", accept"))
+  defp attach_correlation(conn, config, context) do
+    conn
+    |> put_resp_header(config.settings.requestIdHeader, context.request_id)
+    |> sanitize_traceparent()
+    |> update_resp_header("vary", "accept", &(&1 <> ", accept"))
+  end
+
   defp attach_security(conn, %{settings: %{securityHeaders: %{enabled: false}}}), do: conn
   defp attach_security(conn, config) do
     policy = config.settings.securityHeaders
@@ -238,9 +247,49 @@ defmodule OresMiddleware.Plug do
   defp valid_token(value) when is_binary(value), do: if(byte_size(value) <= 128 and Regex.match?(~r/^[A-Za-z0-9._-]+$/, value), do: value)
   defp valid_token(_), do: nil
   defp parse_trace_id(value) when is_binary(value) do
-    case String.split(value, "-") do [_, trace | _] -> if(String.match?(trace, ~r/^[0-9a-fA-F]{32}$/), do: String.downcase(trace)); _ -> nil end
+    case String.split(value, "-") do
+      [_, trace | _] ->
+        trace = String.downcase(trace)
+        if valid_hex_id?(trace, 32, @zero_trace_id), do: trace
+      _ -> nil
+    end
   end
   defp parse_trace_id(_), do: nil
+
+  defp sanitize_traceparent(conn) do
+    case get_resp_header(conn, "traceparent") do
+      [value | _] ->
+        case normalize_traceparent(value) do
+          nil -> delete_resp_header(conn, "traceparent")
+          normalized -> put_resp_header(conn, "traceparent", normalized)
+        end
+      [] -> conn
+    end
+  end
+
+  defp normalize_traceparent(value) when is_binary(value) do
+    case String.split(value, "-") do
+      [version, trace, span, flags] ->
+        version = String.downcase(version)
+        trace = String.downcase(trace)
+        span = String.downcase(span)
+        flags = String.downcase(flags)
+
+        if version == "00" and
+             valid_hex_id?(trace, 32, @zero_trace_id) and
+             valid_hex_id?(span, 16, @zero_span_id) and
+             Regex.match?(~r/^[0-9a-f]{2}$/, flags) do
+          Enum.join([version, trace, span, flags], "-")
+        end
+      _ -> nil
+    end
+  end
+  defp normalize_traceparent(_), do: nil
+
+  defp valid_hex_id?(value, length, zero) do
+    value != zero and byte_size(value) == length and Regex.match?(~r/^[0-9a-f]+$/, value)
+  end
+
   defp random_id, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   defp client_ip(conn, true), do: first_req_header(conn, "x-forwarded-for") |> to_string() |> String.split(",") |> List.first() |> String.trim()
   defp client_ip(conn, false), do: conn.remote_ip |> :inet.ntoa() |> to_string()

@@ -277,7 +277,7 @@ attach_etag(_Request, Response) -> Response.
 
 attach_security(Settings, Context, #{headers := Headers0} = Response) ->
     Security = maps:get(security_headers, Settings),
-    Headers1 = Headers0#{maps:get(request_id_header, Settings) => maps:get(request_id, Context), <<"traceparent">> => <<"00-", (maps:get(trace_id, Context))/binary, "-0000000000000000-01">>},
+    Headers1 = sanitize_traceparent(Headers0#{maps:get(request_id_header, Settings) => maps:get(request_id, Context)}),
     Headers2 = case maps:get(enabled, Security) of
         true -> Headers1#{
             <<"x-content-type-options">> => <<"nosniff">>,
@@ -307,8 +307,55 @@ accepts(Accept, Supported) -> lists:any(fun(Value) -> binary:match(Accept, Value
 
 token_or_new(Value) when is_binary(Value), byte_size(Value) > 0, byte_size(Value) =< 128 -> Value;
 token_or_new(_) -> new_id().
-trace_or_new(Value) when is_binary(Value) -> case binary:split(Value, <<"-">>, [global]) of [_, Trace | _] when byte_size(Trace) =:= 32 -> string:lowercase(Trace); _ -> new_id() end;
+trace_or_new(Value) when is_binary(Value) ->
+    case binary:split(Value, <<"-">>, [global]) of
+        [_, Trace | _] ->
+            Lower = string:lowercase(Trace),
+            case valid_hex_id(Lower, 32, <<"00000000000000000000000000000000">>) of
+                true -> Lower;
+                false -> new_id()
+            end;
+        _ -> new_id()
+    end;
 trace_or_new(_) -> new_id().
+
+sanitize_traceparent(Headers) ->
+    case maps:get(<<"traceparent">>, Headers, undefined) of
+        Value when is_binary(Value) ->
+            case normalize_traceparent(Value) of
+                {ok, Normalized} -> Headers#{<<"traceparent">> => Normalized};
+                error -> maps:remove(<<"traceparent">>, Headers)
+            end;
+        _ -> maps:remove(<<"traceparent">>, Headers)
+    end.
+
+normalize_traceparent(Value) ->
+    case binary:split(Value, <<"-">>, [global]) of
+        [Version0, Trace0, Span0, Flags0] ->
+            Version = string:lowercase(Version0),
+            Trace = string:lowercase(Trace0),
+            Span = string:lowercase(Span0),
+            Flags = string:lowercase(Flags0),
+            case Version =:= <<"00">>
+                andalso valid_hex_id(Trace, 32, <<"00000000000000000000000000000000">>)
+                andalso valid_hex_id(Span, 16, <<"0000000000000000">>)
+                andalso valid_hex(Flags, 2) of
+                true -> {ok, iolist_to_binary([Version, <<"-">>, Trace, <<"-">>, Span, <<"-">>, Flags])};
+                false -> error
+            end;
+        _ -> error
+    end.
+
+valid_hex_id(Value, Length, Zero) ->
+    Value =/= Zero andalso valid_hex(Value, Length).
+
+valid_hex(Value, Length) when is_binary(Value), byte_size(Value) =:= Length ->
+    lists:all(fun(Byte) ->
+        (Byte >= $0 andalso Byte =< $9)
+            orelse (Byte >= $a andalso Byte =< $f)
+    end, binary_to_list(Value));
+valid_hex(_, _) -> false.
+
 new_id() -> binary:encode_hex(crypto:strong_rand_bytes(16), lowercase).
 value(undefined) -> <<"_">>;
 value(Value) when is_binary(Value) -> Value;

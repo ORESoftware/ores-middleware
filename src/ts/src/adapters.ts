@@ -34,8 +34,8 @@ export interface ExpressAdapterOptions {
   /** Response header used for the canonical request ID. */
   requestIdResponseHeader?: string;
   /**
-   * Response trace header. It is emitted only when an inbound/non-zero span ID
-   * is available; the adapter never invents an invalid all-zero W3C span ID.
+   * Reserved for compatibility. Response trace context is owned by the active
+   * tracer; this adapter never echoes an inbound parent or invents a span.
    */
   traceparentResponseHeader?: string;
 }
@@ -209,32 +209,15 @@ function observeNodeResponse(res: any): ResponseObservation {
   };
 }
 
-function validSpanId(value: string | undefined): string | undefined {
-  return value && /^[0-9a-f]{16}$/i.test(value) && value !== "0000000000000000"
-    ? value.toLowerCase()
-    : undefined;
-}
-
-function inboundSpanId(request: Request): string | undefined {
-  return validSpanId(request.headers.get("traceparent")?.split("-")[2]);
-}
-
 function applyEarlyCorrelationHeaders(
   res: any,
   context: RequestContext | undefined,
-  request: Request,
   options: ExpressAdapterOptions
 ): void {
   if (!context || res.headersSent || typeof res.setHeader !== "function") return;
   res.setHeader(options.requestIdResponseHeader ?? "x-request-id", context.requestId);
-
-  const spanId = validSpanId(context.spanId) ?? inboundSpanId(request);
-  if (spanId) {
-    res.setHeader(
-      options.traceparentResponseHeader ?? "traceparent",
-      `00-${context.traceId}-${spanId}-01`
-    );
-  }
+  // A response traceparent belongs to a real active server span. The portable
+  // adapter deliberately leaves that header to the runtime tracer.
 }
 
 async function writeWebResponse(res: any, response: Response): Promise<void> {
@@ -265,7 +248,7 @@ export function expressMiddleware(
       const request = nodeRequestToWeb(req);
       const response = await middleware(request, async (scopedRequest) => {
         const context = attachNodeRequestScope(req, scopedRequest);
-        applyEarlyCorrelationHeaders(res, context, scopedRequest, options);
+        applyEarlyCorrelationHeaders(res, context, options);
         const observation = observeNodeResponse(res);
         try {
           next();
