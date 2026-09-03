@@ -4,10 +4,12 @@ contracts:
     npm install --ignore-scripts --no-audit --no-fund
     npm run contracts:compile
     npm run contracts:check
-    python3 -m unittest scripts/test_contract_parity.py scripts/test_schema_convergence.py -v
+    cargo test --manifest-path tools/contract-parity/Cargo.toml
+    python3 -m unittest scripts/test_schema_convergence.py -v
     python3 scripts/check_zpkg.py
 
 rust:
+    cargo test --manifest-path tools/contract-parity/Cargo.toml
     cargo test --manifest-path src/rust/Cargo.toml --all-features
     python3 scripts/build_targets.py --languages rust
     mkdir -p target/descriptors
