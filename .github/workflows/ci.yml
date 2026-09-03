@@ -27,6 +27,11 @@ jobs:
           show-progress: false
           fetch-depth: 1
 
+      - name: Configure private dependency access
+        uses: ./.github/actions/configure-private-dependencies
+        with:
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+
       - name: Install Python 3.12
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
