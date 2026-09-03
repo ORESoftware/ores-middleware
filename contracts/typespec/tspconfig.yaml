@@ -1,0 +1,10 @@
+emit:
+  - "@typespec/openapi3"
+  - "@typespec/json-schema"
+options:
+  "@typespec/openapi3":
+    output-file: "{output-dir}/openapi.yaml"
+  "@typespec/json-schema":
+    emitAllModels: true
+    output-dir: "{output-dir}/json-schema-evidence"
+warn-as-error: true
