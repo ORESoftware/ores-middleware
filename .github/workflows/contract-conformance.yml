@@ -85,7 +85,7 @@ jobs:
         with:
           otp-version: '27'
           elixir-version: '1.18'
-          gleam-version: 'latest'
+          gleam-version: '1.18.1'
           rebar3-version: 'latest'
       - run: cd src/gleam && gleam format --check src test && gleam test
       - run: cd src/gleam && gleam run -m ores_middleware_contractcheck | jq -e '.language == "gleam"'
