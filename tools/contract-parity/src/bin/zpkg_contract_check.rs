@@ -21,18 +21,8 @@ const EXPECTED_TARGETS: &[(&str, &str, &str, Option<&str>)] = &[
         "node",
         Some("ores-middleware-typescript"),
     ),
-    (
-        "golang",
-        "src/golang",
-        "go",
-        Some("ores-middleware-golang"),
-    ),
-    (
-        "gleam",
-        "src/gleam",
-        "none",
-        Some("ores-middleware-gleam"),
-    ),
+    ("golang", "src/golang", "go", Some("ores-middleware-golang")),
+    ("gleam", "src/gleam", "none", Some("ores-middleware-gleam")),
     (
         "elixir",
         "src/elixir",
@@ -218,7 +208,10 @@ fn parse_assignments(section: &str, body: &str) -> Result<BTreeMap<String, Strin
                 return Err(finding(
                     FindingCode::ManifestSyntax,
                     ".zpkg.toml",
-                    format!("section [{section}] has an unmatched ] near line {}", index + 1),
+                    format!(
+                        "section [{section}] has an unmatched ] near line {}",
+                        index + 1
+                    ),
                 ));
             }
             if *depth == 0 {
@@ -575,8 +568,10 @@ fn validate_manifest(root: &Path, manifest: &Manifest, findings: &mut Vec<Findin
         match parse_string_array(raw, ".zpkg.toml", "build.outputs") {
             Ok(outputs) => {
                 let actual: BTreeSet<String> = outputs.into_iter().collect();
-                let expected: BTreeSet<String> =
-                    EXPECTED_OUTPUTS.iter().map(|value| (*value).to_owned()).collect();
+                let expected: BTreeSet<String> = EXPECTED_OUTPUTS
+                    .iter()
+                    .map(|value| (*value).to_owned())
+                    .collect();
                 if actual != expected {
                     findings.push(finding(
                         FindingCode::BuildContract,
@@ -693,10 +688,8 @@ fn validate_topology(root: &Path, findings: &mut Vec<Finding>) {
         .filter_map(|authority| authority.get("id").and_then(Value::as_str))
         .map(ToOwned::to_owned)
         .collect();
-    let expected_authorities = BTreeSet::from([
-        "typespec".to_owned(),
-        "json-schema-openapi".to_owned(),
-    ]);
+    let expected_authorities =
+        BTreeSet::from(["typespec".to_owned(), "json-schema-openapi".to_owned()]);
     if authorities != expected_authorities {
         findings.push(finding(
             FindingCode::AuthorityTopology,
@@ -716,7 +709,8 @@ fn validate_topology(root: &Path, findings: &mut Vec<Finding>) {
         ),
     ];
     for (authority, expected) in expected_flows {
-        let actual = value_string_array(topology.get("flows").and_then(|flows| flows.get(authority)));
+        let actual =
+            value_string_array(topology.get("flows").and_then(|flows| flows.get(authority)));
         let expected: Vec<String> = expected.into_iter().map(ToOwned::to_owned).collect();
         if actual.as_ref() != Some(&expected) {
             findings.push(finding(
@@ -737,21 +731,12 @@ fn validate_topology(root: &Path, findings: &mut Vec<Finding>) {
             if edge.len() != 2 {
                 return None;
             }
-            Some((
-                edge[0].as_str()?.to_owned(),
-                edge[1].as_str()?.to_owned(),
-            ))
+            Some((edge[0].as_str()?.to_owned(), edge[1].as_str()?.to_owned()))
         })
         .collect();
     let expected_edges = BTreeSet::from([
-        (
-            "typespec".to_owned(),
-            "json-schema-openapi".to_owned(),
-        ),
-        (
-            "json-schema-openapi".to_owned(),
-            "typespec".to_owned(),
-        ),
+        ("typespec".to_owned(), "json-schema-openapi".to_owned()),
+        ("json-schema-openapi".to_owned(), "typespec".to_owned()),
     ]);
     if !expected_edges.is_subset(&edges) {
         findings.push(finding(
@@ -981,7 +966,10 @@ mod tests {
             ),
         )
         .expect("write drifted manifest");
-        assert!(has_code(&validate(fixture.path()), FindingCode::PackageLanguage));
+        assert!(has_code(
+            &validate(fixture.path()),
+            FindingCode::PackageLanguage
+        ));
     }
 
     #[test]
@@ -994,7 +982,10 @@ mod tests {
             "[targets.golang]\ndir = \"src/golang\"\nname = \"ores-middleware-golang\"\nadapter = \"node\"",
         );
         fs::write(path, source).expect("write drifted target");
-        assert!(has_code(&validate(fixture.path()), FindingCode::TargetField));
+        assert!(has_code(
+            &validate(fixture.path()),
+            FindingCode::TargetField
+        ));
     }
 
     #[test]
@@ -1002,16 +993,18 @@ mod tests {
         let fixture = fixture();
         fs::remove_file(fixture.path().join("scripts/orm_catalog_gate.py"))
             .expect("remove required fixture");
-        assert!(has_code(&validate(fixture.path()), FindingCode::RequiredPath));
+        assert!(has_code(
+            &validate(fixture.path()),
+            FindingCode::RequiredPath
+        ));
     }
 
     #[test]
     fn authority_fallback_is_rejected() {
         let fixture = fixture();
         let path = fixture.path().join("contracts/authority-topology.json");
-        let mut topology: Value =
-            serde_json::from_slice(&fs::read(&path).expect("read topology"))
-                .expect("parse topology");
+        let mut topology: Value = serde_json::from_slice(&fs::read(&path).expect("read topology"))
+            .expect("parse topology");
         topology["onUnexplainedMismatch"] = Value::String("PREFER_TYPESPEC".to_owned());
         fs::write(
             path,
