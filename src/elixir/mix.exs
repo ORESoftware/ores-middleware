@@ -23,7 +23,12 @@ defmodule OresMiddleware.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:plug, "~> 1.20"}
+      {:plug, "~> 1.20"},
+      {:oresoftware_next_loggers_elixir,
+       github: "ores-otel/ores.otel.log",
+       ref: "b55271c047be761c4711d87cbd500a49eefda3d9",
+       subdir: "sdk/elixir",
+       depth: 1}
     ]
   end
 end
