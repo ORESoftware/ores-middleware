@@ -13,6 +13,7 @@
 ]).
 
 -define(CONTEXT_KEY, '$ores_middleware_context').
+-define(OWNED_METADATA_KEYS, [request_id, trace_id, tenant_id, user_id]).
 
 get_context() ->
     case erlang:get(?CONTEXT_KEY) of
@@ -74,7 +75,7 @@ with_context(Context, Fun) ->
     PreviousContext = erlang:get(?CONTEXT_KEY),
     PreviousMetadata = logger:get_process_metadata(),
     erlang:put(?CONTEXT_KEY, Context),
-    install_metadata(Context),
+    install_metadata(Context, PreviousMetadata),
     try
         Fun()
     after
@@ -82,12 +83,21 @@ with_context(Context, Fun) ->
         restore_metadata(PreviousMetadata)
     end.
 
-install_metadata(Context) ->
-    Metadata = context_metadata(Context),
-    case map_size(Metadata) of
-        0 -> ok;
-        _ -> logger:update_process_metadata(Metadata)
+%% Preserve metadata owned by the application while replacing, rather than
+%% merging, the request-owned keys. This prevents an anonymous nested scope
+%% from inheriting an outer request's user or tenant identifiers.
+install_metadata(Context, PreviousMetadata) ->
+    Base = remove_owned_metadata(PreviousMetadata),
+    Next = maps:merge(Base, context_metadata(Context)),
+    case map_size(Next) of
+        0 -> logger:unset_process_metadata();
+        _ -> logger:set_process_metadata(Next)
     end.
+
+remove_owned_metadata(Metadata) when is_map(Metadata) ->
+    maps:without(?OWNED_METADATA_KEYS, Metadata);
+remove_owned_metadata(_) ->
+    #{}.
 
 context_metadata({request_context, RequestId, TraceId, TenantId, UserId, _, _, _, _}) ->
     compact_metadata(#{
