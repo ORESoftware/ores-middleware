@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/v1/adapter-descriptor.schema.json",
+  "title": "ORES Middleware Adapter Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "language", "runtime", "packageName", "frameworkAdapters", "capabilities", "operationSymbols"],
+  "properties": {
+    "contractVersion": { "const": "1.0.0" },
+    "language": { "enum": ["rust", "ts", "gleam", "golang", "elixir", "erlang"] },
+    "runtime": { "type": "string", "minLength": 1 },
+    "packageName": { "type": "string", "minLength": 1 },
+    "frameworkAdapters": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "capabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/capability" } },
+    "operationSymbols": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["descriptor", "defaultConfig", "validateConfig", "createMiddleware", "runWithContext", "currentContext", "capabilities"],
+      "properties": {
+        "descriptor": { "type": "string", "minLength": 1 },
+        "defaultConfig": { "type": "string", "minLength": 1 },
+        "validateConfig": { "type": "string", "minLength": 1 },
+        "createMiddleware": { "type": "string", "minLength": 1 },
+        "runWithContext": { "type": "string", "minLength": 1 },
+        "currentContext": { "type": "string", "minLength": 1 },
+        "capabilities": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "sdkOperation": {
+      "type": "string",
+      "enum": ["descriptor", "defaultConfig", "validateConfig", "createMiddleware", "runWithContext", "currentContext", "capabilities"]
+    },
+    "capability": {
+      "type": "string",
+      "enum": [
+        "request-context",
+        "panic-recovery",
+        "request-id",
+        "trace-context",
+        "structured-logging",
+        "metrics-red",
+        "deadline-timeout",
+        "payload-limit",
+        "rate-limit",
+        "auth",
+        "sync-observer",
+        "json",
+        "headers",
+        "compression",
+        "tls-policy",
+        "security-headers",
+        "idempotency",
+        "ip-policy",
+        "cache-etag",
+        "content-negotiation",
+        "fault-injection",
+        "test-auth-bypass",
+        "schema-capture"
+      ]
+    }
+  }
+}

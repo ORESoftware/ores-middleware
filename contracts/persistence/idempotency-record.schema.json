@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/ores-middleware/idempotency-record.schema.json",
+  "title": "ORES middleware idempotency persistence contract",
+  "$ref": "#/$defs/IdempotencyRecord",
+  "$defs": {
+    "IdempotencyStatus": {
+      "type": "string",
+      "enum": ["pending", "succeeded", "failed"]
+    },
+    "IdempotencyRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-ores-sql": {
+        "table": "middleware_idempotency",
+        "primaryKey": ["id"],
+        "unique": [["tenantId", "idempotencyKey"]]
+      },
+      "properties": {
+        "id": {"type": "string"},
+        "tenantId": {"type": "string"},
+        "idempotencyKey": {"type": "string"},
+        "requestHash": {"type": "string"},
+        "status": {"$ref": "#/$defs/IdempotencyStatus"},
+        "responseStatus": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+        "responseBody": {"type": "string"},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "expiresAt": {"type": "string", "format": "date-time"}
+      },
+      "required": [
+        "id",
+        "tenantId",
+        "idempotencyKey",
+        "requestHash",
+        "status",
+        "createdAt",
+        "expiresAt"
+      ]
+    }
+  }
+}

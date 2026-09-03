@@ -1,0 +1,13 @@
+name = "ores_middleware"
+version = "0.1.0"
+target = "erlang"
+description = "OTP-compatible ORES middleware contract and adapters"
+licences = ["MIT"]
+repository = { type = "github", user = "ORESoftware", repo = "ores-middleware" }
+erlang_applications = ["crypto"]
+
+[dependencies]
+gleam_stdlib = ">= 0.60.0 and < 2.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.11.0 and < 2.0.0"

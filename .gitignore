@@ -1,12 +1,42 @@
-# Generated audit/build output.
+# Generated outputs
 /target/*
 !/target/README.md
+!/target/rust/
+!/target/ts/
+!/target/gleam/
+!/target/golang/
+!/target/elixir/
+!/target/erlang/
+!/target/*/.gitkeep
 
-# Language-local build products.
-/src/rust/target/
-/src/ts/node_modules/
+# Language build caches (including nested packages such as docs-serving)
+/src/**/target/
+/src/**/node_modules/
+/src/**/dist/
+/src/**/build/
+/src/**/_build/
+/src/**/deps/
+/src/golang/bin/
 
-# Editor and operating-system noise.
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local zed-pkg state
+/.zed/
+/.zed-pack/
+/.vendor/.zed/
+/.zpkg.lock.tmp
+
+# Local secrets and environment
+.env
+.env.*
+!/env/enc/*.env.enc
+/env/dec/
+*.pem
+*.key
+
+# Editors / OS
 .DS_Store
-*.swp
-*.tmp
+.idea/
+.vscode/

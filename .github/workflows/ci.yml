@@ -1,8 +1,8 @@
-name: ci
+name: semantic-contract-audit
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
   schedule:
     - cron: "47 4 * * *"
@@ -12,13 +12,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ores-middleware-ci-${{ github.ref }}
+  group: ores-middleware-semantic-audit-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,42 +38,74 @@ jobs:
           node-version: "22.23.1"
           package-manager-cache: false
 
-      - name: Install Go 1.24.7
+      - name: Install Go 1.25.0
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.24.7"
+          go-version: "1.25.0"
           cache: false
 
-      - name: Install Rust 1.95.0 and rustfmt
+      - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
           components: rustfmt
 
-      - name: Install exact contract validators
+      - name: Install exact validators and package dependencies
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check --quiet jsonschema==4.25.1
-          npm install --prefix "$RUNNER_TEMP/typespec" \
-            --ignore-scripts --no-audit --no-fund \
-            @typespec/compiler@1.15.0
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --prefix src/ts --ignore-scripts --no-audit --no-fund
 
-      - name: Run peer-authority and cross-language audit
+      - name: Run peer-authority, projection, package, and language audit
         shell: bash
         env:
-          TSP_BIN: ${{ runner.temp }}/typespec/node_modules/.bin/tsp
+          TSP_BIN: ${{ github.workspace }}/node_modules/.bin/tsp
         run: |
           set -euo pipefail
           python scripts/audit.py --receipt target/audit/receipt.json
 
-      - name: Upload execution receipt even on failure
+      - name: Upload execution receipt and discrepancy artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ores-middleware-audit-${{ github.run_id }}
+          name: ores-middleware-semantic-audit-${{ github.run_id }}
           path: |
-            target/audit/receipt.json
+            target/audit/*.json
             target/discrepancies/*.json
+            target/schema-convergence/**/*.json
+            target/schema-convergence/**/*.sql
+            target/schema-convergence/**/*.d.ts
+            target/schema-convergence/**/*.rs
           if-no-files-found: error
           retention-days: 90
+
+  beam-targets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Install pinned Erlang, Elixir, Gleam, and rebar3
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          elixir-version: "1.18.4"
+          gleam-version: "1.14.0"
+          rebar3-version: "3.24.0"
+
+      - name: Compile and test the three BEAM packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd src/gleam && gleam format --check src test && gleam test)
+          (cd src/elixir && mix local.hex --force && mix deps.get && mix test)
+          (cd src/erlang && rebar3 eunit)
+          python3 scripts/build_targets.py --languages gleam,elixir,erlang
+          python3 scripts/check_zpkg.py

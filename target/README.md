@@ -1,10 +1,14 @@
 # Generated targets
 
-Build and audit commands write only below this directory:
+Build and conformance commands write disposable artifacts below this directory:
 
-- `target/audit/` — machine-readable execution receipts;
-- `target/discrepancies/` — fail-closed semantic differences;
-- `target/rust/`, `target/ts/`, `target/golang/`, and future language folders — build output.
+- `target/rust`
+- `target/ts`
+- `target/gleam`
+- `target/golang`
+- `target/elixir`
+- `target/erlang`
+- `target/contracts`
+- `target/descriptors`
 
-Nothing under `target/` is a human-authored contract authority and generated
-output must never overwrite `contracts/`.
+Only this documentation and per-language `.gitkeep` files are versioned. Release artifacts are produced by CI from immutable commits.

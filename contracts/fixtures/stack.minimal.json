@@ -1,0 +1,100 @@
+{
+  "contractVersion": "1.0.0",
+  "environment": "test",
+  "requiredCapabilities": [
+    "request-context",
+    "panic-recovery",
+    "request-id",
+    "trace-context",
+    "structured-logging",
+    "metrics-red",
+    "deadline-timeout",
+    "payload-limit",
+    "rate-limit",
+    "auth",
+    "sync-observer",
+    "json",
+    "headers",
+    "compression",
+    "tls-policy",
+    "security-headers",
+    "idempotency",
+    "ip-policy",
+    "cache-etag",
+    "content-negotiation",
+    "fault-injection",
+    "test-auth-bypass",
+    "schema-capture"
+  ],
+  "settings": {
+    "requestIdHeader": "x-request-id",
+    "traceHeader": "traceparent",
+    "timeoutMs": 5000,
+    "maxBodyBytes": 2097152,
+    "contextRegistryMaxEntries": 10000,
+    "contextRegistryTtlMs": 30000,
+    "rateLimit": {
+      "enabled": true,
+      "capacity": 100,
+      "refillPerSecond": 20,
+      "keyBy": ["tenant", "user", "ip", "route"]
+    },
+    "compression": {
+      "enabled": true,
+      "minimumBytes": 1024,
+      "algorithms": ["br", "gzip"]
+    },
+    "tls": {
+      "mode": "trusted-proxy",
+      "requireHttps": true,
+      "strictForwardedHeaders": true,
+      "trustedProxyCidrs": ["127.0.0.1/32", "::1/128"]
+    },
+    "securityHeaders": {
+      "enabled": true,
+      "hstsMaxAgeSeconds": 31536000,
+      "contentSecurityPolicy": "default-src 'self'; frame-ancestors 'none'",
+      "frameOptions": "DENY"
+    },
+    "idempotency": {
+      "enabled": true,
+      "headerName": "idempotency-key",
+      "ttlSeconds": 86400,
+      "requiredMethods": ["POST", "PUT", "PATCH"]
+    },
+    "faultInjection": {
+      "enabled": false,
+      "latencyMs": 0,
+      "errorRate": 0,
+      "dropRate": 0
+    },
+    "testAuthBypass": {
+      "enabled": false,
+      "headerName": "x-test-auth-bypass",
+      "allowedCidrs": ["127.0.0.1/32", "::1/128"]
+    },
+    "contentRepresentations": ["application/json", "application/problem+json"]
+  },
+  "integrations": {
+    "sharedAuth": {
+      "mode": "http",
+      "issuer": "https://auth.example.invalid/",
+      "audience": "example-service",
+      "jwksUri": "https://auth.example.invalid/.well-known/jwks.json",
+      "introspectionUrl": "https://auth.example.invalid/v1/introspect",
+      "failOpen": false
+    },
+    "optoSync": {
+      "mode": "http",
+      "endpoint": "https://sync.example.invalid/v1/events",
+      "outboxTopic": "example.middleware.audit.v1",
+      "failOpen": true
+    },
+    "oresOtel": {
+      "enabled": true,
+      "serviceName": "example-service",
+      "exporterEndpoint": "http://otel-collector.example.invalid:4318",
+      "propagators": ["tracecontext", "baggage"]
+    }
+  }
+}

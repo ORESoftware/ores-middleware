@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CONTRACT_DIGEST_HEADER, decideDocs } from "../src/index.js";
 
 const fixturePath = fileURLToPath(
-  new URL("../../../fixtures/docs-serving-conformance.tsv", import.meta.url),
+  new URL("../../../../fixtures/docs-serving-conformance.tsv", import.meta.url),
 );
 
 function optional(value) {
