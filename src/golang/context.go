@@ -4,33 +4,53 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	nextloggers "github.com/ores-otel/ores.otel.log/sdk/go"
 )
 
-type RequestContext struct {
-	RequestID       string            `json:"requestId"`
-	TraceID         string            `json:"traceId"`
-	SpanID          string            `json:"spanId,omitempty"`
-	TenantID        string            `json:"tenantId,omitempty"`
-	UserID          string            `json:"userId,omitempty"`
-	Locale          string            `json:"locale,omitempty"`
-	StartedAtUnixMS int64             `json:"startedAtUnixMs"`
-	DeadlineUnixMS  int64             `json:"deadlineUnixMs,omitempty"`
-	Baggage         map[string]string `json:"baggage"`
-}
-
-type requestContextKey struct{}
+// RequestContext is the canonical ores.request-context.v1 value owned by
+// ores-otel. Middleware populates it; telemetry consumes it. No second private
+// context.Context key is introduced here.
+type RequestContext = nextloggers.RequestContext
 
 func WithRequestContext(parent context.Context, value RequestContext) context.Context {
-	return context.WithValue(parent, requestContextKey{}, value)
+	return nextloggers.WithRequestContext(parent, value)
 }
 
 func CurrentContext(ctx context.Context) (RequestContext, bool) {
-	value, ok := ctx.Value(requestContextKey{}).(RequestContext)
-	return value, ok
+	return nextloggers.RequestContextFrom(ctx)
 }
 
-func RunWithContext[T any](ctx context.Context, value RequestContext, operation func(context.Context) (T, error)) (T, error) {
-	return operation(WithRequestContext(ctx, value))
+func CaptureRequestContext(ctx context.Context) (RequestContext, bool) {
+	return nextloggers.CaptureRequestContext(ctx)
+}
+
+func RunWithContext[T any](
+	ctx context.Context,
+	value RequestContext,
+	operation func(context.Context) (T, error),
+) (T, error) {
+	return nextloggers.RunWithRequestContext(ctx, value, operation)
+}
+
+func RequestIDFrom(ctx context.Context) (string, bool) {
+	return nextloggers.RequestIDFrom(ctx)
+}
+
+func LoggedInUserIDFrom(ctx context.Context) (string, bool) {
+	return nextloggers.LoggedInUserIDFrom(ctx)
+}
+
+func TenantIDFrom(ctx context.Context) (string, bool) {
+	return nextloggers.TenantIDFrom(ctx)
+}
+
+func SessionIDFrom(ctx context.Context) (string, bool) {
+	return nextloggers.SessionIDFrom(ctx)
+}
+
+func CorrelationIDFrom(ctx context.Context) (string, bool) {
+	return nextloggers.CorrelationIDFrom(ctx)
 }
 
 type registryEntry struct {
@@ -38,6 +58,9 @@ type registryEntry struct {
 	created time.Time
 }
 
+// ContextRegistry is an optional bounded diagnostics index. It is never used
+// for propagation or lookup by business logic; context.Context remains the
+// source of truth. Delete each entry at request completion.
 type ContextRegistry struct {
 	mu         sync.RWMutex
 	entries    map[string]registryEntry
@@ -46,7 +69,11 @@ type ContextRegistry struct {
 }
 
 func NewContextRegistry(maxEntries int, ttl time.Duration) *ContextRegistry {
-	return &ContextRegistry{entries: make(map[string]registryEntry), maxEntries: maxEntries, ttl: ttl}
+	return &ContextRegistry{
+		entries:    make(map[string]registryEntry),
+		maxEntries: maxEntries,
+		ttl:        ttl,
+	}
 }
 
 func (r *ContextRegistry) Put(value RequestContext) {
