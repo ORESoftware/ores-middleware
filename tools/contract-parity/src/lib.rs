@@ -55,6 +55,7 @@ fn parse_tsp_enum(source: &str, name: &str) -> Result<Vec<String>> {
     let body = extract_block(source, "enum", name)?;
     let member = Regex::new(r#"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*"([^"]+)"\s*,?$"#)?;
     let mut values = Vec::new();
+    let mut seen = BTreeSet::new();
     for raw in body.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with("//") {
@@ -63,7 +64,11 @@ fn parse_tsp_enum(source: &str, name: &str) -> Result<Vec<String>> {
         let captures = member
             .captures(line)
             .ok_or_else(|| format!("unsupported TypeSpec enum member in {name}: {line}"))?;
-        values.push(captures[1].to_owned());
+        let value = captures[1].to_owned();
+        if !seen.insert(value.clone()) {
+            return Err(format!("duplicate TypeSpec enum value in {name}: {value}").into());
+        }
+        values.push(value);
     }
     Ok(values)
 }
@@ -137,6 +142,11 @@ fn parse_tsp_model(source: &str, name: &str) -> Result<Value> {
         let property_name = captures[1].to_owned();
         let required = captures.get(2).is_none();
         let shape = normalize_tsp_type(&captures[3], pending_pattern.take())?;
+        if properties.contains_key(&property_name) {
+            return Err(
+                format!("duplicate TypeSpec property in model {name}: {property_name}").into(),
+            );
+        }
         properties.insert(
             property_name,
             json!({
@@ -201,17 +211,32 @@ fn parse_json_model(schema: &Value, name: &str) -> Result<Value> {
         .pointer(&format!("/$defs/{name}"))
         .and_then(Value::as_object)
         .ok_or_else(|| format!("missing JSON Schema definition {name}"))?;
-    let required: BTreeSet<&str> = definition
-        .get("required")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
     let source_properties = definition
         .get("properties")
         .and_then(Value::as_object)
         .ok_or_else(|| format!("missing properties for JSON Schema definition {name}"))?;
+    let required_values = definition
+        .get("required")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("missing required array for JSON Schema definition {name}"))?;
+    let mut required = BTreeSet::new();
+    for item in required_values {
+        let property = item.as_str().ok_or_else(|| {
+            format!("non-string required property in JSON Schema definition {name}")
+        })?;
+        if !required.insert(property) {
+            return Err(format!(
+                "duplicate required property in JSON Schema definition {name}: {property}"
+            )
+            .into());
+        }
+        if !source_properties.contains_key(property) {
+            return Err(format!(
+                "unknown required property in JSON Schema definition {name}: {property}"
+            )
+            .into());
+        }
+    }
     let mut properties = Map::new();
     for (property_name, property_schema) in source_properties {
         properties.insert(
@@ -417,6 +442,73 @@ mod tests {
             findings
                 .iter()
                 .any(|item| item.detail.contains("model DocsRequest"))
+        );
+    }
+
+    #[test]
+    fn duplicate_typespec_property_is_rejected() {
+        let temp = fixture_root();
+        let path = temp.path().join("contracts/docs-serving.tsp");
+        let source = fs::read_to_string(&path).unwrap();
+        let duplicate = source.replace(
+            "  accept?: string;",
+            "  accept?: string;\n  accept?: string;",
+        );
+        fs::write(&path, duplicate).unwrap();
+        let error = run(temp.path()).expect_err("duplicate property must fail closed");
+        assert!(error.to_string().contains("duplicate TypeSpec property"));
+    }
+
+    #[test]
+    fn duplicate_typespec_enum_value_is_rejected() {
+        let temp = fixture_root();
+        let path = temp.path().join("contracts/docs-serving.tsp");
+        let source = fs::read_to_string(&path).unwrap();
+        let duplicate = source.replace(
+            "  html: \"html\",",
+            "  html: \"html\",\n  htmlAgain: \"html\",",
+        );
+        fs::write(&path, duplicate).unwrap();
+        let error = run(temp.path()).expect_err("duplicate enum value must fail closed");
+        assert!(error.to_string().contains("duplicate TypeSpec enum value"));
+    }
+
+    #[test]
+    fn malformed_json_required_entries_are_rejected() {
+        for mutation in ["unknown", "duplicate", "non-string"] {
+            let temp = fixture_root();
+            let path = temp.path().join("contracts/docs-serving.schema.json");
+            let mut schema: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            let required = schema["$defs"]["DocsRequest"]["required"]
+                .as_array_mut()
+                .unwrap();
+            match mutation {
+                "unknown" => required.push(Value::String("notAProperty".to_owned())),
+                "duplicate" => required.push(required[0].clone()),
+                "non-string" => required.push(json!(42)),
+                _ => unreachable!(),
+            }
+            fs::write(&path, serde_json::to_vec_pretty(&schema).unwrap()).unwrap();
+            assert!(
+                run(temp.path()).is_err(),
+                "{mutation} required entry must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_discrepancy_runs_are_byte_stable() {
+        let temp = fixture_root();
+        let path = temp.path().join("contracts/authority-topology.json");
+        let mut topology: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        topology["prohibitedAuthorityEdges"] = json!([]);
+        fs::write(&path, serde_json::to_vec_pretty(&topology).unwrap()).unwrap();
+
+        let first = run(temp.path()).expect("first run");
+        let second = run(temp.path()).expect("second run");
+        assert_eq!(
+            serde_json::to_vec(&first).unwrap(),
+            serde_json::to_vec(&second).unwrap()
         );
     }
 
