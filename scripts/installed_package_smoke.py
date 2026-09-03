@@ -20,6 +20,7 @@ from typing import Any
 
 EXPECTED_TARGETS = ("rust", "ts", "golang", "gleam", "elixir", "erlang")
 EXPECTED_LANGUAGES = {"rust", "ts", "golang"}
+EXPECTED_NODE_RUNTIME_PACKAGE = "node_modules/@oresoftware/next-loggers"
 
 
 def sha256(path: Path) -> str:
@@ -111,6 +112,77 @@ def assert_self_contained(root: Path) -> None:
             )
 
 
+def assert_node_runtime_closure(typescript_root: Path) -> None:
+    lock_path = typescript_root / "package-lock.json"
+    receipt_path = typescript_root / "runtime-dependencies.json"
+    if not lock_path.is_file():
+        raise ValueError(f"installed TypeScript lock is missing: {lock_path}")
+    if not receipt_path.is_file():
+        raise ValueError(f"installed Node runtime closure receipt is missing: {receipt_path}")
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if receipt.get("schema") != "ores.node-runtime-dependency-closure/v1":
+        raise ValueError("installed Node runtime closure has an unsupported schema")
+    if receipt.get("packageLockSha256") != sha256(lock_path):
+        raise ValueError("installed Node runtime closure lock digest drifted")
+
+    packages = receipt.get("packages")
+    if not isinstance(packages, list) or not all(isinstance(item, dict) for item in packages):
+        raise ValueError("installed Node runtime closure lacks package records")
+    paths = [item.get("path") for item in packages]
+    if EXPECTED_NODE_RUNTIME_PACKAGE not in paths:
+        raise ValueError(
+            "installed Node runtime closure omitted the pinned logging dependency: "
+            f"{paths!r}"
+        )
+
+    dependency = typescript_root / EXPECTED_NODE_RUNTIME_PACKAGE / "package.json"
+    if not dependency.is_file():
+        raise ValueError(f"installed Node runtime dependency is missing: {dependency}")
+
+
+def assert_typescript_runtime(typescript_root: Path) -> dict[str, Any]:
+    entries = {
+        "index": typescript_root / "dist" / "index.js",
+        "operation": typescript_root / "dist" / "operation.js",
+        "otel": typescript_root / "dist" / "otel.js",
+    }
+    for label, entry in entries.items():
+        if not entry.is_file():
+            raise ValueError(f"installed TypeScript {label} entry is missing: {entry}")
+
+    run(
+        [
+            "node",
+            "--input-type=module",
+            "--eval",
+            (
+                "const root = await import(process.argv[1]); "
+                "const operation = await import(process.argv[2]); "
+                "const otel = await import(process.argv[3]); "
+                "if (typeof root.descriptor !== 'function' || "
+                "typeof operation.runOperationBoundary !== 'function' || "
+                "typeof otel.createOresOtelMiddleware !== 'function') process.exit(2);"
+            ),
+            entries["index"].resolve().as_uri(),
+            entries["operation"].resolve().as_uri(),
+            entries["otel"].resolve().as_uri(),
+        ]
+    )
+    return run_json(
+        [
+            "node",
+            "--input-type=module",
+            "--eval",
+            (
+                "const module = await import(process.argv[1]); "
+                "process.stdout.write(JSON.stringify(module.descriptor()));"
+            ),
+            entries["index"].resolve().as_uri(),
+        ]
+    )
+
+
 def assert_beam_runtime(target_root: Path) -> None:
     gleam_beam = find_one(target_root / "gleam" / "build", "ores_middleware.beam")
     erlang_beam = find_one(
@@ -189,28 +261,16 @@ def validate(root: Path) -> None:
 
     rust_binary = target_root / "rust" / "debug" / "contractcheck"
     go_binary = target_root / "golang" / "contractcheck"
-    typescript_entry = target_root / "ts" / "dist" / "index.js"
+    typescript_root = target_root / "ts"
     for binary in (rust_binary, go_binary):
         if not binary.is_file() or not os.access(binary, os.X_OK):
             raise ValueError(f"installed executable is missing or not executable: {binary}")
-    if not typescript_entry.is_file():
-        raise ValueError(f"installed TypeScript entry point is missing: {typescript_entry}")
 
+    assert_node_runtime_closure(typescript_root)
     descriptors = {
         "rust": run_json([str(rust_binary)]),
         "golang": run_json([str(go_binary)]),
-        "ts": run_json(
-            [
-                "node",
-                "--input-type=module",
-                "--eval",
-                (
-                    "const module = await import(process.argv[1]); "
-                    "process.stdout.write(JSON.stringify(module.descriptor()));"
-                ),
-                typescript_entry.resolve().as_uri(),
-            ]
-        ),
+        "ts": assert_typescript_runtime(typescript_root),
     }
     if set(descriptors) != EXPECTED_LANGUAGES:
         raise AssertionError("internal descriptor probe set drifted")
@@ -236,7 +296,8 @@ def main() -> int:
     validate(args.root)
     print(
         "installed Zed package passed: copied peer authorities, cross-translation, "
-        "Rust/TypeScript/Go descriptor parity, and Gleam/Elixir/Erlang runtime probes"
+        "locked Node dependency closure, Rust/TypeScript/Go descriptor parity, "
+        "and Gleam/Elixir/Erlang runtime probes"
     )
     return 0
 
