@@ -151,42 +151,84 @@ level_event(fatal, Logger, Values) -> next_loggers:fatal(Logger, Values).
 %% receives Request#{log := RequestLogger}; ordinary imported file loggers share
 %% the same process-local context while the callback executes.
 create_middleware(Config, Hooks, Logger) when is_map(Logger) ->
-    case ores_middleware:create_middleware(Config, Hooks) of
+    MergedHooks = maps:merge(ores_middleware:default_hooks(), Hooks),
+    TelemetryFinished = maps:get(telemetry_finished, MergedHooks),
+    WrappedHooks = MergedHooks#{
+        telemetry_finished => fun(Context, Request, Response, Duration) ->
+            Result = TelemetryFinished(Context, Request, Response, Duration),
+            maybe_log_timeout(Logger, Context, Request, Response, Duration),
+            Result
+        end
+    },
+    case ores_middleware:create_middleware(Config, WrappedHooks) of
         {error, Issues} -> {error, Issues};
         {ok, Base} ->
             {ok, fun(Request, Next) ->
-                Base(Request, fun(ScopedRequest) ->
-                    case ores_middleware:current_context() of
-                        Context when is_map(Context) ->
-                            RequestWithLog = attach(ScopedRequest, Logger, Context),
-                            RequestLogger = maps:get(log, RequestWithLog),
-                            RequestFields = #{
-                                <<"http.request.method">> => maps:get(method, ScopedRequest, undefined),
-                                <<"url.path">> => maps:get(path, ScopedRequest, undefined)
-                            },
-                            _ = info(RequestLogger, <<"request handler started">>, RequestFields),
-                            try
-                                Response = with_context(RequestLogger, fun() -> Next(RequestWithLog) end),
-                                _ = info(
-                                    RequestLogger,
-                                    <<"request handler completed">>,
-                                    maybe_put(
-                                        RequestFields,
-                                        <<"http.response.status_code">>,
-                                        maps:get(status, Response, undefined)
-                                    )
-                                ),
-                                Response
-                            catch
-                                Class:Reason:Stacktrace ->
-                                    _ = error(RequestLogger, <<"request handler failed">>, RequestFields),
-                                    erlang:raise(Class, Reason, Stacktrace)
-                            end;
-                        _ -> Next(ScopedRequest)
-                    end
-                end)
+                PreviousContext = ores_middleware:current_context(),
+                PreviousMetadata = logger:get_process_metadata(),
+                try
+                    Base(Request, fun(ScopedRequest) ->
+                        case ores_middleware:current_context() of
+                            Context when is_map(Context) ->
+                                RequestWithLog = attach(ScopedRequest, Logger, Context),
+                                RequestLogger = maps:get(log, RequestWithLog),
+                                RequestFields = #{
+                                    <<"http.request.method">> => maps:get(method, ScopedRequest, undefined),
+                                    <<"url.path">> => maps:get(path, ScopedRequest, undefined)
+                                },
+                                _ = info(RequestLogger, <<"request handler started">>, RequestFields),
+                                try
+                                    Response = with_context(RequestLogger, fun() -> Next(RequestWithLog) end),
+                                    _ = info(
+                                        RequestLogger,
+                                        <<"request handler completed">>,
+                                        maybe_put(
+                                            RequestFields,
+                                            <<"http.response.status_code">>,
+                                            maps:get(status, Response, undefined)
+                                        )
+                                    ),
+                                    Response
+                                catch
+                                    Class:Reason:Stacktrace ->
+                                        _ = error(RequestLogger, <<"request handler failed">>, RequestFields),
+                                        erlang:raise(Class, Reason, Stacktrace)
+                                end;
+                            _ -> Next(ScopedRequest)
+                        end
+                    end)
+                after
+                    restore_caller_context(PreviousContext),
+                    restore_caller_metadata(PreviousMetadata)
+                end
             end}
     end.
+
+maybe_log_timeout(Logger, Context, Request, Response, Duration) ->
+    case deadline_response(Response) of
+        false -> ok;
+        true ->
+            RequestLogger = request_logger(Logger, Context),
+            Fields = #{
+                <<"http.request.method">> => maps:get(method, Request, undefined),
+                <<"url.path">> => maps:get(path, Request, undefined),
+                <<"http.response.status_code">> => 504,
+                <<"request.outcome">> => <<"timeout">>,
+                <<"request.duration_ms">> => Duration
+            },
+            _ = error(RequestLogger, <<"request handler timed out">>, Fields),
+            ok
+    end.
+
+deadline_response(#{status := 504, body := Body}) when is_binary(Body) ->
+    binary:match(Body, <<"deadline_exceeded">>) =/= nomatch;
+deadline_response(_) -> false.
+
+restore_caller_context(undefined) -> ores_middleware_context:clear();
+restore_caller_context(Context) when is_map(Context) -> ores_middleware_context:put(Context).
+
+restore_caller_metadata(undefined) -> logger:unset_process_metadata();
+restore_caller_metadata(Metadata) when is_map(Metadata) -> logger:set_process_metadata(Metadata).
 
 request_logger_name(undefined) -> <<"request">>;
 request_logger_name(<<>>) -> <<"request">>;
