@@ -45,6 +45,15 @@ def parse_args() -> argparse.Namespace:
         default="question",
         help="Use ? in Result-returning functions or expect in infallible entrypoints.",
     )
+    parser.add_argument(
+        "--rate-limit-mode",
+        choices=("audit", "configured"),
+        default="audit",
+        help=(
+            "Use the non-enforcing Axum audit adapter by default; choose configured "
+            "only in a separately reviewed activation change."
+        ),
+    )
     parser.add_argument("--service-name", default='env!("CARGO_PKG_NAME")')
     return parser.parse_args()
 
@@ -109,7 +118,9 @@ def _scan_matching(source: str, open_index: int) -> int:
     raise RolloutError("unterminated call expression")
 
 
-def _top_level_arguments(source: str, open_index: int, close_index: int) -> tuple[tuple[int, int], ...]:
+def _top_level_arguments(
+    source: str, open_index: int, close_index: int
+) -> tuple[tuple[int, int], ...]:
     spans: list[tuple[int, int]] = []
     start = open_index + 1
     stack: list[str] = []
@@ -169,17 +180,35 @@ def _terminator(error_mode: str) -> str:
     return "?" if error_mode == "question" else '.expect("valid ORES middleware configuration")'
 
 
-def install_expression(router: str, service_name: str, error_mode: str, indent: str) -> str:
+def _installer(rate_limit_mode: str) -> str:
+    if rate_limit_mode == "audit":
+        return "ores_middleware::frameworks::axum_audit::install_from_env"
+    return "ores_middleware::frameworks::axum::install_from_env"
+
+
+def install_expression(
+    router: str,
+    service_name: str,
+    error_mode: str,
+    indent: str,
+    rate_limit_mode: str,
+) -> str:
     inner = indent + "    "
     return (
-        "ores_middleware::frameworks::axum::install_from_env(\n"
+        f"{_installer(rate_limit_mode)}(\n"
         f"{inner}{router.strip()},\n"
         f"{inner}{service_name},\n"
         f"{indent}){_terminator(error_mode)}"
     )
 
 
-def _wrap_associated_function(argument: str, service_name: str, error_mode: str, indent: str) -> str | None:
+def _wrap_associated_function(
+    argument: str,
+    service_name: str,
+    error_mode: str,
+    indent: str,
+    rate_limit_mode: str,
+) -> str | None:
     marker = "::into_make_service"
     method = argument.find(marker)
     if method < 0:
@@ -196,24 +225,48 @@ def _wrap_associated_function(argument: str, service_name: str, error_mode: str,
     inner = argument[open_paren + 1 : close_paren].strip()
     if not inner:
         return None
-    wrapped = install_expression(inner, service_name, error_mode, indent + "    ")
+    wrapped = install_expression(
+        inner, service_name, error_mode, indent + "    ", rate_limit_mode
+    )
     return argument[: open_paren + 1] + "\n" + indent + "    " + wrapped + ",\n" + indent + ")"
 
 
-def wrap_router_argument(argument: str, service_name: str, error_mode: str, indent: str) -> str:
+def wrap_router_argument(
+    argument: str,
+    service_name: str,
+    error_mode: str,
+    indent: str,
+    rate_limit_mode: str,
+) -> str:
     argument = argument.strip()
-    associated = _wrap_associated_function(argument, service_name, error_mode, indent)
+    associated = _wrap_associated_function(
+        argument, service_name, error_mode, indent, rate_limit_mode
+    )
     if associated is not None:
         return associated
     method = re.search(r"\.into_make_service(?:_with_connect_info)?", argument)
     if method:
         router = argument[: method.start()].strip()
         suffix = argument[method.start() :]
-        return install_expression(router, service_name, error_mode, indent) + suffix
-    return install_expression(argument, service_name, error_mode, indent)
+        return (
+            install_expression(
+                router, service_name, error_mode, indent, rate_limit_mode
+            )
+            + suffix
+        )
+    return install_expression(
+        argument, service_name, error_mode, indent, rate_limit_mode
+    )
 
 
-def insert_router_shadow(source: str, call: Call, router_var: str, service_name: str, error_mode: str) -> str:
+def insert_router_shadow(
+    source: str,
+    call: Call,
+    router_var: str,
+    service_name: str,
+    error_mode: str,
+    rate_limit_mode: str,
+) -> str:
     before = source[: call.start]
     conversion = re.compile(
         rf"(?m)^(?P<indent>[ \t]*)let\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*{re.escape(router_var)}\s*\.into_make_service"
@@ -224,19 +277,42 @@ def insert_router_shadow(source: str, call: Call, router_var: str, service_name:
         indent = matches[-1].group("indent")
     else:
         insertion = source.rfind("\n", 0, call.start) + 1
-        indent = source[insertion:call.start]
-    expression = install_expression(router_var, service_name, error_mode, indent)
+        line_prefix = source[insertion:call.start]
+        indent = re.match(r"[ \t]*", line_prefix).group(0)
+    expression = install_expression(
+        router_var, service_name, error_mode, indent, rate_limit_mode
+    )
     statement = f"{indent}let {router_var} = {expression};\n"
     return source[:insertion] + statement + source[insertion:]
 
 
-def patch_source(path: Path, call_name: str, argument_index: int, router_var: str | None, service_name: str, error_mode: str) -> None:
+def patch_source(
+    path: Path,
+    call_name: str,
+    argument_index: int,
+    router_var: str | None,
+    service_name: str,
+    error_mode: str,
+    rate_limit_mode: str,
+) -> None:
     source = path.read_text()
-    if "ores_middleware::frameworks::axum::install_from_env" in source:
+    if (
+        "ores_middleware::frameworks::axum::install_from_env" in source
+        or "ores_middleware::frameworks::axum_audit::install_from_env" in source
+    ):
         raise RolloutError(f"{path} already contains the ores-middleware installation")
     call = find_call(source, call_name)
     if router_var:
-        path.write_text(insert_router_shadow(source, call, router_var, service_name, error_mode))
+        path.write_text(
+            insert_router_shadow(
+                source,
+                call,
+                router_var,
+                service_name,
+                error_mode,
+                rate_limit_mode,
+            )
+        )
         return
     if argument_index < 0 or argument_index >= len(call.arguments):
         raise RolloutError(
@@ -247,7 +323,11 @@ def patch_source(path: Path, call_name: str, argument_index: int, router_var: st
     call_indent = re.match(r"[ \t]*", source[line_start:call.start]).group(0)
     argument_indent = call_indent + "    "
     replacement = "\n" + argument_indent + wrap_router_argument(
-        source[start:end], service_name, error_mode, argument_indent
+        source[start:end],
+        service_name,
+        error_mode,
+        argument_indent,
+        rate_limit_mode,
     )
     replacement += ",\n" + call_indent
     path.write_text(source[:start] + replacement + source[end:])
@@ -266,7 +346,12 @@ def patch_manifest(path: Path, revision: str) -> None:
         dependencies = re.search(r"(?m)^\[dependencies\]\s*$", manifest)
         if not dependencies:
             raise RolloutError(f"{path} has no [dependencies] section")
-        manifest = manifest[: dependencies.end()] + "\n" + dependency + manifest[dependencies.end() :]
+        manifest = (
+            manifest[: dependencies.end()]
+            + "\n"
+            + dependency
+            + manifest[dependencies.end() :]
+        )
     path.write_text(manifest)
 
 
@@ -280,14 +365,25 @@ def patch_gitignore(path: Path) -> None:
         path.write_text(text)
 
 
-def write_documentation(revision: str, source: Path, manifest: Path) -> None:
+def write_documentation(
+    revision: str, source: Path, manifest: Path, rate_limit_mode: str
+) -> None:
     DOC_PATH.parent.mkdir(parents=True, exist_ok=True)
+    mode_text = (
+        "The shared rate-limit decision is forcibly disabled by the audit adapter; "
+        "existing service-owned limiters remain authoritative. Activation requires a "
+        "separate reviewed change to configured mode."
+        if rate_limit_mode == "audit"
+        else "The shared rate-limit decision follows the validated runtime configuration."
+    )
     DOC_PATH.write_text(
         f"""# Shared request middleware
 
 This server installs `ORESoftware/ores-middleware` at the live Axum boundary in `{source}`, using `{manifest}` and immutable central commit `{revision}`.
 
 The shared layer provides request/trace context, crash recovery, deadlines, streaming payload limits, security headers, compression, ETags, RED telemetry hooks, rate/idempotency ports, and integration ports for shared-auth, opto-sync, and ores-otel. Existing service-specific authentication, authorization, rate limits, and telemetry remain in place beneath the shared request-lifecycle layer.
+
+{mode_text}
 
 Production must set `ORES_MIDDLEWARE_ENV=production` and explicitly choose `ORES_MIDDLEWARE_TLS_MODE=in-process` or `trusted-proxy`. Trusted-proxy mode also requires `ORES_MIDDLEWARE_TRUSTED_PROXY_CIDRS`; forwarded transport headers from other peers are rejected. Development defaults to explicitly disabled TLS enforcement rather than trusting public forwarded headers.
 
@@ -306,6 +402,8 @@ def main() -> int:
             raise RolloutError(f"{path} is outside {root}")
         if not path.is_file():
             raise RolloutError(f"required file does not exist: {path}")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
+        raise RolloutError("revision must be a full lowercase 40-hex commit SHA")
     patch_manifest(manifest, args.revision)
     patch_source(
         source,
@@ -314,9 +412,12 @@ def main() -> int:
         args.router_var,
         args.service_name,
         args.error_mode,
+        args.rate_limit_mode,
     )
     patch_gitignore(Path(".gitignore"))
-    write_documentation(args.revision, args.source, args.manifest)
+    write_documentation(
+        args.revision, args.source, args.manifest, args.rate_limit_mode
+    )
     print(
         json.dumps(
             {
@@ -324,6 +425,7 @@ def main() -> int:
                 "manifest": str(args.manifest),
                 "documentation": str(DOC_PATH),
                 "revision": args.revision,
+                "rateLimitMode": args.rate_limit_mode,
             },
             sort_keys=True,
         )

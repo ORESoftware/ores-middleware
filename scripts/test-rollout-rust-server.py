@@ -56,9 +56,23 @@ def direct_router() -> None:
 }
 """
     )
-    assert "install_from_env" in output
+    assert "frameworks::axum_audit::install_from_env" in output
     assert "app," in output
     assert ")?" in output
+
+
+def configured_router_is_explicit() -> None:
+    _root, output = fixture(
+        """async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+""",
+        "--rate-limit-mode",
+        "configured",
+    )
+    assert "frameworks::axum::install_from_env" in output
+    assert "frameworks::axum_audit" not in output
 
 
 def make_service_receiver() -> None:
@@ -88,6 +102,28 @@ def precomputed_service() -> None:
     assert install < conversion
 
 
+def assigned_serve_router_shadow_preserves_statement_boundary() -> None:
+    _root, output = fixture(
+        """async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let public = axum::serve(
+        listener,
+        router.into_make_service(),
+    );
+    public.await?;
+    Ok(())
+}
+""",
+        "--router-var",
+        "router",
+    )
+    assert "    let router = ores_middleware" in output
+    assert "    let public = axum::serve" in output
+    assert "let public = let router" not in output
+    assert output.index("let router = ores_middleware") < output.index(
+        "let public = axum::serve"
+    )
+
+
 def associated_function() -> None:
     _root, output = fixture(
         """async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -115,8 +151,10 @@ def infallible_entrypoint() -> None:
 
 def main() -> None:
     direct_router()
+    configured_router_is_explicit()
     make_service_receiver()
     precomputed_service()
+    assigned_serve_router_shadow_preserves_statement_boundary()
     associated_function()
     infallible_entrypoint()
     print("Rust rollout helper fixtures passed")
