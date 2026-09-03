@@ -1,0 +1,53 @@
+name: apply-rust-http-lifecycle-boundary
+
+on:
+  push:
+    branches:
+      - agent/rust-http-lifecycle-boundary-20260903
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-rust-http-lifecycle-boundary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/rust-http-lifecycle-boundary-20260903
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Apply exact source transformations
+        run: python3 .agent-patches/apply_rust_lifecycle.py
+
+      - name: Format, lint, and test Rust package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path src/rust/Cargo.toml -- --check
+          cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+
+      - name: Commit verified source-only result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .agent-patches/apply_rust_lifecycle.py
+          rmdir .agent-patches 2>/dev/null || true
+          rm -f .github/workflows/apply-rust-http-lifecycle-boundary.yml
+          git diff --check
+          git config user.name "ores-gh-bot"
+          git config user.email "ores-gh-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(rust): contain the full HTTP middleware lifecycle"
+          git push origin HEAD:agent/rust-http-lifecycle-boundary-20260903
