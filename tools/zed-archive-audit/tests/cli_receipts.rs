@@ -191,7 +191,10 @@ fn cli_preserves_non_utf8_path_rejection_in_the_receipt() {
     assert_eq!(receipt["schema"], "ores.zed-release-acceptance/v1");
     assert_eq!(receipt["status"], "stopped_for_evaluation");
     assert_eq!(receipt["error"]["code"], "invalid_path");
-    assert_eq!(receipt["error"]["detail"], "archive path is not valid UTF-8");
+    assert_eq!(
+        receipt["error"]["detail"],
+        "archive path is not valid UTF-8"
+    );
     assert!(
         !receipt["error"]["detail"]
             .as_str()
