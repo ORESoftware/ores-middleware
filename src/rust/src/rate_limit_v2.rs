@@ -426,9 +426,11 @@ mod tests {
                 .iter()
                 .any(|violation| violation.code == "window-required")
         );
-        assert!(violations.iter().any(|violation| {
-            violation.code == "window-refill-tokens-forbidden"
-        }));
+        assert!(
+            violations
+                .iter()
+                .any(|violation| { violation.code == "window-refill-tokens-forbidden" })
+        );
     }
 
     #[test]
