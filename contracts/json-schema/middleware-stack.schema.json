@@ -20,11 +20,14 @@
   "allOf": [
     {
       "if": {
+        "type": "object",
         "properties": {
           "environment": { "const": "production" },
           "settings": {
+            "type": "object",
             "properties": {
               "rateLimit": {
+                "type": "object",
                 "properties": { "enabled": { "const": true } },
                 "required": ["enabled"]
               }
@@ -35,10 +38,13 @@
         "required": ["environment", "settings"]
       },
       "then": {
+        "type": "object",
         "properties": {
           "settings": {
+            "type": "object",
             "properties": {
               "rateLimit": {
+                "type": "object",
                 "properties": {
                   "keyDerivation": { "const": "external-hmac-sha256" }
                 },
@@ -171,10 +177,12 @@
       "allOf": [
         {
           "if": {
+            "type": "object",
             "properties": { "layer": { "const": "cloudflare-edge" } },
             "required": ["layer"]
           },
           "then": {
+            "type": "object",
             "properties": {
               "keyBy": {
                 "items": { "enum": ["ip", "ip-prefix", "route", "method"] },
@@ -186,6 +194,7 @@
         },
         {
           "not": {
+            "type": "object",
             "properties": {
               "layer": { "const": "authorization" },
               "failureMode": { "const": "fail-open" }
