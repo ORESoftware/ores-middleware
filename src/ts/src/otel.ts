@@ -23,7 +23,26 @@ import {
 
 export * from "@oresoftware/next-loggers";
 export * from "@oresoftware/next-loggers/execution-context";
-export * from "./context.js";
+export { getLogContext } from "@oresoftware/next-loggers/context";
+export {
+  bindRequestContext,
+  captureRequestContext,
+  contextForRequest,
+  currentContext,
+  fromExecutionLogContext,
+  isAsyncContextTracked,
+  requestContextSymbol,
+  runWithBoundRequestContext,
+  runWithCapturedRequestContext,
+  runWithContext,
+  setLoggedInUserId,
+  toExecutionLogContext,
+  updateRequestContext
+} from "./context.js";
+export type {
+  OresRequestContext,
+  RequestContextExtensions
+} from "./context.js";
 
 /** Instance type of the canonical ores-otel default logger export. */
 export type OresLogger = typeof defaultLogger;
