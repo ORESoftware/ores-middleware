@@ -224,7 +224,8 @@ pub fn create_middleware(
                 |> log.send
 
               with_request_context(request_log, fn() {
-                let response = next(scoped_request, request_log)
+                let response: middleware.Response =
+                  next(scoped_request, request_log)
                 let response_fields =
                   list.append(request_fields, [
                     #("http.response.status_code", json.int(response.status)),
