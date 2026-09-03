@@ -1,0 +1,50 @@
+name: one-shot Rust block parser repair
+
+on:
+  push:
+    branches: [refactor/rust-contract-parity-2026-09-03]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-rust-block-parser-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refactor/rust-contract-parity-2026-09-03
+          persist-credentials: true
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - name: Repair, validate, and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tools/contract-parity/src/lib.rs')
+          source = path.read_text(encoding='utf-8')
+          old = 'r"(?s)\\b{}\\s+{}\\s*\\{{(?P<body>.*?)\\}}"'
+          new = 'r"(?ms)\\b{}\\s+{}\\s*\\{{(?P<body>.*?)^\\s*\\}}"'
+          if source.count(old) != 1:
+              raise SystemExit('expected exactly one brittle TypeSpec block expression')
+          path.write_text(source.replace(old, new), encoding='utf-8')
+          PY
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml
+          cargo test --manifest-path tools/contract-parity/Cargo.toml
+          cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml -- --root . --report target/audit/docs-serving-contract-parity.json
+          rm .github/workflows/fix-rust-block-parser.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- tools/contract-parity/src/lib.rs .github/workflows/fix-rust-block-parser.yml
+          git commit -m 'fix: parse TypeSpec regex quantifiers inside model blocks'
+          git push origin HEAD:refactor/rust-contract-parity-2026-09-03
