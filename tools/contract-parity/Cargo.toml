@@ -1,0 +1,19 @@
+[package]
+name = "ores-contract-parity"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Fail-closed TypeSpec and JSON Schema peer-authority parity checker"
+license = "MIT"
+publish = false
+
+[dependencies]
+regex = "1.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+[workspace]

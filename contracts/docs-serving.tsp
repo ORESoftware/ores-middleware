@@ -28,7 +28,9 @@ model DocsRequest {
   path: string;
   accept?: string;
   format?: string;
+  @pattern("^[0-9a-f]{64}$")
   runtimeContractDigest?: string;
+  @pattern("^[0-9a-f]{64}$")
   docsContractDigest?: string;
 }
 
