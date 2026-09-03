@@ -56,7 +56,9 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check --quiet jsonschema==4.25.1
           npm ci --ignore-scripts --no-audit --no-fund
-          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+          # The TypeScript package pins ores-otel to an immutable Git SHA. Its
+          # prepare hook compiles generated JS/declarations from checked-in TS.
+          npm ci --prefix src/ts --no-audit --no-fund
 
       - name: Run peer-authority, projection, package, and language audit
         shell: bash
