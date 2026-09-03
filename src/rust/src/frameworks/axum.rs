@@ -21,8 +21,16 @@ use tower_http::{compression::CompressionLayer, limit::RequestBodyLimitLayer};
 use crate::{
     context::run_with_context,
     integrations::{RequestMetadata, TransportSecurity},
-    MiddlewareError, MiddlewareStack,
+    stack_from_env, BootstrapError, MiddlewareError, MiddlewareStack,
 };
+
+pub fn install_from_env(
+    router: Router,
+    service_name: impl Into<String>,
+) -> Result<Router, BootstrapError> {
+    let stack = Arc::new(stack_from_env(service_name)?);
+    Ok(install(router, stack))
+}
 
 pub fn install(router: Router, stack: Arc<MiddlewareStack>) -> Router {
     let compression = stack.config().settings.compression.enabled;
