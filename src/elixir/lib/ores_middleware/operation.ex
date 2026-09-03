@@ -54,7 +54,8 @@ defmodule OresMiddleware.Operation do
     rescue
       error -> fail(context, descriptor, :error, safe_error_type(error), reporter)
     catch
-      class, _reason -> fail(context, descriptor, :panic, safe_token(class, "panic", 64), reporter)
+      class, _reason ->
+        fail(context, descriptor, :panic, safe_token(class, "panic", 64), reporter)
     end
   end
 
@@ -128,7 +129,9 @@ defmodule OresMiddleware.Operation do
   end
 
   defp safe_token(value, fallback, maximum) when is_binary(value) do
-    if byte_size(value) in 1..maximum and Regex.match?(@safe_token, value), do: value, else: fallback
+    if byte_size(value) in 1..maximum and Regex.match?(@safe_token, value),
+      do: value,
+      else: fallback
   end
 
   defp safe_token(_value, fallback, _maximum), do: fallback
