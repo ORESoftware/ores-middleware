@@ -1,0 +1,13 @@
+[package]
+name = "ores-middleware-docs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Routing-neutral ORES API documentation middleware decision core"
+repository = "https://github.com/ORESoftware/ores-middleware"
+
+[lib]
+name = "ores_middleware_docs"
+path = "src/lib.rs"
+
+[dependencies]

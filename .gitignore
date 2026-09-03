@@ -1,0 +1,12 @@
+# Generated audit/build output.
+/target/*
+!/target/README.md
+
+# Language-local build products.
+/src/rust/target/
+/src/ts/node_modules/
+
+# Editor and operating-system noise.
+.DS_Store
+*.swp
+*.tmp
