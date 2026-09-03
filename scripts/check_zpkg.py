@@ -82,10 +82,19 @@ def validate(root: Path) -> list[str]:
     ):
         if required not in scripts:
             errors.append(f"missing scripts.{required}")
-    if scripts.get("orm-catalog") != "python3 scripts/orm_catalog_gate.py":
-        errors.append("scripts.orm-catalog must execute the checked-in database-backed gate")
-    if not (root / ".github/workflows/persistence-convergence.yml").is_file():
-        errors.append("missing hosted persistence-convergence workflow")
+    expected_orm_command = "python3 scripts/orm_catalog_gate_entrypoint.py"
+    if scripts.get("orm-catalog") != expected_orm_command:
+        errors.append(
+            "scripts.orm-catalog must execute the diagnostic-safe database-backed gate"
+        )
+    for required_path in (
+        "scripts/orm_catalog_gate.py",
+        "scripts/orm_catalog_gate_entrypoint.py",
+        "scripts/subprocess_capture.py",
+        ".github/workflows/persistence-convergence.yml",
+    ):
+        if not (root / required_path).is_file():
+            errors.append(f"missing required persistence gate file: {required_path}")
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
     if "scripts/cross_translate.py" not in smoke_test:
         errors.append("publish.smoke_test must execute the cross-translation gate")
