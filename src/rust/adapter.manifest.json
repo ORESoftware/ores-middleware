@@ -1,0 +1,15 @@
+{
+  "language": "rust",
+  "runtime": "tokio",
+  "packageName": "ores-middleware",
+  "frameworkAdapters": ["axum", "mash", "leptos", "dioxus"],
+  "operationSymbols": {
+    "descriptor": "descriptor",
+    "defaultConfig": "default_config",
+    "validateConfig": "validate_config",
+    "createMiddleware": "MiddlewareStack::new",
+    "runWithContext": "run_with_context",
+    "currentContext": "current_context",
+    "capabilities": "capabilities"
+  }
+}
