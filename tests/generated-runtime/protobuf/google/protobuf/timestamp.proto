@@ -1,0 +1,13 @@
+// Compile-only fixture for generated protobuf conformance tests.
+//
+// This file supplies the stable google.protobuf.Timestamp wire shape to protoc
+// on runners whose protobuf-compiler package omits well-known-type sources. It
+// is not an ORES authority, generated product, or application contract.
+syntax = "proto3";
+
+package google.protobuf;
+
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos = 2;
+}
