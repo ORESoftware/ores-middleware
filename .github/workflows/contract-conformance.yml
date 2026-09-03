@@ -85,7 +85,17 @@ jobs:
           elixir-version: '1.18'
           gleam-version: 'latest'
           rebar3-version: 'latest'
-      - run: cd src/gleam && gleam format --check src test && gleam test
+      - name: Emit canonical Gleam formatting for integration sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/gleam
+          gleam format src/ores_middleware/otel.gleam test/otel_test.gleam
+          echo '--- src/ores_middleware/otel.gleam ---'
+          cat src/ores_middleware/otel.gleam
+          echo '--- test/otel_test.gleam ---'
+          cat test/otel_test.gleam
+          exit 1
       - run: cd src/gleam && gleam run -m ores_middleware_contractcheck | jq -e '.language == "gleam"'
       - run: cd src/elixir && mix deps.get && mix test
       - run: cd src/elixir && MIX_ENV=test mix run --no-compile --no-deps-check --no-start -e 'IO.puts(OresMiddleware.descriptor_json())' | jq -e '.language == "elixir"'
