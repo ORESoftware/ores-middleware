@@ -3,7 +3,6 @@
  * function/method body plans. JSON Schema is a peer authority, not an emitter
  * target or fallback for this source.
  */
-@service(#{ title: "ORES Middleware Function Body Contract" })
 namespace Ores.Middleware.FunctionBodies;
 
 /** Stable pseudocode operations whose ordering and effects are executable. */
