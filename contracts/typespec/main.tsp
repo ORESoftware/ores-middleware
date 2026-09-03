@@ -113,7 +113,7 @@ enum RateLimitDecisionSource {
   kubernetesIngress: "kubernetes-ingress",
   serviceMesh: "service-mesh",
   authorization: "authorization",
-  unknown: "unknown",
+  unknownSource: "unknown",
 }
 
 enum ContentRepresentation {
