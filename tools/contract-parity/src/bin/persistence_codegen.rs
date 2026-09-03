@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const TYPESPEC_SOURCE: &str = "contracts/persistence/idempotency-record.tsp";
-const JSON_SCHEMA_SOURCE: &str =
-    "contracts/persistence/idempotency-record.schema.json";
+const JSON_SCHEMA_SOURCE: &str = "contracts/persistence/idempotency-record.schema.json";
 const COMMON_ARTIFACTS: &[&str] = &[
     "model.json",
     "sql/schema.sql",
@@ -156,9 +155,7 @@ fn pascal_case(value: &str) -> String {
         .map(|part| {
             let mut characters = part.chars();
             match characters.next() {
-                Some(first) => {
-                    first.to_ascii_uppercase().to_string() + characters.as_str()
-                }
+                Some(first) => first.to_ascii_uppercase().to_string() + characters.as_str(),
                 None => String::new(),
             }
         })
@@ -181,9 +178,7 @@ fn extract_typespec_block(source: &str, keyword: &str, name: &str) -> Result<Str
 
 fn parse_typespec_enum(source: &str, name: &str) -> Result<Vec<String>> {
     let body = extract_typespec_block(source, "enum", name)?;
-    let member = Regex::new(
-        r#"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*"([^"]+)"\s*,?$"#,
-    )?;
+    let member = Regex::new(r#"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*"([^"]+)"\s*,?$"#)?;
     let mut values = Vec::new();
     for raw in body.lines() {
         let line = raw.trim();
@@ -249,17 +244,9 @@ fn parse_typespec(root: &Path) -> Result<Model> {
     let source = fs::read_to_string(root.join(TYPESPEC_SOURCE))?;
     let enum_values = parse_typespec_enum(&source, "IdempotencyStatus")?;
     let enums = BTreeMap::from([("IdempotencyStatus".to_owned(), enum_values)]);
-    let property = Regex::new(
-        r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*([^;]+);$",
-    )?;
+    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*([^;]+);$")?;
     let mut fields = Vec::new();
-    for raw in extract_typespec_block(
-        &source,
-        "model",
-        "IdempotencyRecord",
-    )?
-    .lines()
-    {
+    for raw in extract_typespec_block(&source, "model", "IdempotencyRecord")?.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with("//") {
             continue;
@@ -319,34 +306,24 @@ fn json_field(
             .get(definition_name)
             .and_then(|value| value.get("enum"))
             .and_then(Value::as_array)
-            .ok_or_else(|| {
-                format!("JSON Schema enum reference {definition_name} is invalid")
-            })?
+            .ok_or_else(|| format!("JSON Schema enum reference {definition_name} is invalid"))?
             .iter()
             .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| {
-                        format!("JSON Schema enum {definition_name} contains a non-string")
-                    })
+                value.as_str().map(str::to_owned).ok_or_else(|| {
+                    format!("JSON Schema enum {definition_name} contains a non-string")
+                })
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
         ("enum", "text", values)
     } else {
         match object.get("type").and_then(Value::as_str) {
-            Some("string")
-                if object.get("format").and_then(Value::as_str)
-                    == Some("date-time") =>
-            {
+            Some("string") if object.get("format").and_then(Value::as_str) == Some("date-time") => {
                 ("datetime", "timestamptz", Vec::new())
             }
             Some("string") => ("string", "text", Vec::new()),
             Some("integer")
-                if object.get("minimum").and_then(Value::as_i64)
-                    == Some(i32::MIN as i64)
-                    && object.get("maximum").and_then(Value::as_i64)
-                        == Some(i32::MAX as i64) =>
+                if object.get("minimum").and_then(Value::as_i64) == Some(i32::MIN as i64)
+                    && object.get("maximum").and_then(Value::as_i64) == Some(i32::MAX as i64) =>
             {
                 ("int32", "integer", Vec::new())
             }
@@ -369,8 +346,7 @@ fn json_field(
 }
 
 fn parse_json_schema(root: &Path) -> Result<Model> {
-    let schema: Value =
-        serde_json::from_slice(&fs::read(root.join(JSON_SCHEMA_SOURCE))?)?;
+    let schema: Value = serde_json::from_slice(&fs::read(root.join(JSON_SCHEMA_SOURCE))?)?;
     let definitions = schema
         .get("$defs")
         .and_then(Value::as_object)
@@ -417,9 +393,7 @@ fn parse_json_schema(root: &Path) -> Result<Model> {
         .ok_or("x-ores-sql.unique is required")?
         .iter()
         .enumerate()
-        .map(|(index, group)| {
-            string_array(group, &format!("x-ores-sql.unique[{index}]"))
-        })
+        .map(|(index, group)| string_array(group, &format!("x-ores-sql.unique[{index}]")))
         .collect::<Result<Vec<_>>>()?;
     validate_model(&Model {
         name: "IdempotencyRecord".to_owned(),
@@ -440,8 +414,7 @@ fn string_array(value: &Value, label: &str) -> Result<Vec<String>> {
         .ok_or_else(|| format!("{label} must be an array"))?
         .iter()
         .map(|item| {
-            item
-                .as_str()
+            item.as_str()
                 .map(str::to_owned)
                 .ok_or_else(|| format!("{label} must contain only strings").into())
         })
@@ -452,8 +425,11 @@ fn validate_model(model: &Model) -> Result<Model> {
     if model.fields.is_empty() {
         return Err("persistence model must contain fields".into());
     }
-    let field_names: BTreeSet<&str> =
-        model.fields.iter().map(|field| field.name.as_str()).collect();
+    let field_names: BTreeSet<&str> = model
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
     if field_names.len() != model.fields.len() {
         return Err("persistence field names must be unique".into());
     }
@@ -465,8 +441,7 @@ fn validate_model(model: &Model) -> Result<Model> {
             if field.enum_values.is_empty() {
                 return Err(format!("enum field {} must not be empty", field.name).into());
             }
-            let unique: BTreeSet<&str> =
-                field.enum_values.iter().map(String::as_str).collect();
+            let unique: BTreeSet<&str> = field.enum_values.iter().map(String::as_str).collect();
             if unique.len() != field.enum_values.len() {
                 return Err(format!("enum field {} contains duplicate values", field.name).into());
             }
@@ -542,11 +517,7 @@ fn render_sql(model: &Model) -> String {
             .collect::<Vec<_>>();
         lines.push(format!(
             "  CONSTRAINT {} UNIQUE ({})",
-            sql_identifier(&format!(
-                "uq_{}_{}",
-                model.table,
-                names.join("_")
-            )),
+            sql_identifier(&format!("uq_{}_{}", model.table, names.join("_"))),
             names
                 .iter()
                 .map(|name| sql_identifier(name))
@@ -619,12 +590,12 @@ fn render_typescript_declarations(model: &Model) -> String {
 fn javascript_predicate(field: &Field) -> String {
     let value = format!("value.{}", field.name);
     let base = match field.logical_type.as_str() {
-        "int32" => format!(
-            "Number.isInteger({value}) && {value} >= -2147483648 && {value} <= 2147483647"
-        ),
-        "datetime" => format!(
-            "typeof {value} === \"string\" && !Number.isNaN(Date.parse({value}))"
-        ),
+        "int32" => {
+            format!("Number.isInteger({value}) && {value} >= -2147483648 && {value} <= 2147483647")
+        }
+        "datetime" => {
+            format!("typeof {value} === \"string\" && !Number.isNaN(Date.parse({value}))")
+        }
         "enum" => format!("idempotencyStatusSet.has({value})"),
         _ => format!("typeof {value} === \"string\""),
     };
@@ -685,13 +656,7 @@ fn render_rust(model: &Model) -> String {
         .join("\n");
     let as_str_arms = enum_values
         .iter()
-        .map(|value| {
-            format!(
-                "            Self::{} => \"{}\",",
-                pascal_case(value),
-                value
-            )
-        })
+        .map(|value| format!("            Self::{} => \"{}\",", pascal_case(value), value))
         .collect::<Vec<_>>()
         .join("\n");
     let matches = enum_values
@@ -796,19 +761,12 @@ fn render_gleam(model: &Model) -> String {
         .join("\n");
     let cases = enum_values
         .iter()
-        .map(|value| {
-            format!(
-                "    \"{}\" -> Ok({})",
-                value,
-                pascal_case(value)
-            )
-        })
+        .map(|value| format!("    \"{}\" -> Ok({})", value, pascal_case(value)))
         .collect::<Vec<_>>()
         .join("\n");
     format!(
         "import gleam/option.{{type Option}}\n\npub type IdempotencyStatus {{\n{variants}\n}}\n\npub type {} {{\n  {}(\n{fields}\n  )\n}}\n\npub fn idempotency_status_from_string(value: String) -> Result(IdempotencyStatus, Nil) {{\n  case value {{\n{cases}\n    _ -> Error(Nil)\n  }}\n}}\n",
-        model.name,
-        model.name
+        model.name, model.name
     )
 }
 
@@ -944,8 +902,7 @@ fn seaorm_type(field: &Field) -> &'static str {
 }
 
 fn render_seaorm(model: &Model) -> String {
-    let primary: BTreeSet<&str> =
-        model.primary_key.iter().map(String::as_str).collect();
+    let primary: BTreeSet<&str> = model.primary_key.iter().map(String::as_str).collect();
     let fields = model
         .fields
         .iter()
@@ -1032,8 +989,7 @@ fn render_grpc_manifest(model: &Model) -> Value {
 }
 
 fn json_schema_component(root: &Path) -> Result<Value> {
-    let schema: Value =
-        serde_json::from_slice(&fs::read(root.join(JSON_SCHEMA_SOURCE))?)?;
+    let schema: Value = serde_json::from_slice(&fs::read(root.join(JSON_SCHEMA_SOURCE))?)?;
     Ok(schema)
 }
 
@@ -1078,14 +1034,8 @@ fn lane_artifacts(
             "typescript/idempotency_record.mjs".to_owned(),
             render_typescript_runtime(model),
         ),
-        (
-            "rust/idempotency_record.rs".to_owned(),
-            render_rust(model),
-        ),
-        (
-            "golang/idempotency_record.go".to_owned(),
-            render_go(model),
-        ),
+        ("rust/idempotency_record.rs".to_owned(), render_rust(model)),
+        ("golang/idempotency_record.go".to_owned(), render_go(model)),
         (
             "gleam/idempotency_record.gleam".to_owned(),
             render_gleam(model),
@@ -1124,7 +1074,10 @@ fn lane_artifacts(
         Authority::JsonSchemaOpenApi => {
             artifacts.insert(
                 "openapi/idempotency_record.openapi.json".to_owned(),
-                format!("{}\n", serde_json::to_string_pretty(&render_openapi(root)?)?),
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&render_openapi(root)?)?
+                ),
             );
             artifacts.insert(
                 "http/write-client.json".to_owned(),
@@ -1172,8 +1125,7 @@ fn compare_lanes(left: &LaneOutput, right: &LaneOutput) -> Vec<Discrepancy> {
     }
     for path in COMMON_ARTIFACTS {
         match (left.artifacts.get(*path), right.artifacts.get(*path)) {
-            (Some(left_content), Some(right_content))
-                if left_content == right_content => {}
+            (Some(left_content), Some(right_content)) if left_content == right_content => {}
             (Some(left_content), Some(right_content)) => {
                 findings.push(Discrepancy::new(
                     "generated-artifact-mismatch",
@@ -1193,11 +1145,7 @@ fn compare_lanes(left: &LaneOutput, right: &LaneOutput) -> Vec<Discrepancy> {
     findings
 }
 
-fn write_lane(
-    root: &Path,
-    output_root: &Path,
-    lane: &LaneOutput,
-) -> Result<LaneReceipt> {
+fn write_lane(root: &Path, output_root: &Path, lane: &LaneOutput) -> Result<LaneReceipt> {
     let folder = output_root.join(lane.authority.output_folder());
     let mut receipts = Vec::new();
     for (relative, content) in &lane.artifacts {
@@ -1229,11 +1177,7 @@ fn write_lane(
     })
 }
 
-fn write_report(
-    path: &Path,
-    lanes: Vec<LaneReceipt>,
-    findings: &[Discrepancy],
-) -> Result<()> {
+fn write_report(path: &Path, lanes: Vec<LaneReceipt>, findings: &[Discrepancy]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1250,7 +1194,10 @@ fn write_report(
         "zeroUnexplainedFindings": findings.is_empty(),
         "discrepancies": findings,
     });
-    fs::write(path, format!("{}\n", serde_json::to_string_pretty(&report)?))?;
+    fs::write(
+        path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )?;
     Ok(())
 }
 
@@ -1313,10 +1260,7 @@ fn parse_args() -> std::result::Result<(PathBuf, PathBuf, PathBuf), String> {
         .canonicalize()
         .map_err(|error| format!("invalid root {}: {error}", root.display()))?;
     let output = resolve(&root, output);
-    let report = resolve(
-        &root,
-        report.unwrap_or_else(|| output.join("receipt.json")),
-    );
+    let report = resolve(&root, report.unwrap_or_else(|| output.join("receipt.json")));
     Ok((root, output, report))
 }
 
@@ -1437,12 +1381,8 @@ mod tests {
         )
         .unwrap();
         let openapi: Value = serde_json::from_slice(
-            &fs::read(
-                output.join(
-                    "json-schema-openapi/openapi/idempotency_record.openapi.json",
-                ),
-            )
-            .unwrap(),
+            &fs::read(output.join("json-schema-openapi/openapi/idempotency_record.openapi.json"))
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(grpc["messagesOnly"], true);
@@ -1490,8 +1430,7 @@ mod tests {
         let temp = fixture_root();
         let path = temp.path().join(JSON_SCHEMA_SOURCE);
         let mut schema: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        schema["$defs"]["IdempotencyRecord"]["x-ores-sql"]["table"] =
-            json!("wrong_table");
+        schema["$defs"]["IdempotencyRecord"]["x-ores-sql"]["table"] = json!("wrong_table");
         fs::write(&path, serde_json::to_vec_pretty(&schema).unwrap()).unwrap();
         let findings = check(temp.path());
         assert!(findings.iter().any(|finding| {
@@ -1505,8 +1444,7 @@ mod tests {
         let temp = fixture_root();
         assert_eq!(check(temp.path()), Vec::new());
         let report: Value = serde_json::from_slice(
-            &fs::read(temp.path().join("target/schema-convergence/receipt.json"))
-                .unwrap(),
+            &fs::read(temp.path().join("target/schema-convergence/receipt.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(report["status"], "passed");
@@ -1514,10 +1452,7 @@ mod tests {
         assert_eq!(report["lanes"].as_array().unwrap().len(), 2);
         for lane in report["lanes"].as_array().unwrap() {
             assert_eq!(lane["sourceSha256"].as_str().unwrap().len(), 64);
-            assert!(
-                lane["artifacts"].as_array().unwrap().len()
-                    >= COMMON_ARTIFACTS.len()
-            );
+            assert!(lane["artifacts"].as_array().unwrap().len() >= COMMON_ARTIFACTS.len());
         }
     }
 }
