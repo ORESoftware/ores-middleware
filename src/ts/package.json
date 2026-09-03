@@ -13,6 +13,10 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
     },
+    "./context": {
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js"
+    },
     "./docs-serving": {
       "types": "./dist/docs-serving.d.ts",
       "import": "./dist/docs-serving.js"

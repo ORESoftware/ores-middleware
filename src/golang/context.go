@@ -20,17 +20,71 @@ type RequestContext struct {
 
 type requestContextKey struct{}
 
-func WithRequestContext(parent context.Context, value RequestContext) context.Context {
-	return context.WithValue(parent, requestContextKey{}, value)
+func cloneRequestContext(value RequestContext) RequestContext {
+	if value.Baggage == nil {
+		return value
+	}
+	baggage := make(map[string]string, len(value.Baggage))
+	for key, item := range value.Baggage {
+		baggage[key] = item
+	}
+	value.Baggage = baggage
+	return value
 }
 
+// WithRequestContext stores one aggregate value behind one unexported key. The
+// baggage map is copied so sibling goroutines cannot race by mutating a shared
+// map after the context has been installed.
+func WithRequestContext(parent context.Context, value RequestContext) context.Context {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithValue(parent, requestContextKey{}, cloneRequestContext(value))
+}
+
+// CurrentContext returns a defensive copy of the request context.
 func CurrentContext(ctx context.Context) (RequestContext, bool) {
+	if ctx == nil {
+		return RequestContext{}, false
+	}
 	value, ok := ctx.Value(requestContextKey{}).(RequestContext)
-	return value, ok
+	if !ok {
+		return RequestContext{}, false
+	}
+	return cloneRequestContext(value), true
 }
 
 func RunWithContext[T any](ctx context.Context, value RequestContext, operation func(context.Context) (T, error)) (T, error) {
 	return operation(WithRequestContext(ctx, value))
+}
+
+// RequestIDFromContext performs one context lookup and returns the request ID.
+func RequestIDFromContext(ctx context.Context) (string, bool) {
+	value, ok := CurrentContext(ctx)
+	return value.RequestID, ok && value.RequestID != ""
+}
+
+// TraceIDFromContext performs one context lookup and returns the W3C trace ID.
+func TraceIDFromContext(ctx context.Context) (string, bool) {
+	value, ok := CurrentContext(ctx)
+	return value.TraceID, ok && value.TraceID != ""
+}
+
+// UserIDFromContext returns the authenticated user ID, when one was established.
+func UserIDFromContext(ctx context.Context) (string, bool) {
+	value, ok := CurrentContext(ctx)
+	return value.UserID, ok && value.UserID != ""
+}
+
+// LoggedInUserIDFromContext is an explicit naming alias for application code.
+func LoggedInUserIDFromContext(ctx context.Context) (string, bool) {
+	return UserIDFromContext(ctx)
+}
+
+// TenantIDFromContext returns the authenticated tenant ID, when present.
+func TenantIDFromContext(ctx context.Context) (string, bool) {
+	value, ok := CurrentContext(ctx)
+	return value.TenantID, ok && value.TenantID != ""
 }
 
 type registryEntry struct {
@@ -71,7 +125,7 @@ func (r *ContextRegistry) Put(value RequestContext) {
 		}
 		delete(r.entries, oldestKey)
 	}
-	r.entries[value.RequestID] = registryEntry{context: value, created: now}
+	r.entries[value.RequestID] = registryEntry{context: cloneRequestContext(value), created: now}
 }
 
 func (r *ContextRegistry) Get(requestID string) (RequestContext, bool) {
@@ -81,7 +135,7 @@ func (r *ContextRegistry) Get(requestID string) (RequestContext, bool) {
 	if !ok || time.Since(entry.created) > r.ttl {
 		return RequestContext{}, false
 	}
-	return entry.context, true
+	return cloneRequestContext(entry.context), true
 }
 
 func (r *ContextRegistry) Delete(requestID string) {
