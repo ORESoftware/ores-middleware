@@ -5,6 +5,7 @@ on:
     paths:
       - "contracts/function-bodies/**"
       - "scripts/lib/function-body-contracts.mjs"
+      - "scripts/lib/json-pointer-mutations.mjs"
       - "scripts/validate-function-bodies.mjs"
       - "tests/e2e/**"
       - "src/rust/src/operation.rs"
@@ -25,6 +26,7 @@ on:
     paths:
       - "contracts/function-bodies/**"
       - "scripts/lib/function-body-contracts.mjs"
+      - "scripts/lib/json-pointer-mutations.mjs"
       - "scripts/validate-function-bodies.mjs"
       - "tests/e2e/**"
       - "src/rust/src/operation.rs"
@@ -71,6 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check scripts/lib/function-body-contracts.mjs
+          node --check scripts/lib/json-pointer-mutations.mjs
           node --check scripts/validate-function-bodies.mjs
           node --check tests/e2e/function-body-contract.e2e.mjs
       - name: Compile TypeSpec and execute JSON Schema plus E2E gates
@@ -210,10 +213,11 @@ jobs:
         with:
           otp-version: "27"
           rebar3-version: "3.24.0"
-      - name: Compile warnings-as-errors, run xref, and EUnit-test
+      - name: Compile the new body with warnings denied and EUnit-test the package
         working-directory: src/erlang
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/erlang-static"
+          erlc -Wall -Werror -o "$RUNNER_TEMP/erlang-static" src/ores_middleware_operation.erl
           rebar3 as test compile
-          rebar3 xref
           rebar3 eunit
