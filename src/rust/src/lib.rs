@@ -141,10 +141,7 @@ fn base_headers(content_type: &str) -> BTreeMap<String, String> {
             "Permissions-Policy".into(),
             "camera=(), microphone=(), geolocation=()".into(),
         ),
-        (
-            "Vary".into(),
-            format!("Accept, {DOCS_FORMAT_HEADER}"),
-        ),
+        ("Vary".into(), format!("Accept, {DOCS_FORMAT_HEADER}")),
         ("Content-Type".into(), content_type.into()),
     ])
 }
@@ -189,7 +186,11 @@ fn parse_accept(value: Option<&str>) -> Vec<MediaRange> {
     let mut ranges = Vec::new();
     for (index, raw_part) in value.split(',').enumerate() {
         let mut pieces = raw_part.split(';');
-        let media = pieces.next().unwrap_or_default().trim().to_ascii_lowercase();
+        let media = pieces
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
         if media.is_empty() {
             continue;
         }
@@ -238,9 +239,7 @@ fn media_representation(media: &str) -> Option<Representation> {
         "*/*" => Some(Representation::Html),
         "application/*" => Some(Representation::Catalog),
         "text/html" => Some(Representation::Html),
-        "application/vnd.ores.api-docs+json" | "application/json" => {
-            Some(Representation::Catalog)
-        }
+        "application/vnd.ores.api-docs+json" | "application/json" => Some(Representation::Catalog),
         "application/vnd.oai.openapi+json" | "application/openapi+json" => {
             Some(Representation::OpenApi)
         }
@@ -292,9 +291,7 @@ fn digest_failure(runtime_digest: Option<&str>, docs_digest: Option<&str>) -> bo
     let runtime = runtime_digest
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let docs = docs_digest
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let docs = docs_digest.map(str::trim).filter(|value| !value.is_empty());
     if runtime.is_some_and(|value| !valid_digest(value))
         || docs.is_some_and(|value| !valid_digest(value))
     {
@@ -319,11 +316,18 @@ pub fn decide(request: DocsRequest<'_>) -> DocsDecision {
         return DocsDecision::reject(Action::MethodNotAllowed, 405, true);
     }
 
-    if digest_failure(request.runtime_contract_digest, request.docs_contract_digest) {
+    if digest_failure(
+        request.runtime_contract_digest,
+        request.docs_contract_digest,
+    ) {
         return DocsDecision::reject(Action::StoppedForEvaluation, 503, false);
     }
 
-    let format = match request.format.map(str::trim).filter(|value| !value.is_empty()) {
+    let format = match request
+        .format
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(value) => match Representation::parse(value) {
             Some(value) => Some(value),
             None => return DocsDecision::reject(Action::NotAcceptable, 406, false),
@@ -368,7 +372,10 @@ mod tests {
     #[test]
     fn shared_conformance_fixture() {
         let fixture = include_str!("../../../fixtures/docs-serving-conformance.tsv");
-        for line in fixture.lines().filter(|line| !line.is_empty() && !line.starts_with('#')) {
+        for line in fixture
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        {
             let fields: Vec<&str> = line.split('\t').collect();
             assert_eq!(fields.len(), 11, "invalid fixture row: {line}");
             let name = fields[0];
