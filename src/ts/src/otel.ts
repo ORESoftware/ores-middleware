@@ -18,6 +18,7 @@ export * from "@oresoftware/next-loggers/context";
 
 /** Instance type of the canonical ores-otel default logger export. */
 export type OresLogger = typeof defaultLogger;
+export type OresLoggerOptions = Parameters<OresLogger["anew"]>[0];
 export type OresLogFields = Record<string, unknown>;
 export interface OresLogContext {
   loggedInUser?: OresLogFields & { id?: string };
@@ -27,6 +28,18 @@ export interface OresLogContext {
   traceIds?: string[];
   routineId?: string;
   tags?: string[];
+}
+
+/** Canonical process/file logger exported by ores-otel. */
+export const logger: OresLogger = defaultLogger;
+
+/**
+ * Creates an independent ores-otel logger while preserving a single package
+ * integration surface for middleware consumers. This explicit wrapper avoids
+ * relying on transitive star-export behavior for the dependency's constructor.
+ */
+export function createLogger(options: OresLoggerOptions = {}): OresLogger {
+  return defaultLogger.anew(options) as OresLogger;
 }
 
 const requestLoggers = new WeakMap<Request, OresLogger>();
