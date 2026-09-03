@@ -15,9 +15,10 @@ use crate::{
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RateLimitAlgorithm {
+    #[default]
     TokenBucket,
     SlidingWindowCounter,
     FixedWindow,
@@ -35,18 +36,13 @@ impl RateLimitAlgorithm {
     }
 }
 
-impl Default for RateLimitAlgorithm {
-    fn default() -> Self {
-        Self::TokenBucket
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RateLimitLayer {
     CloudflareEdge,
     KubernetesIngress,
     ServiceMesh,
+    #[default]
     Application,
     Authorization,
 }
@@ -63,37 +59,21 @@ impl RateLimitLayer {
     }
 }
 
-impl Default for RateLimitLayer {
-    fn default() -> Self {
-        Self::Application
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RateLimitFailureMode {
     FailOpen,
     FailClosed,
+    #[default]
     LocalOnly,
 }
 
-impl Default for RateLimitFailureMode {
-    fn default() -> Self {
-        Self::LocalOnly
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RateLimitKeyDerivationMode {
+    #[default]
     EphemeralHmacSha256,
     ExternalHmacSha256,
-}
-
-impl Default for RateLimitKeyDerivationMode {
-    fn default() -> Self {
-        Self::EphemeralHmacSha256
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -377,6 +357,10 @@ impl RateLimitKeyDeriver for UnavailableRateLimitKeyDeriver {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the explicit identity inputs make the privacy and trust boundary auditable at every call site"
+)]
 pub fn derive_rate_limit_principal(
     deriver: &dyn RateLimitKeyDeriver,
     namespace: &str,
