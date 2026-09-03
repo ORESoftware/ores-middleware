@@ -101,15 +101,19 @@ jobs:
                'optional_i32(object, "responseStatus")?'),
           ):
               old_count = rust_text.count(old)
-              new_count = rust_text.count(new)
-              if old_count == 1 and new_count == 0:
+              if old_count == 1:
                   rust_text = rust_text.replace(old, new, 1)
-              elif old_count == 0 and new_count == 1:
-                  pass
-              else:
+              elif old_count != 0:
                   raise SystemExit(
-                      f'unexpected Rust witness state for {old!r}: '
-                      f'old={old_count}, new={new_count}'
+                      f'expected at most one Rust witness expression {old!r}, '
+                      f'found {old_count}'
+                  )
+              if old in rust_text:
+                  raise SystemExit(f'Rust witness repair left broken token {old!r}')
+              if rust_text.count(new) != 1:
+                  raise SystemExit(
+                      f'expected exactly one corrected Rust witness expression {new!r}, '
+                      f'found {rust_text.count(new)}'
                   )
           rust_witness.write_text(rust_text, encoding='utf-8')
 
