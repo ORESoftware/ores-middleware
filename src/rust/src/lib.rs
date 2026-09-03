@@ -13,6 +13,7 @@ pub mod operation;
 pub mod otel;
 mod pipeline;
 pub mod rate_limit;
+pub mod rate_limit_v2;
 
 use std::collections::BTreeMap;
 
@@ -47,6 +48,10 @@ pub use rate_limit::{
     RateLimitAlgorithm, RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource,
     RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer,
     RateLimitPrincipal, RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver,
+};
+pub use rate_limit_v2::{
+    RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError,
+    RateLimitPolicyV2, RateLimitPolicyViolation,
 };
 
 pub const CONTRACT_VERSION: &str = "1.0.0";

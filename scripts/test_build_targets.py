@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from scripts.build_targets import (
     assert_output_is_self_contained,
+    materialize_node_runtime_dependencies,
     materialize_project_directory,
 )
 
@@ -101,6 +103,86 @@ class SelfContainedBuildOutputTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "required project source directory"):
                 materialize_project_directory(destination, missing_source, required=True)
+
+    def test_node_runtime_closure_copies_only_lock_defined_production_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            project = base / "project"
+            output = base / "target" / "ts"
+            project.mkdir()
+            output.mkdir(parents=True)
+
+            (project / "package.json").write_text(
+                json.dumps(
+                    {
+                        "name": "fixture",
+                        "dependencies": {"runtime-pkg": "1.2.3"},
+                        "devDependencies": {"dev-pkg": "9.9.9"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (project / "package-lock.json").write_text(
+                json.dumps(
+                    {
+                        "lockfileVersion": 3,
+                        "packages": {
+                            "": {"dependencies": {"runtime-pkg": "1.2.3"}},
+                            "node_modules/runtime-pkg": {"version": "1.2.3"},
+                            "node_modules/dev-pkg": {"version": "9.9.9", "dev": True},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runtime = project / "node_modules" / "runtime-pkg"
+            runtime.mkdir(parents=True)
+            (runtime / "index.js").write_text("export const ready = true;\n", encoding="utf-8")
+            development = project / "node_modules" / "dev-pkg"
+            development.mkdir(parents=True)
+            (development / "index.js").write_text("export const dev = true;\n", encoding="utf-8")
+
+            materialize_node_runtime_dependencies(project, output)
+
+            self.assertTrue((output / "node_modules/runtime-pkg/index.js").is_file())
+            self.assertFalse((output / "node_modules/dev-pkg").exists())
+            receipt = json.loads(
+                (output / "runtime-dependencies.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(receipt["schema"], "ores.node-runtime-dependency-closure/v1")
+            self.assertEqual(
+                [item["path"] for item in receipt["packages"]],
+                ["node_modules/runtime-pkg"],
+            )
+            self.assertEqual(len(receipt["packageLockSha256"]), 64)
+            assert_output_is_self_contained(output)
+
+    def test_missing_required_node_runtime_dependency_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            project = base / "project"
+            output = base / "target" / "ts"
+            project.mkdir()
+            output.mkdir(parents=True)
+            (project / "package.json").write_text(
+                json.dumps({"name": "fixture", "dependencies": {"missing": "1.0.0"}}),
+                encoding="utf-8",
+            )
+            (project / "package-lock.json").write_text(
+                json.dumps(
+                    {
+                        "lockfileVersion": 3,
+                        "packages": {
+                            "": {"dependencies": {"missing": "1.0.0"}},
+                            "node_modules/missing": {"version": "1.0.0"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "required npm runtime dependency"):
+                materialize_node_runtime_dependencies(project, output)
 
 
 if __name__ == "__main__":

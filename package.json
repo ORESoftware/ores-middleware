@@ -7,14 +7,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
     "contracts:polyglot-generate": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_codegen -- --output-root target/schema-convergence --report target/schema-convergence/receipt.json",
     "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
     "contracts:runtime-convergence": "node scripts/generated_runtime_matrix.mjs",
     "contracts:compare": "node scripts/compare-authorities.mjs && cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml -- && npm run contracts:polyglot-generate && npm run contracts:generated-check && npm run contracts:cross-translate",
-    "contracts:validate": "node scripts/validate-contracts.mjs && node scripts/validate-docs-serving.mjs",
+    "contracts:validate": "node scripts/validate-contracts.mjs && node scripts/validate-docs-serving.mjs && node scripts/validate-rate-limit-v2.mjs",
     "contracts:check": "npm run contracts:compare && npm run contracts:validate",
+    "rate-limit-v2:check": "tsp compile contracts/rate-limit-v2/typespec --no-emit && node scripts/validate-rate-limit-v2.mjs",
     "persistence:check": "python3 scripts/orm_matrix_gate.py",
     "descriptors:check": "node scripts/check-descriptors.mjs --require-all",
     "zpkg:check": "python3 scripts/check_zpkg.py",

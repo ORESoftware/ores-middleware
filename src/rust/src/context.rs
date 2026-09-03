@@ -98,14 +98,13 @@ impl ContextRegistry {
         let mut guard = self.inner.write().await;
         let now = Instant::now();
         guard.retain(|_, (created, _)| now.duration_since(*created) <= self.ttl);
-        if guard.len() >= self.max_entries {
-            if let Some(oldest) = guard
+        if guard.len() >= self.max_entries
+            && let Some(oldest) = guard
                 .iter()
                 .min_by_key(|(_, (created, _))| *created)
                 .map(|(key, _)| key.clone())
-            {
-                guard.remove(&oldest);
-            }
+        {
+            guard.remove(&oldest);
         }
         guard.insert(context.request_id.clone(), (now, context));
     }

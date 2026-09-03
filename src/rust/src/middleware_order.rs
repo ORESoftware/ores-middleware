@@ -139,7 +139,8 @@ pub struct OrderViolation {
 }
 
 /// Validates the ordering invariants shared by framework adapters and service
-/// composition roots. Unknown or duplicate layouts fail closed.
+/// composition roots. Every declared stage must occur exactly once, and the
+/// complete request/response execution sequence must match the reviewed order.
 pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolation> {
     let mut violations = Vec::new();
 
@@ -148,6 +149,15 @@ pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolati
             violations.push(OrderViolation {
                 code: "duplicate-stage",
                 message: "middleware stages must occur exactly once",
+            });
+        }
+    }
+
+    for expected in DEFAULT_MIDDLEWARE_ORDER {
+        if !stages.contains(&expected) {
+            violations.push(OrderViolation {
+                code: "missing-stage",
+                message: "every reviewed middleware stage must be present exactly once",
             });
         }
     }
@@ -236,6 +246,16 @@ pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolati
         &mut violations,
     );
 
+    for pair in DEFAULT_MIDDLEWARE_ORDER.windows(2) {
+        require_before(
+            stages,
+            pair[0],
+            pair[1],
+            "reviewed-stage-order",
+            &mut violations,
+        );
+    }
+
     violations
 }
 
@@ -309,6 +329,30 @@ mod tests {
             validate_middleware_order(&stages)
                 .iter()
                 .any(|issue| issue.code == "duplicate-stage")
+        );
+    }
+
+    #[test]
+    fn omitted_stage_is_rejected_even_when_remaining_pairs_are_ordered() {
+        let stages = DEFAULT_MIDDLEWARE_ORDER
+            .into_iter()
+            .filter(|stage| *stage != MiddlewareStage::Deadline)
+            .collect::<Vec<_>>();
+        assert!(
+            validate_middleware_order(&stages)
+                .iter()
+                .any(|issue| issue.code == "missing-stage")
+        );
+    }
+
+    #[test]
+    fn every_adjacent_stage_boundary_is_enforced() {
+        let mut stages = DEFAULT_MIDDLEWARE_ORDER;
+        stages.swap(11, 12);
+        assert!(
+            validate_middleware_order(&stages)
+                .iter()
+                .any(|issue| issue.code == "reviewed-stage-order")
         );
     }
 

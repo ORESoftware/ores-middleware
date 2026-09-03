@@ -1,4 +1,10 @@
 import { currentContext, runWithContext } from "./context.js";
+import {
+  operationContextFromRequestContext,
+  runOperationBoundary,
+  type OperationFailure,
+  type OperationFailureReporter
+} from "./operation.js";
 
 export { currentContext, runWithContext };
 
@@ -65,6 +71,8 @@ export interface MiddlewareDependencies {
     started(context: RequestContext, request: Request): Promise<void> | void;
     finished(context: RequestContext, request: Request, response: Response, durationMs: number): Promise<void> | void;
   };
+  /** Optional audited sink; defaults to the bounded ores-otel reporter. */
+  operationFailureReporter?: OperationFailureReporter;
   syncObserver?: (context: RequestContext, request: Request, response: Response, durationMs: number) => Promise<void>;
   captureSchema?: (request: Request, response: Response) => Promise<void>;
   now?: () => number;
@@ -162,6 +170,20 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
 
   return async (request, next) => {
     const started = now();
+    const requestId = validToken(request.headers.get(config.settings.requestIdHeader)) ?? crypto.randomUUID();
+    const traceId = parseTraceId(request.headers.get(config.settings.traceHeader)) ?? crypto.randomUUID().replaceAll("-", "");
+    let context: RequestContext = {
+      requestId,
+      traceId,
+      locale: request.headers.get("accept-language") ?? undefined,
+      startedAtUnixMs: started,
+      deadlineUnixMs: started + config.settings.timeoutMs,
+      baggage: {}
+    };
+
+    const preAuthOutcome = await runOperationBoundary(
+      { transport: "http", scope: "request", name: "middleware.pre_auth", signal: request.signal },
+      async () => {
     const contentLength = Number(request.headers.get("content-length") ?? "0");
     if (Number.isFinite(contentLength) && contentLength > config.settings.maxBodyBytes) return problem(413, "payload_too_large", "request body exceeds configured limit");
     const accepted = request.headers.get("accept");
@@ -173,17 +195,6 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const effectiveHttps = url.protocol === "https:" || (trustedProxy && forwardedProto === "https");
     if (config.settings.tls.requireHttps && !effectiveHttps) return problem(426, "https_required", "HTTPS is required");
     if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer");
-
-    const requestId = validToken(request.headers.get(config.settings.requestIdHeader)) ?? crypto.randomUUID();
-    const traceId = parseTraceId(request.headers.get(config.settings.traceHeader)) ?? crypto.randomUUID().replaceAll("-", "");
-    const context: RequestContext = {
-      requestId,
-      traceId,
-      locale: request.headers.get("accept-language") ?? undefined,
-      startedAtUnixMs: started,
-      deadlineUnixMs: started + config.settings.timeoutMs,
-      baggage: {}
-    };
 
     if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, context))) return problem(403, "ip_policy_denied", "request source is not permitted");
     if (config.settings.rateLimit.enabled) {
@@ -200,9 +211,21 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     } else if (dependencies.authVerifier) {
       auth = await dependencies.authVerifier(request, context);
     }
-    context.userId = auth.userId;
-    context.tenantId = auth.tenantId;
-    for (const [key, value] of Object.entries(auth.claims ?? {})) if (key.startsWith("otel.")) context.baggage[key] = value;
+    context = {
+      ...context,
+      userId: auth.userId,
+      tenantId: auth.tenantId,
+      baggage: {
+        ...context.baggage,
+        ...Object.fromEntries(
+          Object.entries(auth.claims ?? {}).filter(([key]) => key.startsWith("otel."))
+        )
+      }
+    };
+
+    const authenticatedOutcome = await runOperationBoundary(
+      { transport: "http", scope: "request", name: "middleware.request", signal: request.signal },
+      async () => {
     if (config.integrations.sharedAuth.mode !== "disabled" && !context.userId) return problem(401, "authentication_required", "shared-auth did not establish a user");
 
     if (config.settings.faultInjection.enabled) {
@@ -218,16 +241,12 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     }
 
     await dependencies.telemetry?.started(context, request);
-    let response: Response;
-    try {
-      response = await runWithContext(context, () => withDeadline(config.settings.timeoutMs, () => next(request)));
-    } catch (error) {
-      response = error instanceof DeadlineError ? problem(504, "deadline_exceeded", "request deadline exceeded") : problem(500, "internal_error", "request handler failed");
-    }
+    let response = await withDeadline(config.settings.timeoutMs, () => next(request));
 
     response = await attachEtag(request, response);
-    response = attachHeaders(config, context, response);
     response = maybeCompress(config, request, response);
+    // Observers and persistence consume the semantic response before
+    // request-specific security and correlation headers are finalized.
     const durationMs = Math.max(0, now() - started);
     await dependencies.telemetry?.finished(context, request, response.clone(), durationMs);
     if (dependencies.captureSchema) await dependencies.captureSchema(request.clone(), response.clone());
@@ -236,11 +255,31 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
       catch { if (!config.integrations.optoSync.failOpen) return problem(503, "sync_observer_failed", "opto-sync observation failed"); }
     }
 
-    if (idempotencyKey) {
+    if (idempotencyKey && response.status >= 200 && response.status < 300) {
       const body = new Uint8Array(await response.clone().arrayBuffer());
       await idempotencyStore.set(`${request.method}:${url.pathname}:${idempotencyKey}`, { status: response.status, headers: [...response.headers.entries()], body, expiresAt: now() + config.settings.idempotency.ttlSeconds * 1_000 });
     }
     return response;
+      },
+      {
+        context: operationContextFromRequestContext(context),
+        reportFailure: dependencies.operationFailureReporter
+      }
+    );
+    const response = authenticatedOutcome.ok
+      ? authenticatedOutcome.value
+      : operationFailureResponse(authenticatedOutcome.failure);
+    return attachHeaders(config, context, response);
+      },
+      {
+        context: operationContextFromRequestContext(context),
+        reportFailure: dependencies.operationFailureReporter
+      }
+    );
+    const response = preAuthOutcome.ok
+      ? preAuthOutcome.value
+      : operationFailureResponse(preAuthOutcome.failure);
+    return attachHeaders(config, context, response);
   };
 }
 
@@ -285,7 +324,12 @@ export function descriptor() {
   };
 }
 
-class DeadlineError extends Error {}
+class DeadlineError extends Error {
+  constructor() {
+    super("request deadline exceeded");
+    this.name = "TimeoutError";
+  }
+}
 function withDeadline<T>(timeoutMs: number, operation: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new DeadlineError()), timeoutMs);
@@ -328,14 +372,35 @@ function validTraceparent(value: string | null): string | undefined {
   return `${version}-${traceId}-${spanId}-${flags}`;
 }
 
+function operationFailureResponse(failure: OperationFailure): Response {
+  return failure.kind === "deadline_exceeded"
+    ? problem(504, "deadline_exceeded", "request deadline exceeded")
+    : failure.kind === "cancelled"
+      ? problem(499, "request_cancelled", "request was cancelled")
+      : problem(500, "internal_error", "request processing failed");
+}
+
 function problem(status: number, code: string, detail: string): Response { return Response.json({ type: `urn:ores:middleware:${code}`, title: code, status, detail }, { status, headers: { "content-type": "application/problem+json" } }); }
+function mergeVary(headers: Headers, ...tokens: string[]): void {
+  const existing = headers.get("vary");
+  if (existing?.trim() === "*") return;
+  const values = new Map<string, string>();
+  for (const value of [...(existing?.split(",") ?? []), ...tokens]) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (!values.has(key)) values.set(key, key);
+  }
+  if (values.size > 0) headers.set("vary", [...values.values()].join(", "));
+  else headers.delete("vary");
+}
 function attachHeaders(config: MiddlewareConfig, context: RequestContext, response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set(config.settings.requestIdHeader, context.requestId);
   const responseTraceparent = validTraceparent(headers.get("traceparent"));
   if (responseTraceparent) headers.set("traceparent", responseTraceparent);
   else headers.delete("traceparent");
-  headers.append("vary", "accept, accept-encoding");
+  mergeVary(headers, "accept", "accept-encoding");
   if (config.settings.securityHeaders.enabled) {
     headers.set("x-content-type-options", "nosniff"); headers.set("x-frame-options", config.settings.securityHeaders.frameOptions); headers.set("referrer-policy", "strict-origin-when-cross-origin"); headers.set("strict-transport-security", `max-age=${config.settings.securityHeaders.hstsMaxAgeSeconds}; includeSubDomains`);
     if (config.settings.securityHeaders.contentSecurityPolicy) headers.set("content-security-policy", config.settings.securityHeaders.contentSecurityPolicy);
@@ -355,6 +420,6 @@ function maybeCompress(config: MiddlewareConfig, request: Request, response: Res
   if (!config.settings.compression.enabled || !response.body || typeof CompressionStream === "undefined") return response;
   const length = Number(response.headers.get("content-length") ?? "0");
   if (!Number.isFinite(length) || length < config.settings.compression.minimumBytes || !request.headers.get("accept-encoding")?.includes("gzip")) return response;
-  const headers = new Headers(response.headers); headers.delete("content-length"); headers.set("content-encoding", "gzip"); headers.append("vary", "accept-encoding");
+  const headers = new Headers(response.headers); headers.delete("content-length"); headers.set("content-encoding", "gzip"); mergeVary(headers, "accept-encoding");
   return new Response(response.body.pipeThrough(new CompressionStream("gzip")), { status: response.status, statusText: response.statusText, headers });
 }
