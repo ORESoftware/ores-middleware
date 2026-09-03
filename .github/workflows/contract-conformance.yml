@@ -28,10 +28,26 @@ jobs:
       - run: npm run contracts:check
       - run: node scripts/check-source-layout.mjs
       - run: python3 -m unittest scripts/test_contract_parity.py -v
+      - run: python3 -m unittest scripts/test_schema_convergence.py -v
+      - run: python3 -m unittest scripts/test_cross_translation.py -v
       - run: python3 scripts/check_contract_parity.py
+      - run: python3 scripts/cross_translate.py
+      - run: python3 scripts/check_zpkg.py
       - run: npx tsp compile contracts/docs-serving.tsp --no-emit
       - run: node scripts/validate-docs-serving.mjs
       - run: python3 scripts/test-rollout-rust-server.py
+      - name: Upload cross-translation receipts and witnesses
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cross-translation-${{ github.run_id }}
+          path: |
+            target/audit/cross-translation.json
+            target/discrepancies/cross-translation.json
+            target/cross-translation/**/*.json
+            target/cross-translation/**/*.tsp
+          if-no-files-found: error
+          retention-days: 90
 
   rust:
     runs-on: ubuntu-24.04

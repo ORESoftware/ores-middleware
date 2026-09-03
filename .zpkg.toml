@@ -29,7 +29,7 @@ dir = ".vendor/.zed"
 [publish]
 include_readme = true
 tag_format = "v{version}"
-smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/scripts/check_zpkg.py\" --root \"$ZED_PKG_TEST_TARGET\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/authority-topology.json\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.tsp\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.schema.json\""
+smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/scripts/check_zpkg.py\" --root \"$ZED_PKG_TEST_TARGET\" && python3 \"$ZED_PKG_TEST_TARGET/scripts/cross_translate.py\" --root \"$ZED_PKG_TEST_TARGET\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/authority-topology.json\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.tsp\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.schema.json\""
 exclude = [
   ".env",
   ".env.*",
@@ -89,6 +89,7 @@ adapter = "none"
 audit = "python3 scripts/audit.py --receipt target/audit/receipt.json"
 build = "python3 scripts/build_targets.py"
 contracts = "npm run contracts:compile && npm run contracts:check"
+cross-translation = "python3 scripts/cross_translate.py"
 projection-parity = "python3 scripts/schema_convergence.py"
 test = "python3 scripts/audit.py --receipt target/audit/receipt.json"
 zpkg-check = "python3 scripts/check_zpkg.py"
