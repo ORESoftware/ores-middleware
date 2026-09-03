@@ -7,6 +7,9 @@ on:
       - 'contracts/**'
       - 'src/**'
       - 'scripts/build_targets.py'
+      - 'scripts/check_zpkg.py'
+      - 'scripts/cross_translate.py'
+      - 'scripts/installed_package_smoke.py'
       - 'scripts/test_build_targets.py'
       - 'scripts/run-zed-release-acceptance.sh'
       - 'tools/zed-archive-audit/**'
@@ -18,6 +21,9 @@ on:
       - 'contracts/**'
       - 'src/**'
       - 'scripts/build_targets.py'
+      - 'scripts/check_zpkg.py'
+      - 'scripts/cross_translate.py'
+      - 'scripts/installed_package_smoke.py'
       - 'scripts/test_build_targets.py'
       - 'scripts/run-zed-release-acceptance.sh'
       - 'tools/zed-archive-audit/**'
@@ -85,8 +91,17 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
 
-      - name: Test self-contained target-output guard
-        run: python3 -m unittest scripts/test_build_targets.py -v
+      - name: Validate release scripts and self-contained output guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/build_targets.py \
+            scripts/check_zpkg.py \
+            scripts/cross_translate.py \
+            scripts/installed_package_smoke.py
+          python3 scripts/check_zpkg.py
+          python3 -m unittest scripts/test_build_targets.py -v
 
       - name: Run native target tests before packaging
         shell: bash
