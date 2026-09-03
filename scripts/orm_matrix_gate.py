@@ -39,7 +39,6 @@ from scripts.orm_catalog_gate import (
     redact_database_url,
     render_cargo,
     render_sql,
-    run_command,
     seaorm_rust_type,
     sha256_bytes,
     source_digests,
@@ -49,6 +48,7 @@ from scripts.orm_catalog_gate import (
     write_text,
 )
 from scripts.schema_convergence import Model
+from scripts.subprocess_capture import run_command
 
 LANES = (
     "typespec-diesel",
