@@ -1,0 +1,15 @@
+{
+  "language": "elixir",
+  "runtime": "beam-otp",
+  "packageName": "ores_middleware",
+  "frameworkAdapters": ["plug", "phoenix", "bandit", "cowboy", "otp"],
+  "operationSymbols": {
+    "descriptor": "OresMiddleware.descriptor/0",
+    "defaultConfig": "OresMiddleware.default_config/1",
+    "validateConfig": "OresMiddleware.validate_config/1",
+    "createMiddleware": "OresMiddleware.create_middleware/2",
+    "runWithContext": "OresMiddleware.run_with_context/2",
+    "currentContext": "OresMiddleware.current_context/0",
+    "capabilities": "OresMiddleware.capabilities/0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@oresoftware/ores-middleware-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec",
+    "contracts:compare": "node scripts/compare-authorities.mjs",
+    "contracts:validate": "node scripts/validate-contracts.mjs",
+    "contracts:check": "npm run contracts:compare && npm run contracts:validate",
+    "descriptors:check": "node scripts/check-descriptors.mjs --require-all",
+    "verify": "npm run contracts:compile && npm run contracts:check && node scripts/check-source-layout.mjs"
+  },
+  "devDependencies": {
+    "@typespec/compiler": "^1.0.0",
+    "@typespec/http": "^1.0.0",
+    "@typespec/json-schema": "^1.0.0",
+    "@typespec/openapi3": "^1.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

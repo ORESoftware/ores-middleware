@@ -1,0 +1,33 @@
+[package]
+name = "ores-middleware"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Cross-framework ORES middleware contract and Rust adapters"
+repository = "https://github.com/ORESoftware/ores-middleware"
+
+[features]
+default = ["axum", "compression"]
+axum = ["dep:axum"]
+compression = ["axum", "dep:tower-http"]
+mash = ["axum"]
+leptos = ["axum"]
+dioxus = ["axum"]
+
+[dependencies]
+axum = { version = "0.8", optional = true }
+futures-util = "0.3"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tower-http = { version = "0.6", features = ["compression-full"], optional = true }
+tracing = "0.1"
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[[bin]]
+name = "contractcheck"
+path = "src/bin/contractcheck.rs"

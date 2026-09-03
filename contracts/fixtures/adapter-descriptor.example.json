@@ -1,0 +1,41 @@
+{
+  "contractVersion": "1.0.0",
+  "language": "rust",
+  "runtime": "tokio",
+  "packageName": "ores-middleware",
+  "frameworkAdapters": ["axum", "mash", "leptos", "dioxus"],
+  "capabilities": [
+    "request-context",
+    "panic-recovery",
+    "request-id",
+    "trace-context",
+    "structured-logging",
+    "metrics-red",
+    "deadline-timeout",
+    "payload-limit",
+    "rate-limit",
+    "auth",
+    "sync-observer",
+    "json",
+    "headers",
+    "compression",
+    "tls-policy",
+    "security-headers",
+    "idempotency",
+    "ip-policy",
+    "cache-etag",
+    "content-negotiation",
+    "fault-injection",
+    "test-auth-bypass",
+    "schema-capture"
+  ],
+  "operationSymbols": {
+    "descriptor": "descriptor",
+    "defaultConfig": "default_config",
+    "validateConfig": "validate_config",
+    "createMiddleware": "MiddlewareStack::new",
+    "runWithContext": "run_with_context",
+    "currentContext": "current_context",
+    "capabilities": "capabilities"
+  }
+}

@@ -1,0 +1,290 @@
+name: reusable-server-rollout
+
+on:
+  workflow_call:
+    inputs:
+      core-revision:
+        description: Immutable ores-middleware commit used by the server
+        required: false
+        type: string
+        default: 84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3
+      rollout-branch:
+        description: Caller branch that receives the verified implementation
+        required: false
+        type: string
+        default: feat/ores-middleware-v1
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      FLEET_GITHUB_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+      CORE_REV: ${{ inputs.core-revision }}
+      ROLLOUT_BRANCH: ${{ inputs.rollout-branch }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ inputs.rollout-branch }}
+          fetch-depth: 0
+
+      - name: Configure private dependency access when available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${FLEET_GITHUB_TOKEN:-}" ]]; then
+            git config --global url."https://x-access-token:${FLEET_GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
+
+      - name: Select the repository Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rust_version="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('Cargo.toml').read_text()
+          match = re.search(r'^rust-version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+          print(match.group(1) if match else 'stable')
+          PY
+          )"
+          rustup toolchain install "$rust_version" --profile minimal --component rustfmt
+          printf 'RUST_VERSION=%s\n' "$rust_version" >> "$GITHUB_ENV"
+
+      - name: Apply the ORES middleware contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          core_rev = os.environ['CORE_REV']
+          dependency = (
+              'ores-middleware = { git = "https://github.com/ORESoftware/ores-middleware.git", '
+              f'rev = "{core_rev}", package = "ores-middleware", default-features = false, '
+              'features = ["axum"] }'
+          )
+          module = 'mod ores_middleware;'
+          helper = r'''#![forbid(unsafe_code)]
+
+          use std::sync::Arc;
+
+          use ::ores_middleware::{
+              MiddlewareConfig, MiddlewareStack, RuntimeEnvironment, default_config,
+              frameworks::axum as ores_axum,
+          };
+          use axum::Router;
+
+          const SERVICE_NAME: &str = env!("CARGO_PKG_NAME");
+
+          pub(super) fn install(router: Router) -> Router {
+              let stack = match MiddlewareStack::new(rollout_config()) {
+                  Ok(stack) => stack,
+                  Err(issues) => {
+                      panic!("invalid ORES middleware v1 configuration for {SERVICE_NAME}: {issues:?}")
+                  }
+              };
+              ores_axum::install(router, Arc::new(stack))
+          }
+
+          fn rollout_config() -> MiddlewareConfig {
+              let mut config = default_config(SERVICE_NAME);
+              config.environment = RuntimeEnvironment::Production;
+              config.settings.timeout_ms = 15_000;
+              config.settings.max_body_bytes = 8 * 1024 * 1024;
+
+              // TLS terminates at the deployment boundary until this listener receives
+              // trusted socket-peer metadata. Never trust public forwarding headers here.
+              config.settings.tls.mode = "disabled".into();
+              config.settings.tls.require_https = false;
+              config.settings.tls.strict_forwarded_headers = false;
+              config.settings.tls.trusted_proxy_cidrs.clear();
+
+              // A distributed limiter is service policy. Avoid silently replacing it
+              // with a process-local bucket before authenticated peer keys are wired.
+              config.settings.rate_limit.enabled = false;
+
+              // This server uses the dependency-light Axum profile. Compression remains
+              // compile- and runtime-tested by the core crate's all-features matrix.
+              config.settings.compression.enabled = false;
+              config
+          }
+
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              #[test]
+              fn rollout_config_passes_standard_validation() {
+                  assert!(MiddlewareStack::new(rollout_config()).is_ok());
+              }
+
+              #[test]
+              fn runtime_descriptor_exports_the_standard_sdk() {
+                  let descriptor = ::ores_middleware::descriptor();
+                  for operation in [
+                      "descriptor",
+                      "defaultConfig",
+                      "validateConfig",
+                      "createMiddleware",
+                      "runWithContext",
+                      "currentContext",
+                      "capabilities",
+                  ] {
+                      assert!(descriptor.operation_symbols.contains_key(operation));
+                  }
+                  assert_eq!(descriptor.contract_version, "1.0.0");
+              }
+          }
+          '''
+
+          def fail(message: str) -> None:
+              raise SystemExit(message)
+
+          def add_module(text: str) -> str:
+              if module in text:
+                  return text
+              marker = '#![forbid(unsafe_code)]\n'
+              if marker in text:
+                  return text.replace(marker, marker + '\n' + module + '\n', 1)
+              return module + '\n\n' + text
+
+          cargo_path = Path('Cargo.toml')
+          if not cargo_path.exists():
+              fail('Cargo.toml is required for a Rust server rollout')
+          cargo = cargo_path.read_text()
+          if 'ores-middleware' not in cargo:
+              lines = cargo.splitlines(keepends=True)
+              for index, line in enumerate(lines):
+                  if re.match(r'^axum\s*=\s*', line):
+                      lines.insert(index + 1, dependency + '\n')
+                      break
+              else:
+                  fail('Axum dependency not found; refusing a non-Axum rollout')
+              cargo_path.write_text(''.join(lines))
+
+          router_path: Path
+          helper_path: Path
+          app_path = Path('src/app.rs')
+          http_path = Path('src/http.rs')
+          http_mod_path = Path('src/http/mod.rs')
+          main_path = Path('src/main.rs')
+
+          if app_path.exists() and re.search(r'pub(?:\([^)]*\))?\s+fn router\(state: AppState\) -> Router', app_path.read_text()):
+              router_path = app_path
+              helper_path = Path('src/app/ores_middleware.rs')
+              text = add_module(router_path.read_text())
+              if 'let router = Router::new()' not in text:
+                  text, count = re.subn(
+                      r'(pub(?:\([^)]*\))?\s+fn router\(state: AppState\) -> Router \{\n\s*)Router::new\(\)',
+                      r'\1let router = Router::new()',
+                      text,
+                      count=1,
+                  )
+                  if count != 1:
+                      fail('Unable to bind the src/app.rs router')
+              if 'ores_middleware::install(router)' not in text:
+                  text, count = re.subn(
+                      r'(\.with_state\(state\))\n\}',
+                      r'\1;\n    ores_middleware::install(router)\n}',
+                      text,
+                      count=1,
+                  )
+                  if count != 1:
+                      fail('Unable to install middleware in src/app.rs')
+              router_path.write_text(text)
+
+          elif http_path.exists() and 'pub fn app(state: AppState, networks: TrustedNetworks) -> Router' in http_path.read_text():
+              router_path = http_path
+              helper_path = Path('src/http/ores_middleware.rs')
+              text = add_module(router_path.read_text())
+              if 'ores_middleware::install(router)' not in text:
+                  old = '    public.merge(protected).with_state(state)\n}'
+                  new = (
+                      '    let router = public.merge(protected).with_state(state);\n'
+                      '    ores_middleware::install(router)\n}'
+                  )
+                  if old not in text:
+                      fail('Unable to install middleware in src/http.rs')
+                  text = text.replace(old, new, 1)
+              router_path.write_text(text)
+
+          elif http_mod_path.exists() and re.search(r'fn router\(state: AppState\) -> Router', http_mod_path.read_text()):
+              router_path = http_mod_path
+              helper_path = Path('src/http/ores_middleware.rs')
+              text = add_module(router_path.read_text())
+              if 'ores_middleware::install(router)' not in text:
+                  match = re.search(
+                      r'(?P<indent>\s*)(?P<visibility>pub(?:\([^)]*\))?\s+)?fn router\(state: AppState\) -> Router \{\n'
+                      r'(?P<body>\s*Router::new\(\)[^\n]*)\n\}',
+                      text,
+                  )
+                  if not match:
+                      fail('Unable to bind the src/http/mod.rs router')
+                  body = match.group('body').strip()
+                  replacement = (
+                      f"{match.group('indent')}{match.group('visibility') or ''}fn router(state: AppState) -> Router {{\n"
+                      f"    let router = {body};\n"
+                      "    ores_middleware::install(router)\n}"
+                  )
+                  text = text[:match.start()] + replacement + text[match.end():]
+              router_path.write_text(text)
+
+          elif main_path.exists() and re.search(r'fn router\([^\n]*\) -> Router', main_path.read_text()):
+              router_path = main_path
+              helper_path = Path('src/ores_middleware.rs')
+              text = add_module(router_path.read_text())
+              if 'ores_middleware::install(router)' not in text:
+                  text, count = re.subn(
+                      r'(fn router\([^\n]*\) -> Router \{\n\s*)Router::new\(\)',
+                      r'\1let router = Router::new()',
+                      text,
+                      count=1,
+                  )
+                  if count != 1:
+                      fail('Unable to bind the src/main.rs router')
+                  text, count = re.subn(
+                      r'(\.with_state\([^)]+\))\n\}',
+                      r'\1;\n    ores_middleware::install(router)\n}',
+                      text,
+                      count=1,
+                  )
+                  if count != 1:
+                      fail('Unable to install middleware in src/main.rs')
+              router_path.write_text(text)
+
+          else:
+              fail('No supported live Axum router entrypoint was found')
+
+          helper_path.parent.mkdir(parents=True, exist_ok=True)
+          helper_path.write_text(helper)
+          Path('.ores-middleware-paths').write_text(f'{router_path}\n{helper_path}\n')
+          PY
+
+      - name: Format, compile, and run the middleware contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +"$RUST_VERSION" fmt --all -- --check
+          cargo +"$RUST_VERSION" check --all-targets
+          cargo +"$RUST_VERSION" test --all-targets
+
+      - name: Commit the verified rollout and remove the caller bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t paths < .ores-middleware-paths
+          rm .ores-middleware-paths
+          rm .github/workflows/ores-middleware-rollout.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- Cargo.toml Cargo.lock "${paths[0]}" "${paths[1]}" .github/workflows/ores-middleware-rollout.yml
+          git diff --cached --check
+          git commit -m 'feat(middleware): adopt the standard ORES SDK contract'
+          git push origin HEAD:"$ROLLOUT_BRANCH"

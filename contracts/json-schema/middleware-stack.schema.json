@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/v1/middleware-stack.schema.json",
+  "title": "ORES Middleware Stack Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "environment", "requiredCapabilities", "settings", "integrations"],
+  "properties": {
+    "contractVersion": { "const": "1.0.0" },
+    "environment": { "enum": ["development", "test", "staging", "production"] },
+    "requiredCapabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/capability" }
+    },
+    "settings": { "$ref": "#/$defs/settings" },
+    "integrations": { "$ref": "#/$defs/integrations" }
+  },
+  "$defs": {
+    "capability": {
+      "type": "string",
+      "enum": [
+        "request-context",
+        "panic-recovery",
+        "request-id",
+        "trace-context",
+        "structured-logging",
+        "metrics-red",
+        "deadline-timeout",
+        "payload-limit",
+        "rate-limit",
+        "auth",
+        "sync-observer",
+        "json",
+        "headers",
+        "compression",
+        "tls-policy",
+        "security-headers",
+        "idempotency",
+        "ip-policy",
+        "cache-etag",
+        "content-negotiation",
+        "fault-injection",
+        "test-auth-bypass",
+        "schema-capture"
+      ]
+    },
+    "rateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "capacity", "refillPerSecond", "keyBy"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "capacity": { "type": "integer", "minimum": 1 },
+        "refillPerSecond": { "type": "number", "exclusiveMinimum": 0 },
+        "keyBy": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["ip", "user", "tenant", "route"] }
+        }
+      }
+    },
+    "compression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "minimumBytes", "algorithms"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minimumBytes": { "type": "integer", "minimum": 0 },
+        "algorithms": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["br", "gzip", "deflate", "zstd"] }
+        }
+      }
+    },
+    "tls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "requireHttps", "strictForwardedHeaders", "trustedProxyCidrs"],
+      "properties": {
+        "mode": { "enum": ["disabled", "in-process", "trusted-proxy"] },
+        "requireHttps": { "type": "boolean" },
+        "strictForwardedHeaders": { "type": "boolean" },
+        "trustedProxyCidrs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "securityHeaders": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "hstsMaxAgeSeconds", "frameOptions"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "hstsMaxAgeSeconds": { "type": "integer", "minimum": 0 },
+        "contentSecurityPolicy": { "type": "string" },
+        "frameOptions": { "enum": ["DENY", "SAMEORIGIN"] }
+      }
+    },
+    "idempotency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "headerName", "ttlSeconds", "requiredMethods"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "headerName": { "type": "string", "minLength": 1 },
+        "ttlSeconds": { "type": "integer", "minimum": 1 },
+        "requiredMethods": { "type": "array", "uniqueItems": true, "items": { "enum": ["POST", "PUT", "PATCH", "DELETE"] } }
+      }
+    },
+    "faultInjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "latencyMs", "errorRate", "dropRate"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "latencyMs": { "type": "integer", "minimum": 0 },
+        "errorRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dropRate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "testAuthBypass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "headerName", "allowedCidrs"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "headerName": { "type": "string", "minLength": 1 },
+        "allowedCidrs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestIdHeader",
+        "traceHeader",
+        "timeoutMs",
+        "maxBodyBytes",
+        "contextRegistryMaxEntries",
+        "contextRegistryTtlMs",
+        "rateLimit",
+        "compression",
+        "tls",
+        "securityHeaders",
+        "idempotency",
+        "faultInjection",
+        "testAuthBypass",
+        "contentRepresentations"
+      ],
+      "properties": {
+        "requestIdHeader": { "type": "string", "minLength": 1 },
+        "traceHeader": { "type": "string", "minLength": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "maxBodyBytes": { "type": "integer", "minimum": 1 },
+        "contextRegistryMaxEntries": { "type": "integer", "minimum": 0 },
+        "contextRegistryTtlMs": { "type": "integer", "minimum": 1 },
+        "rateLimit": { "$ref": "#/$defs/rateLimit" },
+        "compression": { "$ref": "#/$defs/compression" },
+        "tls": { "$ref": "#/$defs/tls" },
+        "securityHeaders": { "$ref": "#/$defs/securityHeaders" },
+        "idempotency": { "$ref": "#/$defs/idempotency" },
+        "faultInjection": { "$ref": "#/$defs/faultInjection" },
+        "testAuthBypass": { "$ref": "#/$defs/testAuthBypass" },
+        "contentRepresentations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["application/json", "application/problem+json", "application/msgpack", "application/xml"] }
+        }
+      }
+    },
+    "integrationMode": { "enum": ["disabled", "http", "embedded"] },
+    "sharedAuth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "failOpen"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/integrationMode" },
+        "issuer": { "type": "string" },
+        "audience": { "type": "string" },
+        "jwksUri": { "type": "string", "format": "uri" },
+        "introspectionUrl": { "type": "string", "format": "uri" },
+        "failOpen": { "const": false }
+      }
+    },
+    "optoSync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "failOpen"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/integrationMode" },
+        "endpoint": { "type": "string", "format": "uri" },
+        "outboxTopic": { "type": "string" },
+        "failOpen": { "type": "boolean" }
+      }
+    },
+    "oresOtel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "serviceName", "propagators"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "serviceName": { "type": "string", "minLength": 1 },
+        "exporterEndpoint": { "type": "string", "format": "uri" },
+        "propagators": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["tracecontext", "baggage", "b3", "jaeger"] } }
+      }
+    },
+    "integrations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sharedAuth", "optoSync", "oresOtel"],
+      "properties": {
+        "sharedAuth": { "$ref": "#/$defs/sharedAuth" },
+        "optoSync": { "$ref": "#/$defs/optoSync" },
+        "oresOtel": { "$ref": "#/$defs/oresOtel" }
+      }
+    }
+  }
+}

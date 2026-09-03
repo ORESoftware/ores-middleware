@@ -1,0 +1,122 @@
+name: verified Rust server rollout
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: Rust source file containing the live server boundary
+        required: true
+        type: string
+      manifest:
+        description: Cargo manifest for the server crate
+        required: true
+        type: string
+      middleware_revision:
+        description: Immutable, fully-conformant ores-middleware commit
+        required: true
+        type: string
+      call_name:
+        description: Server call to patch
+        required: false
+        default: axum::serve
+        type: string
+      router_argument:
+        description: Zero-based Router argument index
+        required: false
+        default: 1
+        type: number
+      router_var:
+        description: Router variable to shadow before a precomputed service conversion
+        required: false
+        default: ''
+        type: string
+      error_mode:
+        description: question for Result-returning functions or expect for infallible entrypoints
+        required: false
+        default: question
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  apply-format-check-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE: ${{ inputs.source }}
+      MANIFEST: ${{ inputs.manifest }}
+      MIDDLEWARE_REVISION: ${{ inputs.middleware_revision }}
+      CALL_NAME: ${{ inputs.call_name }}
+      ROUTER_ARGUMENT: ${{ inputs.router_argument }}
+      ROUTER_VAR: ${{ inputs.router_var }}
+      ERROR_MODE: ${{ inputs.error_mode }}
+    steps:
+      - name: Check out target server branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check out pinned rollout helper
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/ores-middleware
+          ref: ${{ inputs.middleware_revision }}
+          path: .ores-middleware-tool
+
+      - name: Patch the live server boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --source "$SOURCE"
+            --manifest "$MANIFEST"
+            --revision "$MIDDLEWARE_REVISION"
+            --call "$CALL_NAME"
+            --router-argument "$ROUTER_ARGUMENT"
+            --error-mode "$ERROR_MODE"
+          )
+          if [[ -n "$ROUTER_VAR" ]]; then
+            args+=(--router-var "$ROUTER_VAR")
+          fi
+          python3 .ores-middleware-tool/scripts/rollout-rust-server.py "${args[@]}"
+          grep -Fq 'ores_middleware::frameworks::axum::install_from_env' "$SOURCE"
+
+      - name: Format and compile every target in the server crate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path "$MANIFEST" --all
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/cargo-target" \
+            cargo check --manifest-path "$MANIFEST" --all-targets
+
+      - name: Commit only verified rollout files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ores-middleware-tool
+          workflow=.github/workflows/ores-middleware-rollout.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$SOURCE" "$MANIFEST" docs/ores-middleware.md .gitignore
+          while IFS= read -r -d '' lockfile; do
+            git add "$lockfile"
+          done < <(find . -name Cargo.lock -type f \
+            -not -path './.git/*' \
+            -not -path './target/*' \
+            -print0)
+          git rm "$workflow"
+          git diff --cached --check
+          if git diff --cached --name-only | grep -Eq '(^|/)target/|^\.ores-middleware-tool/'; then
+            echo 'generated build output entered the staged diff' >&2
+            exit 1
+          fi
+          git diff --cached --name-only
+          git commit -m 'feat: install shared ores middleware at Axum boundary'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
