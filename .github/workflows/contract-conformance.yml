@@ -136,12 +136,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p target/generated-compile/protobuf
+          generated_proto=target/schema-convergence/typespec/protobuf/idempotency_record.proto
+          descriptor=target/generated-compile/protobuf/idempotency_record.pb
+          grep -Fq 'import "google/protobuf/timestamp.proto";' "$generated_proto"
+          mkdir -p "$(dirname "$descriptor")"
           protoc \
             --proto_path=target/schema-convergence/typespec/protobuf \
-            --proto_path=/usr/include \
-            --descriptor_set_out=target/generated-compile/protobuf/idempotency_record.pb \
-            target/schema-convergence/typespec/protobuf/idempotency_record.proto
+            --proto_path=tests/generated-runtime/protobuf \
+            --include_imports \
+            --descriptor_set_out="$descriptor" \
+            "$generated_proto"
+          test -s "$descriptor"
+          protoc --decode_raw < "$descriptor" > target/generated-compile/protobuf/idempotency_record.descriptor.txt
+          test -s target/generated-compile/protobuf/idempotency_record.descriptor.txt
       - name: Compile generated Gleam, Elixir, and Erlang code from both lanes
         shell: bash
         run: |
