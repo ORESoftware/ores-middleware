@@ -65,6 +65,6 @@ jobs:
       - run: cd src/gleam && gleam format --check src test && gleam test
       - run: cd src/gleam && gleam run -m ores_middleware_contractcheck | jq -e '.language == "gleam"'
       - run: cd src/elixir && mix deps.get && mix test
-      - run: cd src/elixir && mix ores.contractcheck | jq -e '.language == "elixir"'
+      - run: cd src/elixir && MIX_ENV=test mix run --no-compile --no-deps-check --no-start -e 'IO.puts(OresMiddleware.descriptor_json())' | jq -e '.language == "elixir"'
       - run: cd src/erlang && rebar3 eunit
       - run: cd src/erlang && escript escript/contractcheck.escript | jq -e '.language == "erlang"'
