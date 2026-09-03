@@ -13,6 +13,10 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
     },
+    "./context": {
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js"
+    },
     "./docs-serving": {
       "types": "./dist/docs-serving.d.ts",
       "import": "./dist/docs-serving.js"
@@ -31,7 +35,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@oresoftware/next-loggers": "git+https://github.com/ores-otel/ores.otel.log.git#b55271c047be761c4711d87cbd500a49eefda3d9"
+    "@oresoftware/next-loggers": "git+https://github.com/ores-otel/ores.otel.log.git#f30374c33ead938d0b69d2eb5ce560cf985bfddc"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
