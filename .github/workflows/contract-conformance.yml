@@ -23,14 +23,19 @@ jobs:
         with:
           node-version: 22.23.1
           cache: npm
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
       - run: npm ci
       - run: npm run contracts:compile
       - run: npm run contracts:check
       - run: node scripts/check-source-layout.mjs
-      - run: python3 -m unittest scripts/test_contract_parity.py -v
+      - run: cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+      - run: cargo test --manifest-path tools/contract-parity/Cargo.toml
+      - run: cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --
       - run: python3 -m unittest scripts/test_schema_convergence.py -v
       - run: python3 -m unittest scripts/test_cross_translation.py -v
-      - run: python3 scripts/check_contract_parity.py
       - run: python3 scripts/cross_translate.py
       - run: python3 scripts/check_zpkg.py
       - run: npx tsp compile contracts/docs-serving.tsp --no-emit
@@ -60,6 +65,8 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt
       - run: rustfmt --edition 2024 --check src/rust/src/docs_serving.rs
+      - run: cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+      - run: cargo test --manifest-path tools/contract-parity/Cargo.toml
       - run: cargo test --manifest-path src/rust/Cargo.toml --all-features
       - run: cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck | jq -e '.language == "rust"'
 
