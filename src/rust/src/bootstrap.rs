@@ -1,8 +1,13 @@
 use std::{env, fmt, str::FromStr};
 
 use crate::{
-    default_config, validate_config, MiddlewareConfig, MiddlewareStack, RuntimeEnvironment,
-    ValidationIssue,
+    default_config,
+    rate_limit::{
+        RateLimitAlgorithm, RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitLayer,
+        RateLimitSignal,
+    },
+    validate_config, IntegrationError, MiddlewareConfig, MiddlewareStack,
+    RuntimeEnvironment, ValidationIssue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +42,14 @@ impl BootstrapError {
             message,
         }
     }
+
+    fn integration(variable: impl Into<String>, error: IntegrationError) -> Self {
+        Self {
+            variable: Some(variable.into()),
+            code: error.code,
+            message: error.message,
+        }
+    }
 }
 
 impl fmt::Display for BootstrapError {
@@ -60,7 +73,27 @@ pub fn stack_from_env(
     service_name: impl Into<String>,
 ) -> Result<MiddlewareStack, BootstrapError> {
     let config = config_from_env(service_name)?;
-    MiddlewareStack::new(config).map_err(BootstrapError::config)
+    let external_hmac = config.settings.rate_limit.enabled
+        && matches!(
+            config.settings.rate_limit.key_derivation,
+            RateLimitKeyDerivationMode::ExternalHmacSha256
+        );
+    let stack = MiddlewareStack::new(config).map_err(BootstrapError::config)?;
+    if !external_hmac {
+        return Ok(stack);
+    }
+
+    let variable = "ORES_MIDDLEWARE_RATE_LIMIT_HMAC_SECRET";
+    let secret = env::var(variable).map_err(|_| {
+        BootstrapError::variable(
+            variable,
+            "required_for_external_hmac",
+            "external rate-limit key derivation requires a secret-store-backed HMAC key",
+        )
+    })?;
+    stack
+        .with_rate_limit_hmac_key(secret.as_bytes())
+        .map_err(|error| BootstrapError::integration(variable, error))
 }
 
 fn config_from_lookup<F>(
@@ -78,6 +111,11 @@ where
     )
     .unwrap_or_else(|| "development".to_owned());
     config.environment = parse_environment(&environment_value)?;
+    if matches!(config.environment, RuntimeEnvironment::Production) {
+        config.settings.rate_limit.key_derivation =
+            RateLimitKeyDerivationMode::ExternalHmacSha256;
+        config.settings.rate_limit.failure_mode = RateLimitFailureMode::FailClosed;
+    }
 
     let tls_mode = lookup("ORES_MIDDLEWARE_TLS_MODE");
     match tls_mode.as_deref().map(normalize) {
@@ -156,6 +194,58 @@ where
             "ORES_MIDDLEWARE_RATE_LIMIT_REFILL_PER_SECOND",
         )?;
     }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_POLICY_ID") {
+        config.settings.rate_limit.policy_id =
+            parse_non_empty(&value, "ORES_MIDDLEWARE_RATE_LIMIT_POLICY_ID")?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM") {
+        config.settings.rate_limit.algorithm =
+            parse_rate_limit_algorithm(&value, "ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM")?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_LAYER") {
+        config.settings.rate_limit.layer =
+            parse_rate_limit_layer(&value, "ORES_MIDDLEWARE_RATE_LIMIT_LAYER")?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE") {
+        config.settings.rate_limit.failure_mode = parse_rate_limit_failure_mode(
+            &value,
+            "ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE",
+        )?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_WINDOW_MS") {
+        config.settings.rate_limit.window_ms =
+            parse_number(&value, "ORES_MIDDLEWARE_RATE_LIMIT_WINDOW_MS")?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES") {
+        config.settings.rate_limit.local_cache_max_entries = parse_number(
+            &value,
+            "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES",
+        )?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS") {
+        config.settings.rate_limit.local_cache_ttl_ms = parse_number(
+            &value,
+            "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS",
+        )?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_NAMESPACE") {
+        config.settings.rate_limit.key_namespace =
+            parse_non_empty(&value, "ORES_MIDDLEWARE_RATE_LIMIT_KEY_NAMESPACE")?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_VERSION") {
+        config.settings.rate_limit.key_version =
+            parse_non_empty(&value, "ORES_MIDDLEWARE_RATE_LIMIT_KEY_VERSION")?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION") {
+        config.settings.rate_limit.key_derivation = parse_rate_limit_key_derivation(
+            &value,
+            "ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION",
+        )?;
+    }
+    if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY") {
+        config.settings.rate_limit.key_by =
+            parse_rate_limit_signals(&value, "ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY")?;
+    }
     if let Some(value) = lookup("ORES_MIDDLEWARE_CONTEXT_REGISTRY_MAX_ENTRIES") {
         config.settings.context_registry_max_entries = parse_number(
             &value,
@@ -185,7 +275,7 @@ where
 }
 
 fn parse_environment(value: &str) -> Result<RuntimeEnvironment, BootstrapError> {
-    match normalize(value) {
+    match normalized_owned(value).as_str() {
         "development" | "dev" | "local" => Ok(RuntimeEnvironment::Development),
         "test" | "testing" => Ok(RuntimeEnvironment::Test),
         "staging" | "stage" => Ok(RuntimeEnvironment::Staging),
@@ -199,7 +289,7 @@ fn parse_environment(value: &str) -> Result<RuntimeEnvironment, BootstrapError> 
 }
 
 fn parse_bool(value: &str, variable: &str) -> Result<bool, BootstrapError> {
-    match normalize(value) {
+    match normalized_owned(value).as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),
         other => Err(BootstrapError::variable(
@@ -233,6 +323,127 @@ fn parse_float(value: &str, variable: &str) -> Result<f64, BootstrapError> {
     })
 }
 
+fn parse_non_empty(value: &str, variable: &str) -> Result<String, BootstrapError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(BootstrapError::variable(
+            variable,
+            "empty_value",
+            "value must not be empty",
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn parse_rate_limit_algorithm(
+    value: &str,
+    variable: &str,
+) -> Result<RateLimitAlgorithm, BootstrapError> {
+    match normalized_owned(value).as_str() {
+        "token-bucket" | "token_bucket" | "tokenbucket" => {
+            Ok(RateLimitAlgorithm::TokenBucket)
+        }
+        "sliding-window-counter" | "sliding_window_counter" => {
+            Ok(RateLimitAlgorithm::SlidingWindowCounter)
+        }
+        "fixed-window" | "fixed_window" => Ok(RateLimitAlgorithm::FixedWindow),
+        "concurrency" | "concurrency-limit" => Ok(RateLimitAlgorithm::Concurrency),
+        other => Err(invalid_rate_limit_value(variable, other)),
+    }
+}
+
+fn parse_rate_limit_layer(
+    value: &str,
+    variable: &str,
+) -> Result<RateLimitLayer, BootstrapError> {
+    match normalized_owned(value).as_str() {
+        "cloudflare-edge" | "cloudflare" | "edge" => Ok(RateLimitLayer::CloudflareEdge),
+        "kubernetes-ingress" | "k8s-ingress" | "ingress" => {
+            Ok(RateLimitLayer::KubernetesIngress)
+        }
+        "service-mesh" | "mesh" | "sidecar" => Ok(RateLimitLayer::ServiceMesh),
+        "application" | "app" => Ok(RateLimitLayer::Application),
+        "authorization" | "auth" => Ok(RateLimitLayer::Authorization),
+        other => Err(invalid_rate_limit_value(variable, other)),
+    }
+}
+
+fn parse_rate_limit_failure_mode(
+    value: &str,
+    variable: &str,
+) -> Result<RateLimitFailureMode, BootstrapError> {
+    match normalized_owned(value).as_str() {
+        "fail-open" | "fail_open" => Ok(RateLimitFailureMode::FailOpen),
+        "fail-closed" | "fail_closed" => Ok(RateLimitFailureMode::FailClosed),
+        "local-only" | "local_only" | "local-fallback" => {
+            Ok(RateLimitFailureMode::LocalOnly)
+        }
+        other => Err(invalid_rate_limit_value(variable, other)),
+    }
+}
+
+fn parse_rate_limit_key_derivation(
+    value: &str,
+    variable: &str,
+) -> Result<RateLimitKeyDerivationMode, BootstrapError> {
+    match normalized_owned(value).as_str() {
+        "ephemeral-hmac-sha256" | "ephemeral" => {
+            Ok(RateLimitKeyDerivationMode::EphemeralHmacSha256)
+        }
+        "external-hmac-sha256" | "external" => {
+            Ok(RateLimitKeyDerivationMode::ExternalHmacSha256)
+        }
+        other => Err(invalid_rate_limit_value(variable, other)),
+    }
+}
+
+fn parse_rate_limit_signals(
+    value: &str,
+    variable: &str,
+) -> Result<Vec<RateLimitSignal>, BootstrapError> {
+    let values = split_csv(value);
+    if values.is_empty() {
+        return Err(BootstrapError::variable(
+            variable,
+            "empty_value",
+            "at least one rate-limit signal is required",
+        ));
+    }
+    values
+        .iter()
+        .map(|value| parse_rate_limit_signal(value, variable))
+        .collect()
+}
+
+fn parse_rate_limit_signal(
+    value: &str,
+    variable: &str,
+) -> Result<RateLimitSignal, BootstrapError> {
+    match normalized_owned(value).as_str() {
+        "ip" => Ok(RateLimitSignal::Ip),
+        "ip-prefix" | "ip_prefix" => Ok(RateLimitSignal::IpPrefix),
+        "user" => Ok(RateLimitSignal::User),
+        "subject" | "sub" => Ok(RateLimitSignal::Subject),
+        "email" => Ok(RateLimitSignal::Email),
+        "tenant" => Ok(RateLimitSignal::Tenant),
+        "organization" | "org" => Ok(RateLimitSignal::Organization),
+        "session" | "sid" => Ok(RateLimitSignal::Session),
+        "device" => Ok(RateLimitSignal::Device),
+        "api-key" | "api_key" | "client" => Ok(RateLimitSignal::ApiKey),
+        "route" => Ok(RateLimitSignal::Route),
+        "method" => Ok(RateLimitSignal::Method),
+        other => Err(invalid_rate_limit_value(variable, other)),
+    }
+}
+
+fn invalid_rate_limit_value(variable: &str, value: &str) -> BootstrapError {
+    BootstrapError::variable(
+        variable,
+        "invalid_value",
+        format!("unsupported rate-limit value {value:?}"),
+    )
+}
+
 fn split_csv(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -244,6 +455,10 @@ fn split_csv(value: &str) -> Vec<String> {
 
 fn normalize(value: &str) -> &str {
     value.trim()
+}
+
+fn normalized_owned(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -308,5 +523,48 @@ mod tests {
         assert_eq!(config.settings.timeout_ms, 7_500);
         assert_eq!(config.settings.max_body_bytes, 1_048_576);
         assert!(!config.settings.rate_limit.enabled);
+    }
+
+    #[test]
+    fn parses_layered_rate_limit_policy() {
+        let config = from(&[
+            ("ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM", "sliding-window-counter"),
+            ("ORES_MIDDLEWARE_RATE_LIMIT_LAYER", "service-mesh"),
+            ("ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE", "fail-closed"),
+            (
+                "ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY",
+                "subject,organization,route,method",
+            ),
+            ("ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES", "5000"),
+            ("ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION", "external"),
+        ])
+        .unwrap();
+        assert!(matches!(
+            config.settings.rate_limit.algorithm,
+            RateLimitAlgorithm::SlidingWindowCounter
+        ));
+        assert!(matches!(
+            config.settings.rate_limit.layer,
+            RateLimitLayer::ServiceMesh
+        ));
+        assert_eq!(config.settings.rate_limit.key_by.len(), 4);
+        assert_eq!(config.settings.rate_limit.local_cache_max_entries, 5_000);
+    }
+
+    #[test]
+    fn production_defaults_to_external_hmac_and_fail_closed() {
+        let config = from(&[
+            ("ORES_MIDDLEWARE_ENV", "production"),
+            ("ORES_MIDDLEWARE_TLS_MODE", "in-process"),
+        ])
+        .unwrap();
+        assert!(matches!(
+            config.settings.rate_limit.key_derivation,
+            RateLimitKeyDerivationMode::ExternalHmacSha256
+        ));
+        assert!(matches!(
+            config.settings.rate_limit.failure_mode,
+            RateLimitFailureMode::FailClosed
+        ));
     }
 }
