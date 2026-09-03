@@ -8,6 +8,7 @@ pub mod docs_serving;
 pub mod frameworks;
 mod integrations;
 mod net;
+pub mod otel;
 mod pipeline;
 
 use std::collections::BTreeMap;
@@ -23,6 +24,7 @@ pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
 };
+pub use otel::{run_with_ores_log_context, to_ores_log_context, RequestLogger};
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 
 pub const CONTRACT_VERSION: &str = "1.0.0";

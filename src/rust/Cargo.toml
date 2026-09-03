@@ -18,6 +18,7 @@ dioxus = ["axum"]
 axum = { version = "0.8", optional = true }
 futures-util = "0.3"
 http = "1"
+next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log.git", rev = "b55271c047be761c4711d87cbd500a49eefda3d9" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

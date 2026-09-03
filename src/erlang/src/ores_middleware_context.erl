@@ -24,7 +24,11 @@ run(Context, Fun) when is_function(Fun, 0) ->
     PreviousContext = current(),
     PreviousMetadata = logger:get_process_metadata(),
     put(Context),
-    try Fun()
+    try
+        next_loggers:with_context(
+            ores_middleware_otel:to_log_context(Context),
+            Fun
+        )
     after
         restore_context(PreviousContext),
         restore_metadata(PreviousMetadata)

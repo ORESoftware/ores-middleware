@@ -2,17 +2,25 @@ defmodule OresMiddleware.Stack do
   @moduledoc false
   require Logger
 
-  defstruct [:config, :hooks]
+  defstruct [:config, :hooks, :logger]
 
-  def new(config, hooks \\ %{}) do
+  def new(config, hooks \\ %{}, logger \\ nil) do
     case OresMiddleware.Config.validate(config) do
-      [] -> {:ok, %__MODULE__{config: config, hooks: Map.merge(default_hooks(), Map.new(hooks))}}
-      issues -> {:error, issues}
+      [] ->
+        {:ok,
+         %__MODULE__{
+           config: config,
+           hooks: Map.merge(default_hooks(), Map.new(hooks)),
+           logger: logger
+         }}
+
+      issues ->
+        {:error, issues}
     end
   end
 
-  def new!(config, hooks \\ %{}) do
-    case new(config, hooks) do
+  def new!(config, hooks \\ %{}, logger \\ nil) do
+    case new(config, hooks, logger) do
       {:ok, stack} -> stack
       {:error, issues} -> raise ArgumentError, "invalid middleware configuration: #{inspect(issues)}"
     end
