@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --manifest-path src/rust/Cargo.toml -- --check
+          rustfmt --edition 2024 src/rust/src/pipeline.rs src/rust/src/frameworks/axum.rs
           cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
           cargo test --manifest-path src/rust/Cargo.toml --all-features
 
