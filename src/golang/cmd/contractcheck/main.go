@@ -9,5 +9,7 @@ import (
 
 func main() {
 	encoder := json.NewEncoder(os.Stdout)
-	if err := encoder.Encode(oresmiddleware.Descriptor()); err != nil { panic(err) }
+	if err := encoder.Encode(oresmiddleware.Descriptor()); err != nil {
+		panic(err)
+	}
 }

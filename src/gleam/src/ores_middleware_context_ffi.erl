@@ -43,6 +43,6 @@ run_with_deadline(Fun, TimeoutMs, Context) ->
     end.
 
 system_time_ms() -> erlang:system_time(millisecond).
-new_id() -> string:lowercase(binary:encode_hex(crypto:strong_rand_bytes(16))).
+new_id() -> binary:encode_hex(crypto:strong_rand_bytes(16), lowercase).
 random_float() -> rand:uniform().
 sleep(Milliseconds) -> timer:sleep(Milliseconds), nil.

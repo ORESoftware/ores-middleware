@@ -110,7 +110,7 @@ run(Config, Hooks, Request, Next) when is_function(Next, 1) ->
         {cached, Response} -> Response;
         {ok, Context, IdempotencyKey} ->
             Started = erlang:monotonic_time(millisecond),
-            maps:get(telemetry_started, Hooks)(Context, Request),
+            (maps:get(telemetry_started, Hooks))(Context, Request),
             Response0 = run_handler(Next, Request, Context, maps:get(timeout_ms, maps:get(settings, Config))),
             finish(Config, Hooks, Context, Request, Response0, #{started => Started, idempotency_key => IdempotencyKey})
     end.
@@ -136,7 +136,7 @@ prepare_accept(Config, Hooks, Request, Headers) ->
 prepare_transport(Config, Hooks, Request, Headers) ->
     Settings = maps:get(settings, Config),
     Tls = maps:get(tls, Settings),
-    Trusted = maps:get(trusted_proxy, Hooks)(Request, maps:get(trusted_proxy_cidrs, Tls)),
+    Trusted = (maps:get(trusted_proxy, Hooks))(Request, maps:get(trusted_proxy_cidrs, Tls)),
     Forwarded = maps:get(<<"x-forwarded-proto">>, Headers, undefined),
     Scheme = maps:get(scheme, Request, <<"http">>),
     case maps:get(strict_forwarded_headers, Tls) andalso Forwarded =/= undefined andalso not Trusted of
@@ -155,7 +155,7 @@ prepare_context(Config, Hooks, Request, Headers) ->
     RequestId = token_or_new(maps:get(maps:get(request_id_header, Settings), Headers, undefined)),
     TraceId = trace_or_new(maps:get(maps:get(trace_header, Settings), Headers, undefined)),
     Context0 = #{request_id => RequestId, trace_id => TraceId, tenant_id => undefined, user_id => undefined, locale => maps:get(<<"accept-language">>, Headers, undefined), started_at_unix_ms => Now, deadline_unix_ms => Now + maps:get(timeout_ms, Settings), baggage => #{}},
-    case maps:get(authorize_ip, Hooks)(Request, Context0) of
+    case (maps:get(authorize_ip, Hooks))(Request, Context0) of
         false -> {error, problem(403, <<"ip_policy_denied">>, <<"request source is not permitted">>)};
         true -> prepare_auth(Config, Hooks, Request, Context0, Headers)
     end.
@@ -166,9 +166,9 @@ prepare_auth(Config, Hooks, Request, Context0, Headers) ->
     Bypass = maps:get(enabled, BypassPolicy) andalso maps:get(maps:get(header_name, BypassPolicy), Headers, undefined) =:= <<"true">>,
     Environment = maps:get(environment, Config),
     Decision = case Bypass of
-        true when Environment =:= test; Environment =:= staging -> maps:get(resolve_test_identity, Hooks)(Request, Context0);
+        true when Environment =:= test; Environment =:= staging -> (maps:get(resolve_test_identity, Hooks))(Request, Context0);
         true -> {error, production_forbidden};
-        false -> maps:get(authenticate, Hooks)(Request, Context0)
+        false -> (maps:get(authenticate, Hooks))(Request, Context0)
     end,
     case Decision of
         {error, _Reason} -> {error, problem(401, <<"authentication_failed">>, <<"authentication failed">>)};
@@ -185,7 +185,7 @@ prepare_rate(Config, Hooks, Request, Context) ->
     Settings = maps:get(settings, Config),
     Policy = maps:get(rate_limit, Settings),
     Key = iolist_to_binary(lists:join(<<":">>, [value(maps:get(tenant_id, Context)), value(maps:get(user_id, Context)), value(maps:get(remote_ip, Request, undefined)), maps:get(path, Request)])),
-    case maps:get(enabled, Policy) andalso not maps:get(rate_limit, Hooks)(Key, maps:get(capacity, Policy), maps:get(refill_per_second, Policy)) of
+    case maps:get(enabled, Policy) andalso not (maps:get(rate_limit, Hooks))(Key, maps:get(capacity, Policy), maps:get(refill_per_second, Policy)) of
         true -> {error, problem(429, <<"rate_limited">>, <<"rate limit exceeded">>)};
         false -> prepare_fault(Config, Hooks, Request, Context)
     end.
@@ -216,7 +216,7 @@ prepare_idempotency(Config, Hooks, Request, Context) ->
         false -> ores_middleware_context:put(Context), {ok, Context, undefined};
         true ->
             Key = iolist_to_binary([Method, <<":">>, maps:get(path, Request), <<":">>, HeaderValue]),
-            case maps:get(idempotency_get, Hooks)(Key) of
+            case (maps:get(idempotency_get, Hooks))(Key) of
                 {ok, Response} -> {cached, Response};
                 _ -> ores_middleware_context:put(Context), {ok, Context, Key}
             end
@@ -245,19 +245,19 @@ finish(Config, Hooks, Context, Request, Response0, Meta) ->
     Response2 = attach_security(Settings, Context, Response1),
     Response3 = maybe_compress(Settings, Request, Response2),
     Duration = erlang:monotonic_time(millisecond) - maps:get(started, Meta),
-    maps:get(schema_capture, Hooks)(Request, Response3),
+    (maps:get(schema_capture, Hooks))(Request, Response3),
     OptoSync = maps:get(opto_sync, maps:get(integrations, Config)),
-    Response4 = case maps:get(sync_observe, Hooks)(Context, Request, Response3, Duration) of
+    Response4 = case (maps:get(sync_observe, Hooks))(Context, Request, Response3, Duration) of
         ok -> Response3;
         {error, _} -> case maps:get(fail_open, OptoSync) of true -> Response3; false -> problem(503, <<"sync_observer_failed">>, <<"opto-sync observation failed">>) end
     end,
     IdempotencyKey = maps:get(idempotency_key, Meta, undefined),
     Status = maps:get(status, Response4),
     case IdempotencyKey =/= undefined andalso Status >= 200 andalso Status < 300 of
-        true -> Policy = maps:get(idempotency, Settings), maps:get(idempotency_put, Hooks)(IdempotencyKey, Response4, maps:get(ttl_seconds, Policy));
+        true -> Policy = maps:get(idempotency, Settings), (maps:get(idempotency_put, Hooks))(IdempotencyKey, Response4, maps:get(ttl_seconds, Policy));
         false -> ok
     end,
-    maps:get(telemetry_finished, Hooks)(Context, Request, Response4, Duration),
+    (maps:get(telemetry_finished, Hooks))(Context, Request, Response4, Duration),
     Response4.
 
 attach_etag(#{method := <<"GET">>, headers := RequestHeaders}, #{status := 200, body := Body, headers := Headers} = Response) when is_binary(Body) ->

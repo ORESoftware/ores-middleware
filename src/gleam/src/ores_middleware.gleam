@@ -83,13 +83,18 @@ pub type RequestContext {
 }
 
 pub type AuthDecision {
-  AuthDecision(user_id: String, tenant_id: String, baggage: Dict(String, String))
+  AuthDecision(
+    user_id: String,
+    tenant_id: String,
+    baggage: Dict(String, String),
+  )
 }
 
 pub type Hooks {
   Hooks(
     authenticate: fn(Request, RequestContext) -> Result(AuthDecision, String),
-    resolve_test_identity: fn(Request, RequestContext) -> Result(AuthDecision, String),
+    resolve_test_identity: fn(Request, RequestContext) ->
+      Result(AuthDecision, String),
     authorize_ip: fn(Request, RequestContext) -> Bool,
     rate_limit: fn(Request, RequestContext, Int, Float) -> Bool,
     idempotency_get: fn(String) -> Result(Response, Nil),
@@ -98,7 +103,8 @@ pub type Hooks {
     etag: fn(Request, Response) -> Response,
     telemetry_started: fn(RequestContext, Request) -> Nil,
     telemetry_finished: fn(RequestContext, Request, Response, Int) -> Nil,
-    sync_observe: fn(RequestContext, Request, Response, Int) -> Result(Nil, String),
+    sync_observe: fn(RequestContext, Request, Response, Int) ->
+      Result(Nil, String),
     schema_capture: fn(Request, Response) -> Nil,
   )
 }
@@ -182,7 +188,9 @@ pub fn default_config(service_name: String) -> Config {
 pub fn default_hooks() -> Hooks {
   Hooks(
     authenticate: fn(_, _) { Ok(AuthDecision("", "", dict.new())) },
-    resolve_test_identity: fn(_, _) { Error("test identity resolver is not configured") },
+    resolve_test_identity: fn(_, _) {
+      Error("test identity resolver is not configured")
+    },
     authorize_ip: fn(_, _) { True },
     rate_limit: fn(_, _, _, _) { True },
     idempotency_get: fn(_) { Error(Nil) },
@@ -200,84 +208,189 @@ pub fn validate_config(config: Config) -> List(ValidationIssue) {
   let issues = []
   let issues = case config.contract_version == contract_version {
     True -> issues
-    False -> [ValidationIssue("/contractVersion", "unsupported_version", "expected " <> contract_version), ..issues]
+    False -> [
+      ValidationIssue(
+        "/contractVersion",
+        "unsupported_version",
+        "expected " <> contract_version,
+      ),
+      ..issues
+    ]
   }
   let issues = case config.timeout_ms > 0 {
     True -> issues
-    False -> [ValidationIssue("/timeoutMs", "range", "timeout must be positive"), ..issues]
+    False -> [
+      ValidationIssue("/timeoutMs", "range", "timeout must be positive"),
+      ..issues
+    ]
   }
   let issues = case config.max_body_bytes > 0 {
     True -> issues
-    False -> [ValidationIssue("/maxBodyBytes", "range", "body limit must be positive"), ..issues]
+    False -> [
+      ValidationIssue("/maxBodyBytes", "range", "body limit must be positive"),
+      ..issues
+    ]
   }
-  let issues = case config.rate_limit_enabled && { config.rate_limit_capacity <= 0 || config.rate_limit_refill_per_second <= 0.0 } {
-    True -> [ValidationIssue("/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill"), ..issues]
+  let issues = case
+    config.rate_limit_enabled
+    && {
+      config.rate_limit_capacity <= 0
+      || config.rate_limit_refill_per_second <= 0.0
+    }
+  {
+    True -> [
+      ValidationIssue(
+        "/rateLimit",
+        "invalid_rate_limit",
+        "enabled token bucket requires positive capacity and refill",
+      ),
+      ..issues
+    ]
     False -> issues
   }
-  let issues = case config.fault_error_rate < 0.0 || config.fault_error_rate > 1.0 || config.fault_drop_rate < 0.0 || config.fault_drop_rate > 1.0 {
-    True -> [ValidationIssue("/faultInjection", "range", "fault rates must be within 0..=1"), ..issues]
+  let issues = case
+    config.fault_error_rate < 0.0
+    || config.fault_error_rate > 1.0
+    || config.fault_drop_rate < 0.0
+    || config.fault_drop_rate > 1.0
+  {
+    True -> [
+      ValidationIssue(
+        "/faultInjection",
+        "range",
+        "fault rates must be within 0..=1",
+      ),
+      ..issues
+    ]
     False -> issues
   }
-  let issues = case config.environment == Production && config.fault_injection_enabled {
-    True -> [ValidationIssue("/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production"), ..issues]
+  let issues = case
+    config.environment == Production && config.fault_injection_enabled
+  {
+    True -> [
+      ValidationIssue(
+        "/faultInjection/enabled",
+        "production_forbidden",
+        "fault injection is forbidden in production",
+      ),
+      ..issues
+    ]
     False -> issues
   }
-  let issues = case config.environment == Production && config.test_auth_bypass_enabled {
-    True -> [ValidationIssue("/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production"), ..issues]
+  let issues = case
+    config.environment == Production && config.test_auth_bypass_enabled
+  {
+    True -> [
+      ValidationIssue(
+        "/testAuthBypass/enabled",
+        "production_forbidden",
+        "test auth bypass is forbidden in production",
+      ),
+      ..issues
+    ]
     False -> issues
   }
   let issues = case config.shared_auth_fail_open {
-    True -> [ValidationIssue("/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed"), ..issues]
+    True -> [
+      ValidationIssue(
+        "/sharedAuth/failOpen",
+        "auth_fail_open",
+        "shared-auth must fail closed",
+      ),
+      ..issues
+    ]
     False -> issues
   }
-  let issues = list.fold(config.required_capabilities, issues, fn(issues, capability) {
-    case list.contains(capabilities(), capability) {
-      True -> issues
-      False -> [ValidationIssue("/requiredCapabilities", "unknown_capability", capability), ..issues]
-    }
-  })
+  let issues =
+    list.fold(config.required_capabilities, issues, fn(issues, capability) {
+      case list.contains(capabilities(), capability) {
+        True -> issues
+        False -> [
+          ValidationIssue(
+            "/requiredCapabilities",
+            "unknown_capability",
+            capability,
+          ),
+          ..issues
+        ]
+      }
+    })
   list.reverse(issues)
 }
 
-pub fn create_middleware(config: Config, hooks: Hooks) -> Result(Middleware, List(ValidationIssue)) {
+pub fn create_middleware(
+  config: Config,
+  hooks: Hooks,
+) -> Result(Middleware, List(ValidationIssue)) {
   case validate_config(config) {
     [] -> Ok(fn(request, next) { handle(config, hooks, request, next) })
     issues -> Error(issues)
   }
 }
 
-fn handle(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> Response) -> Response {
+fn handle(
+  config: Config,
+  hooks: Hooks,
+  request: Request,
+  next: fn(Request) -> Response,
+) -> Response {
   case request.body_size > config.max_body_bytes {
-    True -> problem(413, "payload_too_large", "request body exceeds configured limit")
+    True ->
+      problem(413, "payload_too_large", "request body exceeds configured limit")
     False -> handle_transport(config, hooks, request, next)
   }
 }
 
-fn handle_transport(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> Response) -> Response {
+fn handle_transport(
+  config: Config,
+  hooks: Hooks,
+  request: Request,
+  next: fn(Request) -> Response,
+) -> Response {
   case config.require_https && request.scheme != "https" {
     True -> problem(426, "https_required", "HTTPS is required")
     False -> {
       let now = system_time_ms()
-      let context = RequestContext(
-        request_id: value_or_new(header(request.headers, config.request_id_header)),
-        trace_id: value_or_new(trace_id(header(request.headers, config.trace_header))),
-        tenant_id: "",
-        user_id: "",
-        locale: header(request.headers, "accept-language"),
-        started_at_unix_ms: now,
-        deadline_unix_ms: now + config.timeout_ms,
-        baggage: dict.new(),
-      )
+      let context =
+        RequestContext(
+          request_id: value_or_new(header(
+            request.headers,
+            config.request_id_header,
+          )),
+          trace_id: value_or_new(
+            trace_id(header(request.headers, config.trace_header)),
+          ),
+          tenant_id: "",
+          user_id: "",
+          locale: header(request.headers, "accept-language"),
+          started_at_unix_ms: now,
+          deadline_unix_ms: now + config.timeout_ms,
+          baggage: dict.new(),
+        )
       handle_policy(config, hooks, request, next, context)
     }
   }
 }
 
-fn handle_policy(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> Response, context: RequestContext) -> Response {
+fn handle_policy(
+  config: Config,
+  hooks: Hooks,
+  request: Request,
+  next: fn(Request) -> Response,
+  context: RequestContext,
+) -> Response {
   case hooks.authorize_ip(request, context) {
     False -> problem(403, "ip_policy_denied", "request source is not permitted")
     True -> {
-      case config.rate_limit_enabled && !hooks.rate_limit(request, context, config.rate_limit_capacity, config.rate_limit_refill_per_second) {
+      case
+        config.rate_limit_enabled
+        && !hooks.rate_limit(
+          request,
+          context,
+          config.rate_limit_capacity,
+          config.rate_limit_refill_per_second,
+        )
+      {
         True -> problem(429, "rate_limited", "rate limit exceeded")
         False -> authenticate(config, hooks, request, next, context)
       }
@@ -285,67 +398,130 @@ fn handle_policy(config: Config, hooks: Hooks, request: Request, next: fn(Reques
   }
 }
 
-fn authenticate(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> Response, context: RequestContext) -> Response {
-  let bypass_requested = config.test_auth_bypass_enabled && header(request.headers, config.test_auth_bypass_header) == "true"
+fn authenticate(
+  config: Config,
+  hooks: Hooks,
+  request: Request,
+  next: fn(Request) -> Response,
+  context: RequestContext,
+) -> Response {
+  let bypass_requested =
+    config.test_auth_bypass_enabled
+    && header(request.headers, config.test_auth_bypass_header) == "true"
   let decision = case bypass_requested {
-    True -> case config.environment == Test || config.environment == Staging {
-      True -> hooks.resolve_test_identity(request, context)
-      False -> Error("test bypass is forbidden")
-    }
+    True ->
+      case config.environment == Test || config.environment == Staging {
+        True -> hooks.resolve_test_identity(request, context)
+        False -> Error("test bypass is forbidden")
+      }
     False -> hooks.authenticate(request, context)
   }
   case decision {
     Error(_) -> problem(401, "authentication_failed", "authentication failed")
     Ok(auth) -> {
-      let context = RequestContext(..context, user_id: auth.user_id, tenant_id: auth.tenant_id, baggage: auth.baggage)
+      let context =
+        RequestContext(
+          ..context,
+          user_id: auth.user_id,
+          tenant_id: auth.tenant_id,
+          baggage: auth.baggage,
+        )
       case config.shared_auth_mode != Disabled && context.user_id == "" {
-        True -> problem(401, "authentication_required", "shared-auth did not establish a user")
+        True ->
+          problem(
+            401,
+            "authentication_required",
+            "shared-auth did not establish a user",
+          )
         False -> dispatch(config, hooks, request, next, context)
       }
     }
   }
 }
 
-fn dispatch(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> Response, context: RequestContext) -> Response {
+fn dispatch(
+  config: Config,
+  hooks: Hooks,
+  request: Request,
+  next: fn(Request) -> Response,
+  context: RequestContext,
+) -> Response {
   case config.fault_injection_enabled && config.fault_latency_ms > 0 {
     True -> sleep(config.fault_latency_ms)
     False -> Nil
   }
-  case config.fault_injection_enabled && random_float() < config.fault_drop_rate {
+  case
+    config.fault_injection_enabled && random_float() < config.fault_drop_rate
+  {
     True -> problem(503, "fault_drop", "injected transport drop")
-    False -> case config.fault_injection_enabled && random_float() < config.fault_error_rate {
-      True -> problem(500, "fault_error", "injected middleware error")
-      False -> execute(config, hooks, request, next, context)
-    }
+    False ->
+      case
+        config.fault_injection_enabled
+        && random_float() < config.fault_error_rate
+      {
+        True -> problem(500, "fault_error", "injected middleware error")
+        False -> execute(config, hooks, request, next, context)
+      }
   }
 }
 
-fn execute(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> Response, context: RequestContext) -> Response {
+fn execute(
+  config: Config,
+  hooks: Hooks,
+  request: Request,
+  next: fn(Request) -> Response,
+  context: RequestContext,
+) -> Response {
   let idempotency_key = case config.idempotency_enabled {
     True -> header(request.headers, config.idempotency_header)
     False -> ""
   }
-  case idempotency_key != "" && hooks.idempotency_get(idempotency_key) |> result_is_ok {
-    True -> result_value(hooks.idempotency_get(idempotency_key), problem(500, "idempotency_error", "idempotency lookup failed"))
+  let cached = hooks.idempotency_get(idempotency_key)
+  case idempotency_key != "" && result_is_ok(cached) {
+    True ->
+      result_value(
+        cached,
+        problem(500, "idempotency_error", "idempotency lookup failed"),
+      )
     False -> {
       hooks.telemetry_started(context, request)
       let started = system_time_ms()
-      let response = run_with_context(context, fn() { run_with_deadline(fn() { next(request) }, config.timeout_ms, context) })
+      let response =
+        run_with_context(context, fn() {
+          run_with_deadline(fn() { next(request) }, config.timeout_ms, context)
+        })
       let response = case response {
         Ok(response) -> response
-        Error("deadline_exceeded") -> problem(504, "deadline_exceeded", "request deadline exceeded")
+        Error("deadline_exceeded") ->
+          problem(504, "deadline_exceeded", "request deadline exceeded")
         Error(_) -> problem(500, "internal_error", "request handler failed")
       }
       let response = hooks.etag(request, response)
-      let response = case config.compression_enabled { True -> hooks.compress(request, response) False -> response }
+      let response = case config.compression_enabled {
+        True -> hooks.compress(request, response)
+        False -> response
+      }
       let response = attach_headers(config, context, response)
       let duration = system_time_ms() - started
       hooks.schema_capture(request, response)
-      let response = case hooks.sync_observe(context, request, response, duration) {
+      let response = case
+        hooks.sync_observe(context, request, response, duration)
+      {
         Ok(_) -> response
-        Error(_) -> case config.opto_sync_fail_open { True -> response False -> problem(503, "sync_observer_failed", "opto-sync observation failed") }
+        Error(_) ->
+          case config.opto_sync_fail_open {
+            True -> response
+            False ->
+              problem(
+                503,
+                "sync_observer_failed",
+                "opto-sync observation failed",
+              )
+          }
       }
-      case idempotency_key != "" && response.status >= 200 && response.status < 300 {
+      case
+        idempotency_key != "" && response.status >= 200 && response.status < 300
+      {
         True -> hooks.idempotency_put(idempotency_key, response)
         False -> Nil
       }
@@ -355,16 +531,28 @@ fn execute(config: Config, hooks: Hooks, request: Request, next: fn(Request) -> 
   }
 }
 
-fn attach_headers(config: Config, context: RequestContext, response: Response) -> Response {
-  let headers = response.headers
+fn attach_headers(
+  config: Config,
+  context: RequestContext,
+  response: Response,
+) -> Response {
+  let headers =
+    response.headers
     |> dict.insert(config.request_id_header, context.request_id)
-    |> dict.insert("traceparent", "00-" <> context.trace_id <> "-0000000000000000-01")
+    |> dict.insert(
+      "traceparent",
+      "00-" <> context.trace_id <> "-0000000000000000-01",
+    )
   let headers = case config.security_headers_enabled {
-    True -> headers
+    True ->
+      headers
       |> dict.insert("x-content-type-options", "nosniff")
       |> dict.insert("x-frame-options", "DENY")
       |> dict.insert("referrer-policy", "strict-origin-when-cross-origin")
-      |> dict.insert("strict-transport-security", "max-age=31536000; includeSubDomains")
+      |> dict.insert(
+        "strict-transport-security",
+        "max-age=31536000; includeSubDomains",
+      )
     False -> headers
   }
   Response(response.status, headers, response.body)
@@ -373,8 +561,16 @@ fn attach_headers(config: Config, context: RequestContext, response: Response) -
 fn problem(status: Int, code: String, detail: String) -> Response {
   Response(
     status,
-    dict.from_list([["content-type", "application/problem+json"]]),
-    "{\"type\":\"urn:ores:middleware:" <> code <> "\",\"title\":\"" <> code <> "\",\"status\":" <> int_to_string(status) <> ",\"detail\":\"" <> detail <> "\"}",
+    dict.from_list([#("content-type", "application/problem+json")]),
+    "{\"type\":\"urn:ores:middleware:"
+      <> code
+      <> "\",\"title\":\""
+      <> code
+      <> "\",\"status\":"
+      <> int_to_string(status)
+      <> ",\"detail\":\""
+      <> detail
+      <> "\"}",
   )
 }
 
@@ -387,20 +583,47 @@ fn header(headers: Dict(String, String), name: String) -> String {
 
 fn trace_id(value: String) -> String {
   case string.split(value, "-") {
-    [_, trace, ..] -> case string.length(trace) == 32 { True -> trace False -> "" }
+    [_, trace, ..] ->
+      case string.length(trace) == 32 {
+        True -> trace
+        False -> ""
+      }
     _ -> ""
   }
 }
 
-fn value_or_new(value: String) -> String { case value == "" { True -> new_id() False -> value } }
-fn result_is_ok(value: Result(a, b)) -> Bool { case value { Ok(_) -> True Error(_) -> False } }
-fn result_value(value: Result(a, b), fallback: a) -> a { case value { Ok(item) -> item Error(_) -> fallback } }
+fn value_or_new(value: String) -> String {
+  case value == "" {
+    True -> new_id()
+    False -> value
+  }
+}
 
-pub fn run_with_context(context: RequestContext, operation: fn() -> result) -> result {
+fn result_is_ok(value: Result(a, b)) -> Bool {
+  case value {
+    Ok(_) -> True
+    Error(_) -> False
+  }
+}
+
+fn result_value(value: Result(a, b), fallback: a) -> a {
+  case value {
+    Ok(item) -> item
+    Error(_) -> fallback
+  }
+}
+
+pub fn run_with_context(
+  context: RequestContext,
+  operation: fn() -> result,
+) -> result {
   let previous = current_context()
   put_context(context)
   let output = operation()
-  case previous { Ok(value) -> put_context(value) Error(_) -> clear_context() }
+  case previous {
+    Ok(value) -> put_context(value)
+    Error(_) -> clear_context()
+  }
   output
 }
 
@@ -413,13 +636,13 @@ pub fn descriptor() -> AdapterDescriptor {
     framework_adapters: ["gleam-http", "mist", "wisp", "cowboy", "otp"],
     capabilities: capabilities(),
     operation_symbols: dict.from_list([
-      ["descriptor", "descriptor"],
-      ["defaultConfig", "default_config"],
-      ["validateConfig", "validate_config"],
-      ["createMiddleware", "create_middleware"],
-      ["runWithContext", "run_with_context"],
-      ["currentContext", "current_context"],
-      ["capabilities", "capabilities"],
+      #("descriptor", "descriptor"),
+      #("defaultConfig", "default_config"),
+      #("validateConfig", "validate_config"),
+      #("createMiddleware", "create_middleware"),
+      #("runWithContext", "run_with_context"),
+      #("currentContext", "current_context"),
+      #("capabilities", "capabilities"),
     ]),
   )
 }
@@ -438,7 +661,11 @@ fn put_context(context: RequestContext) -> Nil
 fn clear_context() -> Nil
 
 @external(erlang, "ores_middleware_context_ffi", "run_with_deadline")
-fn run_with_deadline(operation: fn() -> result, timeout_ms: Int, context: RequestContext) -> Result(result, String)
+fn run_with_deadline(
+  operation: fn() -> result,
+  timeout_ms: Int,
+  context: RequestContext,
+) -> Result(result, String)
 
 @external(erlang, "ores_middleware_context_ffi", "system_time_ms")
 fn system_time_ms() -> Int

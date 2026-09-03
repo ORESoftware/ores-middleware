@@ -50,15 +50,25 @@ func NewContextRegistry(maxEntries int, ttl time.Duration) *ContextRegistry {
 }
 
 func (r *ContextRegistry) Put(value RequestContext) {
-	if r.maxEntries <= 0 { return }
+	if r.maxEntries <= 0 {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
-	for key, entry := range r.entries { if now.Sub(entry.created) > r.ttl { delete(r.entries, key) } }
+	for key, entry := range r.entries {
+		if now.Sub(entry.created) > r.ttl {
+			delete(r.entries, key)
+		}
+	}
 	if len(r.entries) >= r.maxEntries {
 		var oldestKey string
 		var oldest time.Time
-		for key, entry := range r.entries { if oldest.IsZero() || entry.created.Before(oldest) { oldest, oldestKey = entry.created, key } }
+		for key, entry := range r.entries {
+			if oldest.IsZero() || entry.created.Before(oldest) {
+				oldest, oldestKey = entry.created, key
+			}
+		}
 		delete(r.entries, oldestKey)
 	}
 	r.entries[value.RequestID] = registryEntry{context: value, created: now}
@@ -68,10 +78,14 @@ func (r *ContextRegistry) Get(requestID string) (RequestContext, bool) {
 	r.mu.RLock()
 	entry, ok := r.entries[requestID]
 	r.mu.RUnlock()
-	if !ok || time.Since(entry.created) > r.ttl { return RequestContext{}, false }
+	if !ok || time.Since(entry.created) > r.ttl {
+		return RequestContext{}, false
+	}
 	return entry.context, true
 }
 
 func (r *ContextRegistry) Delete(requestID string) {
-	r.mu.Lock(); delete(r.entries, requestID); r.mu.Unlock()
+	r.mu.Lock()
+	delete(r.entries, requestID)
+	r.mu.Unlock()
 }

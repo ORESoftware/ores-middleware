@@ -76,20 +76,20 @@ type TestAuthBypassPolicy struct {
 }
 
 type MiddlewareSettings struct {
-	RequestIDHeader          string               `json:"requestIdHeader"`
-	TraceHeader              string               `json:"traceHeader"`
-	TimeoutMS                int64                `json:"timeoutMs"`
-	MaxBodyBytes             int64                `json:"maxBodyBytes"`
-	ContextRegistryMaxEntries int                 `json:"contextRegistryMaxEntries"`
-	ContextRegistryTTLMS     int64                `json:"contextRegistryTtlMs"`
-	RateLimit                RateLimitPolicy      `json:"rateLimit"`
-	Compression              CompressionPolicy    `json:"compression"`
-	TLS                      TLSPolicy            `json:"tls"`
-	SecurityHeaders          SecurityHeaderPolicy `json:"securityHeaders"`
-	Idempotency              IdempotencyPolicy    `json:"idempotency"`
-	FaultInjection           FaultInjectionPolicy `json:"faultInjection"`
-	TestAuthBypass           TestAuthBypassPolicy `json:"testAuthBypass"`
-	ContentRepresentations   []string             `json:"contentRepresentations"`
+	RequestIDHeader           string               `json:"requestIdHeader"`
+	TraceHeader               string               `json:"traceHeader"`
+	TimeoutMS                 int64                `json:"timeoutMs"`
+	MaxBodyBytes              int64                `json:"maxBodyBytes"`
+	ContextRegistryMaxEntries int                  `json:"contextRegistryMaxEntries"`
+	ContextRegistryTTLMS      int64                `json:"contextRegistryTtlMs"`
+	RateLimit                 RateLimitPolicy      `json:"rateLimit"`
+	Compression               CompressionPolicy    `json:"compression"`
+	TLS                       TLSPolicy            `json:"tls"`
+	SecurityHeaders           SecurityHeaderPolicy `json:"securityHeaders"`
+	Idempotency               IdempotencyPolicy    `json:"idempotency"`
+	FaultInjection            FaultInjectionPolicy `json:"faultInjection"`
+	TestAuthBypass            TestAuthBypassPolicy `json:"testAuthBypass"`
+	ContentRepresentations    []string             `json:"contentRepresentations"`
 }
 
 type SharedAuthIntegration struct {
@@ -137,47 +137,71 @@ type ValidationIssue struct {
 
 type ValidationIssues []ValidationIssue
 
-func (v ValidationIssues) Error() string { return fmt.Sprintf("middleware configuration has %d issue(s)", len(v)) }
+func (v ValidationIssues) Error() string {
+	return fmt.Sprintf("middleware configuration has %d issue(s)", len(v))
+}
 
 func DefaultConfig(serviceName string) Config {
 	return Config{
-		ContractVersion: ContractVersion,
-		Environment: Development,
+		ContractVersion:      ContractVersion,
+		Environment:          Development,
 		RequiredCapabilities: append([]string(nil), Capabilities...),
 		Settings: MiddlewareSettings{
 			RequestIDHeader: "x-request-id", TraceHeader: "traceparent", TimeoutMS: 5_000, MaxBodyBytes: 2 * 1024 * 1024,
 			ContextRegistryMaxEntries: 10_000, ContextRegistryTTLMS: 30_000,
-			RateLimit: RateLimitPolicy{Enabled: true, Capacity: 100, RefillPerSecond: 20, KeyBy: []string{"tenant", "user", "ip", "route"}},
-			Compression: CompressionPolicy{Enabled: true, MinimumBytes: 1_024, Algorithms: []string{"gzip"}},
-			TLS: TLSPolicy{Mode: "trusted-proxy", RequireHTTPS: true, StrictForwardedHeaders: true, TrustedProxyCIDRs: []string{"127.0.0.1/32", "::1/128"}},
-			SecurityHeaders: SecurityHeaderPolicy{Enabled: true, HSTSMaxAgeSeconds: 31_536_000, ContentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'", FrameOptions: "DENY"},
-			Idempotency: IdempotencyPolicy{Enabled: true, HeaderName: "idempotency-key", TTLSeconds: 86_400, RequiredMethods: []string{"POST", "PUT", "PATCH"}},
-			FaultInjection: FaultInjectionPolicy{},
-			TestAuthBypass: TestAuthBypassPolicy{HeaderName: "x-test-auth-bypass", AllowedCIDRs: []string{"127.0.0.1/32", "::1/128"}},
+			RateLimit:              RateLimitPolicy{Enabled: true, Capacity: 100, RefillPerSecond: 20, KeyBy: []string{"tenant", "user", "ip", "route"}},
+			Compression:            CompressionPolicy{Enabled: true, MinimumBytes: 1_024, Algorithms: []string{"gzip"}},
+			TLS:                    TLSPolicy{Mode: "trusted-proxy", RequireHTTPS: true, StrictForwardedHeaders: true, TrustedProxyCIDRs: []string{"127.0.0.1/32", "::1/128"}},
+			SecurityHeaders:        SecurityHeaderPolicy{Enabled: true, HSTSMaxAgeSeconds: 31_536_000, ContentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'", FrameOptions: "DENY"},
+			Idempotency:            IdempotencyPolicy{Enabled: true, HeaderName: "idempotency-key", TTLSeconds: 86_400, RequiredMethods: []string{"POST", "PUT", "PATCH"}},
+			FaultInjection:         FaultInjectionPolicy{},
+			TestAuthBypass:         TestAuthBypassPolicy{HeaderName: "x-test-auth-bypass", AllowedCIDRs: []string{"127.0.0.1/32", "::1/128"}},
 			ContentRepresentations: []string{"application/json", "application/problem+json"},
 		},
 		Integrations: MiddlewareIntegrations{
 			SharedAuth: SharedAuthIntegration{Mode: IntegrationDisabled, FailOpen: false},
-			OptoSync: OptoSyncIntegration{Mode: IntegrationDisabled, FailOpen: true},
-			OresOtel: OresOtelIntegration{Enabled: true, ServiceName: serviceName, Propagators: []string{"tracecontext", "baggage"}},
+			OptoSync:   OptoSyncIntegration{Mode: IntegrationDisabled, FailOpen: true},
+			OresOtel:   OresOtelIntegration{Enabled: true, ServiceName: serviceName, Propagators: []string{"tracecontext", "baggage"}},
 		},
 	}
 }
 
 func ValidateConfig(config Config) ValidationIssues {
 	var issues ValidationIssues
-	add := func(path, code, message string) { issues = append(issues, ValidationIssue{Path: path, Code: code, Message: message}) }
-	if config.ContractVersion != ContractVersion { add("/contractVersion", "unsupported_version", "expected "+ContractVersion) }
-	if config.Settings.TimeoutMS <= 0 { add("/settings/timeoutMs", "range", "timeout must be positive") }
-	if config.Settings.MaxBodyBytes <= 0 { add("/settings/maxBodyBytes", "range", "body limit must be positive") }
-	if config.Settings.RateLimit.Enabled && (config.Settings.RateLimit.Capacity <= 0 || config.Settings.RateLimit.RefillPerSecond <= 0) { add("/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill") }
-	if config.Settings.FaultInjection.ErrorRate < 0 || config.Settings.FaultInjection.ErrorRate > 1 || config.Settings.FaultInjection.DropRate < 0 || config.Settings.FaultInjection.DropRate > 1 { add("/settings/faultInjection", "range", "fault rates must be within 0..=1") }
-	if config.Environment == Production && config.Settings.FaultInjection.Enabled { add("/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production") }
-	if config.Environment == Production && config.Settings.TestAuthBypass.Enabled { add("/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production") }
-	if config.Integrations.SharedAuth.FailOpen { add("/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed") }
-	if config.Settings.TLS.Mode == "trusted-proxy" && len(config.Settings.TLS.TrustedProxyCIDRs) == 0 { add("/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs") }
+	add := func(path, code, message string) {
+		issues = append(issues, ValidationIssue{Path: path, Code: code, Message: message})
+	}
+	if config.ContractVersion != ContractVersion {
+		add("/contractVersion", "unsupported_version", "expected "+ContractVersion)
+	}
+	if config.Settings.TimeoutMS <= 0 {
+		add("/settings/timeoutMs", "range", "timeout must be positive")
+	}
+	if config.Settings.MaxBodyBytes <= 0 {
+		add("/settings/maxBodyBytes", "range", "body limit must be positive")
+	}
+	if config.Settings.RateLimit.Enabled && (config.Settings.RateLimit.Capacity <= 0 || config.Settings.RateLimit.RefillPerSecond <= 0) {
+		add("/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill")
+	}
+	if config.Settings.FaultInjection.ErrorRate < 0 || config.Settings.FaultInjection.ErrorRate > 1 || config.Settings.FaultInjection.DropRate < 0 || config.Settings.FaultInjection.DropRate > 1 {
+		add("/settings/faultInjection", "range", "fault rates must be within 0..=1")
+	}
+	if config.Environment == Production && config.Settings.FaultInjection.Enabled {
+		add("/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production")
+	}
+	if config.Environment == Production && config.Settings.TestAuthBypass.Enabled {
+		add("/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production")
+	}
+	if config.Integrations.SharedAuth.FailOpen {
+		add("/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed")
+	}
+	if config.Settings.TLS.Mode == "trusted-proxy" && len(config.Settings.TLS.TrustedProxyCIDRs) == 0 {
+		add("/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs")
+	}
 	for _, capability := range config.RequiredCapabilities {
-		if !slices.Contains(Capabilities, capability) { add("/requiredCapabilities", "unknown_capability", capability) }
+		if !slices.Contains(Capabilities, capability) {
+			add("/requiredCapabilities", "unknown_capability", capability)
+		}
 	}
 	return issues
 }
