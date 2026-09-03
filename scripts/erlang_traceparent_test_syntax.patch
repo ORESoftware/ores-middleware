@@ -1,0 +1,38 @@
+--- a/src/erlang/test/ores_middleware_traceparent_tests.erl
++++ b/src/erlang/test/ores_middleware_traceparent_tests.erl
+@@ -41,14 +41,16 @@ middleware() ->
+     Middleware.
+ 
+ inbound_parent_is_not_relabelled_as_response_span_test() ->
+-    Response = middleware()(request(?VALID_TRACE_ID), fun(_Request) ->
++    Middleware = middleware(),
++    Response = Middleware(request(?VALID_TRACE_ID), fun(_Request) ->
+         #{status => 204, headers => #{}, body => <<>>}
+     end),
+     ?assertEqual(false, maps:is_key(<<"traceparent">>, maps:get(headers, Response))).
+ 
+ only_valid_tracer_owned_response_traceparent_is_preserved_test() ->
++    Middleware = middleware(),
+     Valid = <<"00-", ?VALID_TRACE_ID/binary, "-", ?VALID_SERVER_SPAN_ID/binary, "-01">>,
+-    ValidResponse = middleware()(request(?VALID_TRACE_ID), fun(_Request) ->
++    ValidResponse = Middleware(request(?VALID_TRACE_ID), fun(_Request) ->
+         #{status => 204, headers => #{<<"traceparent">> => string:uppercase(Valid)}, body => <<>>}
+     end),
+     ?assertEqual(Valid, maps:get(<<"traceparent">>, maps:get(headers, ValidResponse))),
+@@ -56,12 +58,13 @@ only_valid_tracer_owned_response_traceparent_is_preserved_test() ->
+ 
+     Invalid = <<"00-", ?VALID_TRACE_ID/binary, "-0000000000000000-01">>,
+-    InvalidResponse = middleware()(request(?VALID_TRACE_ID), fun(_Request) ->
++    InvalidResponse = Middleware(request(?VALID_TRACE_ID), fun(_Request) ->
+         #{status => 204, headers => #{<<"traceparent">> => Invalid}, body => <<>>}
+     end),
+     ?assertEqual(false, maps:is_key(<<"traceparent">>, maps:get(headers, InvalidResponse))).
+ 
+ all_zero_inbound_trace_id_is_replaced_test() ->
++    Middleware = middleware(),
+     Parent = self(),
+-    Response = middleware()(request(?ZERO_TRACE_ID), fun(_Request) ->
++    Response = Middleware(request(?ZERO_TRACE_ID), fun(_Request) ->
+         Parent ! {observed_trace_id, ores_middleware:current_trace_id()},
+         #{status => 204, headers => #{}, body => <<>>}
+     end),
