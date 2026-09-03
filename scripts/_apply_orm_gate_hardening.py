@@ -47,6 +47,68 @@ def main() -> int:
     gate.write_text(text, encoding="utf-8")
 
 
+def patch_matrix_paths() -> None:
+    gate = Path("scripts/orm_matrix_gate.py")
+    text = gate.read_text(encoding="utf-8")
+    run_anchor = '''def run(
+    root: Path = ROOT,
+'''
+    helper = '''def resolve_cli_path(root: Path, value: Path | None, default: Path) -> Path:
+    """Resolve a CLI evidence path against the selected repository root."""
+    candidate = default if value is None else value
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    return candidate.resolve()
+
+
+'''
+    if helper.strip() not in text:
+        count = text.count(run_anchor)
+        if count != 1:
+            raise RuntimeError(f"expected one ORM matrix run anchor, found {count}")
+        text = text.replace(run_anchor, helper + run_anchor, 1)
+
+    old_run_output = '''    output_root = output_root or root / "target" / "orm-matrix-gate"
+'''
+    new_run_output = '''    output_root = resolve_cli_path(
+        root,
+        output_root,
+        root / "target" / "orm-matrix-gate",
+    )
+'''
+    count = text.count(old_run_output)
+    if count != 1:
+        raise RuntimeError(f"expected one run output-root assignment, found {count}")
+    text = text.replace(old_run_output, new_run_output, 1)
+
+    old_main_output = '''    output_root = args.output_root or root / "target" / "orm-matrix-gate"
+'''
+    new_main_output = '''    output_root = resolve_cli_path(
+        root,
+        args.output_root,
+        root / "target" / "orm-matrix-gate",
+    )
+'''
+    count = text.count(old_main_output)
+    if count != 1:
+        raise RuntimeError(f"expected one CLI output-root assignment, found {count}")
+    text = text.replace(old_main_output, new_main_output, 1)
+
+    old_report = '''    report_path = args.report or output_root / "receipt.json"
+'''
+    new_report = '''    report_path = resolve_cli_path(
+        root,
+        args.report,
+        output_root / "receipt.json",
+    )
+'''
+    count = text.count(old_report)
+    if count != 1:
+        raise RuntimeError(f"expected one report-path assignment, found {count}")
+    text = text.replace(old_report, new_report, 1)
+    gate.write_text(text, encoding="utf-8")
+
+
 def patch_tests() -> None:
     tests = Path("scripts/test_orm_catalog_gate.py")
     text = tests.read_text(encoding="utf-8")
@@ -72,6 +134,42 @@ def patch_tests() -> None:
         text = text.replace(footer, method + footer, 1)
     tests.write_text(text, encoding="utf-8")
 
+    matrix_tests = Path("scripts/test_orm_matrix_gate.py")
+    text = matrix_tests.read_text(encoding="utf-8")
+    import_anchor = '''    render_rust_matrix,
+)
+'''
+    if "    resolve_cli_path,\n" not in text:
+        count = text.count(import_anchor)
+        if count != 1:
+            raise RuntimeError(f"expected one ORM matrix import anchor, found {count}")
+        text = text.replace(
+            import_anchor,
+            '''    render_rust_matrix,
+    resolve_cli_path,
+)
+''',
+            1,
+        )
+    method = '''
+    def test_relative_evidence_paths_are_root_anchored(self) -> None:
+        resolved = resolve_cli_path(
+            self.root,
+            Path("target/relative-evidence"),
+            self.root / "unused",
+        )
+        self.assertEqual(
+            resolved,
+            (self.root / "target/relative-evidence").resolve(),
+        )
+        self.assertTrue(resolved.is_relative_to(self.root.resolve()))
+'''
+    if method.strip() not in text:
+        if footer not in text:
+            raise RuntimeError("missing ORM matrix test footer")
+        text = text.replace(footer, method + footer, 1)
+    matrix_tests.write_text(text, encoding="utf-8")
+
 
 def patch_zpkg_guard() -> None:
     zpkg = Path("scripts/check_zpkg.py")
@@ -90,6 +188,15 @@ def patch_zpkg_guard() -> None:
     ):
         if lane not in matrix_source:
             errors.append(f"four-way ORM matrix must retain lane {lane!r}")
+    for required_text in (
+        "def resolve_cli_path(",
+        "output_root = resolve_cli_path(",
+        "report_path = resolve_cli_path(",
+    ):
+        if required_text not in matrix_source:
+            errors.append(
+                f"ORM matrix must root-anchor relative evidence paths: missing {required_text!r}"
+            )
 
     compatibility_source = (root / "scripts/orm_catalog_gate.py").read_text(
         encoding="utf-8"
@@ -149,7 +256,10 @@ The gate pins and compiles real Diesel and SeaORM implementations, executes all
 four authority/ORM manifests, applies independently generated SQL to separate
 disposable PostgreSQL schemas, and normalizes `pg_catalog` plus
 `information_schema` read-back. It compares ORM semantics within each
-authority, each ORM across authorities, and both database catalogs.
+authority, each ORM across authorities, and both database catalogs. Relative
+CLI evidence paths are resolved against the selected repository root before
+artifacts are hashed, so a valid custom `--output-root` cannot fail only during
+receipt construction.
 
 Any source, generated-code, ORM, SQL, compiler, runtime, or catalog mismatch
 receives a deterministic fingerprint and enters `STOPPED_FOR_EVALUATION`.
@@ -162,6 +272,7 @@ deployment remain blocked. No authority or ORM wins by precedence or fallback.
 
 def main() -> None:
     patch_compatibility_gate()
+    patch_matrix_paths()
     patch_tests()
     patch_zpkg_guard()
     patch_architecture()
