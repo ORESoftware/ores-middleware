@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod bootstrap;
 mod config;
 mod context;
 pub mod frameworks;
@@ -10,6 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub use bootstrap::{config_from_env, stack_from_env, BootstrapError};
 pub use config::{
     default_config, validate_config, MiddlewareConfig, RuntimeEnvironment, ValidationIssue,
 };
