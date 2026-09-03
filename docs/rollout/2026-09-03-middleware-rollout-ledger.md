@@ -88,15 +88,26 @@ These PRs are relevant dependencies or verification layers but are not counted a
 
 ### Private cross-repository dependencies
 
-The following PRs remain fail-closed because GitHub Actions cannot read a required private repository with the repository-scoped `GITHUB_TOKEN`:
+`ORESoftware/ores-middleware` #27 is closed without merge and superseded by draft PR #38. Its complete final history remains reachable as merge ancestry in #38. The semantic replacement preserves the deterministic rate-limit adapter but moves it into an optional standalone Rust integration crate and removes the private Cargo Git transport.
 
-- `ORESoftware/ores-middleware` #27 — `ores-rate-limit/ores-rl-lib-core`
+PR #38 is intentionally blocked until all of these are true on one exact head:
+
+- `ores-rate-limit/ores-rl-lib-core` publishes reviewed `v0.1.0` from exact commit `f66103b6ea619a033fc1750219226d53f461a459`;
+- the middleware commits a real `.zpkg.lock` recording package version, artifact SHA-256, byte size, archive format, source, VCS tag, and VCS commit;
+- CI installs the private package with checksum-verified Zed 0.2.3 using `zed install --frozen --install-mode copy`;
+- the optional adapter and the ordinary middleware crate both compile and pass tests;
+- every other required repository workflow is green and independent review is clean.
+
+The first exact-head replacement run validated the Zed-only source boundary and then stopped with exit code 2 because the lock did not yet exist. Missing lock or release evidence is not converted into success, and no private Git or authenticated URL rewrite is accepted as a fallback.
+
+Other private-dependency blockers remain:
+
 - `usa-acc/usa-acc-admin-api-server.rs` #4 — `usa-acc-lib-core`
 - `scintilla-run/scintilla-api-server.rs` #8 — `shared-auth/shared-auth-clients`
 - `sonus-auris/sonus-auris-api-server.rs` #27 — `shared-auth/shared-auth-clients`
 - `3FA-app/3fa-api-server.rs` #12 — `shared-auth/shared-auth-clients`; this PR is also bootstrap-only and explicitly not mergeable as production work
 
-A credential must be installed through GitHub's encrypted Actions-secret or GitHub-App mechanism. A personal access token must never be committed to a workflow, source file, lockfile, issue, PR body, or log.
+Private package authorization must use an approved repository secret or GitHub App identity at the Zed registry boundary. A personal access token must never be committed to a workflow, source file, lockfile, issue, PR body, or log. A native package manifest must not add a second private Git transport when root `.zpkg.toml` and the frozen Zed lock are the dependency authority.
 
 ### Workflow approval gates
 
