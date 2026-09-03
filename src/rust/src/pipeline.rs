@@ -12,10 +12,15 @@ use crate::{
     context::{ContextRegistry, RequestContext},
     integrations::{
         AnonymousAuth, DynAuthVerifier, DynRateLimiter, DynSyncObserver, DynTelemetrySink,
-        InMemoryTokenBucket, NoopSyncObserver, RequestMetadata, ResponseMetadata,
-        TracingTelemetry,
+        InMemoryTokenBucket, IntegrationError, NoopSyncObserver, RequestMetadata,
+        ResponseMetadata, TracingTelemetry,
     },
     net::cidr_contains,
+    rate_limit::{
+        derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver,
+        RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
+        RateLimitKeyDerivationMode, RateLimitRequest, UnavailableRateLimitKeyDeriver,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +28,23 @@ pub struct MiddlewareError {
     pub status: u16,
     pub code: &'static str,
     pub message: String,
+    pub headers: BTreeMap<String, String>,
+}
+
+impl MiddlewareError {
+    pub fn new(status: u16, code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+            headers: BTreeMap::new(),
+        }
+    }
+
+    fn with_headers(mut self, headers: BTreeMap<String, String>) -> Self {
+        self.headers = headers;
+        self
+    }
 }
 
 pub struct ActiveRequest {
@@ -38,6 +60,8 @@ pub struct MiddlewareStack {
     sync: DynSyncObserver,
     telemetry: DynTelemetrySink,
     rate_limiter: DynRateLimiter,
+    local_rate_limiter: DynRateLimiter,
+    rate_limit_key_deriver: DynRateLimitKeyDeriver,
     registry: ContextRegistry,
 }
 
@@ -51,12 +75,32 @@ impl MiddlewareStack {
             config.settings.context_registry_max_entries,
             Duration::from_millis(config.settings.context_registry_ttl_ms),
         );
+        let policy = &config.settings.rate_limit;
+        let local_rate_limiter: DynRateLimiter = Arc::new(InMemoryTokenBucket::with_bounds(
+            policy.local_cache_max_entries,
+            Duration::from_millis(policy.local_cache_ttl_ms),
+        ));
+        let rate_limit_key_deriver: DynRateLimitKeyDeriver = match policy.key_derivation {
+            RateLimitKeyDerivationMode::EphemeralHmacSha256 => {
+                let mut secret = [0_u8; 32];
+                let first = Uuid::new_v4();
+                let second = Uuid::new_v4();
+                secret[..16].copy_from_slice(first.as_bytes());
+                secret[16..].copy_from_slice(second.as_bytes());
+                Arc::new(HmacSha256KeyDeriver::from_key(secret))
+            }
+            RateLimitKeyDerivationMode::ExternalHmacSha256 => {
+                Arc::new(UnavailableRateLimitKeyDeriver)
+            }
+        };
         Ok(Self {
             config: Arc::new(config),
             auth: Arc::new(AnonymousAuth),
             sync: Arc::new(NoopSyncObserver),
             telemetry: Arc::new(TracingTelemetry),
-            rate_limiter: Arc::new(InMemoryTokenBucket::default()),
+            rate_limiter: local_rate_limiter.clone(),
+            local_rate_limiter,
+            rate_limit_key_deriver,
             registry,
         })
     }
@@ -81,6 +125,19 @@ impl MiddlewareStack {
         self
     }
 
+    pub fn with_rate_limit_key_deriver(mut self, deriver: DynRateLimitKeyDeriver) -> Self {
+        self.rate_limit_key_deriver = deriver;
+        self
+    }
+
+    pub fn with_rate_limit_hmac_key(
+        self,
+        secret: impl AsRef<[u8]>,
+    ) -> Result<Self, IntegrationError> {
+        let deriver = HmacSha256KeyDeriver::new(secret)?;
+        Ok(self.with_rate_limit_key_deriver(Arc::new(deriver)))
+    }
+
     pub fn config(&self) -> &MiddlewareConfig {
         &self.config
     }
@@ -93,11 +150,11 @@ impl MiddlewareStack {
             .content_length
             .is_some_and(|length| length > self.config.settings.max_body_bytes as u64)
         {
-            return Err(MiddlewareError {
-                status: 413,
-                code: "payload_too_large",
-                message: "request body exceeds configured limit".into(),
-            });
+            return Err(MiddlewareError::new(
+                413,
+                "payload_too_large",
+                "request body exceeds configured limit",
+            ));
         }
 
         enforce_transport_policy(&self.config, &request)?;
@@ -127,42 +184,37 @@ impl MiddlewareStack {
             .auth
             .verify(&request)
             .await
-            .map_err(|error| MiddlewareError {
-                status: 401,
-                code: error.code,
-                message: error.message,
-            })?;
-        context.user_id = auth.user_id;
-        context.tenant_id = auth.tenant_id;
-        context
-            .baggage
-            .extend(auth.claims.into_iter().filter(|(key, _)| key.starts_with("otel.")));
+            .map_err(|error| MiddlewareError::new(401, error.code, error.message))?;
+        context.user_id = auth.user_id.clone();
+        context.tenant_id = auth.tenant_id.clone();
+        context.baggage.extend(
+            auth.claims
+                .iter()
+                .filter(|(key, _)| key.starts_with("otel."))
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
 
         if !matches!(
             self.config.integrations.shared_auth.mode,
             IntegrationMode::Disabled
         ) && context.user_id.is_none()
         {
-            return Err(MiddlewareError {
-                status: 401,
-                code: "authentication_required",
-                message: "shared-auth did not establish a user".into(),
-            });
+            return Err(MiddlewareError::new(
+                401,
+                "authentication_required",
+                "shared-auth did not establish a user",
+            ));
         }
 
         if self.config.settings.rate_limit.enabled {
-            let key = rate_limit_key(&context, &request);
-            let policy = &self.config.settings.rate_limit;
-            if !self
-                .rate_limiter
-                .allow(&key, policy.capacity, policy.refill_per_second)
-                .await
-            {
-                return Err(MiddlewareError {
-                    status: 429,
-                    code: "rate_limited",
-                    message: "rate limit exceeded".into(),
-                });
+            let decision = self
+                .evaluate_rate_limit(&context, &request, &auth)
+                .await;
+            self.telemetry
+                .rate_limit_decision(&context, &request, &decision)
+                .await;
+            if !decision.is_allowed() {
+                return Err(rate_limit_error(&decision));
             }
         }
 
@@ -182,6 +234,71 @@ impl MiddlewareStack {
             started: Instant::now(),
             request,
         })
+    }
+
+    async fn evaluate_rate_limit(
+        &self,
+        context: &RequestContext,
+        request: &RequestMetadata,
+        auth: &crate::integrations::AuthDecision,
+    ) -> RateLimitDecision {
+        let policy = &self.config.settings.rate_limit;
+        let principal = derive_rate_limit_principal(
+            self.rate_limit_key_deriver.as_ref(),
+            &policy.key_namespace,
+            &policy.key_version,
+            &policy.key_by,
+            context,
+            request,
+            auth,
+            effective_client_ip(&self.config, request).as_deref(),
+        );
+
+        let principal = match principal {
+            Ok(principal) => principal,
+            Err(error) => {
+                return decision_for_failure(
+                    policy,
+                    matches!(policy.failure_mode, RateLimitFailureMode::FailOpen),
+                    error.code,
+                );
+            }
+        };
+
+        let evaluation = RateLimitRequest {
+            principal,
+            policy_id: policy.policy_id.clone(),
+            algorithm: policy.algorithm,
+            layer: policy.layer,
+            capacity: policy.capacity,
+            refill_per_second: policy.refill_per_second,
+            window_ms: policy.window_ms,
+            cost: 1,
+        };
+
+        match self.rate_limiter.evaluate(&evaluation).await {
+            Ok(decision) => decision,
+            Err(error) => match policy.failure_mode {
+                RateLimitFailureMode::FailOpen => decision_for_failure(policy, true, error.code),
+                RateLimitFailureMode::FailClosed => {
+                    decision_for_failure(policy, false, error.code)
+                }
+                RateLimitFailureMode::LocalOnly => {
+                    match self.local_rate_limiter.evaluate(&evaluation).await {
+                        Ok(mut decision) => {
+                            if decision.is_allowed() {
+                                decision.kind = RateLimitDecisionKind::DegradedAllowed;
+                            }
+                            decision.reason_code = Some(error.code.into());
+                            decision
+                        }
+                        Err(local_error) => {
+                            decision_for_failure(policy, false, local_error.code)
+                        }
+                    }
+                }
+            },
+        }
     }
 
     pub async fn finish(
@@ -252,6 +369,80 @@ impl MiddlewareStack {
     }
 }
 
+fn decision_for_failure(
+    policy: &crate::config::RateLimitPolicy,
+    allowed: bool,
+    reason_code: &'static str,
+) -> RateLimitDecision {
+    RateLimitDecision {
+        kind: if allowed {
+            RateLimitDecisionKind::DegradedAllowed
+        } else {
+            RateLimitDecisionKind::DegradedDenied
+        },
+        source: RateLimitDecisionSource::Unknown,
+        policy_id: policy.policy_id.clone(),
+        layer: policy.layer,
+        algorithm: policy.algorithm,
+        limit: policy.capacity,
+        remaining: 0,
+        retry_after_ms: (!allowed).then_some(1_000),
+        reset_after_ms: None,
+        reason_code: Some(reason_code.into()),
+    }
+}
+
+fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
+    let degraded = matches!(decision.kind, RateLimitDecisionKind::DegradedDenied);
+    let status = if degraded { 503 } else { 429 };
+    let code = if degraded {
+        "rate_limit_unavailable"
+    } else {
+        "rate_limited"
+    };
+    let message = if degraded {
+        "rate-limit enforcement is temporarily unavailable"
+    } else {
+        "rate limit exceeded"
+    };
+
+    let mut headers = BTreeMap::new();
+    headers.insert("ratelimit-limit".into(), decision.limit.to_string());
+    headers.insert(
+        "ratelimit-remaining".into(),
+        decision.remaining.to_string(),
+    );
+    if let Some(reset_after_ms) = decision.reset_after_ms {
+        headers.insert(
+            "ratelimit-reset".into(),
+            seconds_ceil(reset_after_ms).to_string(),
+        );
+    }
+    let retry_after_ms = decision.retry_after_ms.unwrap_or(1_000);
+    headers.insert(
+        "retry-after".into(),
+        seconds_ceil(retry_after_ms).to_string(),
+    );
+    headers.insert(
+        "x-ores-rate-limit-policy".into(),
+        decision.policy_id.clone(),
+    );
+    headers.insert(
+        "x-ores-rate-limit-layer".into(),
+        decision.layer.as_str().into(),
+    );
+    headers.insert(
+        "x-ores-rate-limit-decision".into(),
+        decision.kind.as_str().into(),
+    );
+
+    MiddlewareError::new(status, code, message).with_headers(headers)
+}
+
+const fn seconds_ceil(milliseconds: u64) -> u64 {
+    milliseconds.saturating_add(999) / 1_000
+}
+
 fn enforce_transport_policy(
     config: &MiddlewareConfig,
     request: &RequestMetadata,
@@ -267,17 +458,20 @@ fn enforce_transport_policy(
         request.remote_ip.as_deref(),
         &tls.trusted_proxy_cidrs,
     );
+    let has_forwarded_identity = request.headers.contains_key("x-forwarded-for")
+        || request.headers.contains_key("cf-connecting-ip")
+        || request.headers.contains_key("forwarded");
 
     if tls.mode == "trusted-proxy"
         && tls.strict_forwarded_headers
-        && forwarded.is_some()
+        && (forwarded.is_some() || has_forwarded_identity)
         && !trusted_proxy
     {
-        return Err(MiddlewareError {
-            status: 400,
-            code: "untrusted_forwarded_header",
-            message: "forwarded transport headers came from an untrusted peer".into(),
-        });
+        return Err(MiddlewareError::new(
+            400,
+            "untrusted_forwarded_header",
+            "forwarded transport or client headers came from an untrusted peer",
+        ));
     }
 
     let secure = request.transport_secure
@@ -286,14 +480,43 @@ fn enforce_transport_policy(
             && forwarded.as_deref() == Some("https"));
 
     if tls.require_https && !secure {
-        return Err(MiddlewareError {
-            status: 426,
-            code: "https_required",
-            message: "HTTPS is required".into(),
-        });
+        return Err(MiddlewareError::new(
+            426,
+            "https_required",
+            "HTTPS is required",
+        ));
     }
 
     Ok(())
+}
+
+fn effective_client_ip(config: &MiddlewareConfig, request: &RequestMetadata) -> Option<String> {
+    let trusted_proxy = peer_is_trusted(
+        request.remote_ip.as_deref(),
+        &config.settings.tls.trusted_proxy_cidrs,
+    );
+    if trusted_proxy {
+        let forwarded = request
+            .headers
+            .get("cf-connecting-ip")
+            .map(String::as_str)
+            .or_else(|| {
+                request
+                    .headers
+                    .get("x-forwarded-for")
+                    .and_then(|value| value.split(',').next())
+            })
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(ip) = forwarded.and_then(|value| value.parse::<IpAddr>().ok()) {
+            return Some(ip.to_string());
+        }
+    }
+    request
+        .remote_ip
+        .as_deref()
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .map(|ip| ip.to_string())
 }
 
 fn peer_is_trusted(remote_ip: Option<&str>, cidrs: &[String]) -> bool {
@@ -320,22 +543,22 @@ fn parse_trace_id(header: Option<&String>) -> Option<String> {
         .then(|| trace_id.to_ascii_lowercase())
 }
 
-fn rate_limit_key(context: &RequestContext, request: &RequestMetadata) -> String {
-    format!(
-        "{}:{}:{}:{}",
-        context.tenant_id.as_deref().unwrap_or("_"),
-        context.user_id.as_deref().unwrap_or("_"),
-        request.remote_ip.as_deref().unwrap_or("_"),
-        request.path
-    )
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::default_config;
+    use std::{future::Future, pin::Pin};
 
-    fn request(remote_ip: &str, forwarded_proto: Option<&str>, transport_secure: bool) -> RequestMetadata {
+    use super::*;
+    use crate::{
+        default_config,
+        integrations::RateLimiter,
+        rate_limit::{RateLimitAlgorithm, RateLimitLayer},
+    };
+
+    fn request(
+        remote_ip: &str,
+        forwarded_proto: Option<&str>,
+        transport_secure: bool,
+    ) -> RequestMetadata {
         let mut headers = BTreeMap::new();
         if let Some(value) = forwarded_proto {
             headers.insert("x-forwarded-proto".into(), value.into());
@@ -364,6 +587,33 @@ mod tests {
     }
 
     #[test]
+    fn rejects_forwarded_client_ip_from_untrusted_peer() {
+        let mut config = default_config("test-service");
+        config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
+        let mut request = request("198.51.100.10", None, true);
+        request
+            .headers
+            .insert("x-forwarded-for".into(), "203.0.113.9".into());
+        let error = enforce_transport_policy(&config, &request).unwrap_err();
+        assert_eq!(error.code, "untrusted_forwarded_header");
+    }
+
+    #[test]
+    fn uses_forwarded_client_ip_only_from_trusted_peer() {
+        let mut config = default_config("test-service");
+        config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
+        let mut request = request("10.23.4.5", Some("https"), false);
+        request.headers.insert(
+            "x-forwarded-for".into(),
+            "203.0.113.9, 10.23.4.5".into(),
+        );
+        assert_eq!(
+            effective_client_ip(&config, &request).as_deref(),
+            Some("203.0.113.9")
+        );
+    }
+
+    #[test]
     fn accepts_forwarded_https_only_from_trusted_peer() {
         let mut config = default_config("test-service");
         config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
@@ -388,5 +638,68 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    struct FailingLimiter;
+
+    impl RateLimiter for FailingLimiter {
+        fn allow<'a>(
+            &'a self,
+            _key: &'a str,
+            _capacity: u32,
+            _refill_per_second: f64,
+        ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { false })
+        }
+
+        fn evaluate<'a>(
+            &'a self,
+            _request: &'a RateLimitRequest,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<RateLimitDecision, IntegrationError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async {
+                Err(IntegrationError {
+                    code: "redis_unavailable",
+                    message: "backend unavailable".into(),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn local_only_mode_falls_back_without_exposing_identity() {
+        let mut config = default_config("test-service");
+        config.settings.tls.mode = "in-process".into();
+        config.settings.tls.trusted_proxy_cidrs.clear();
+        config.settings.rate_limit.capacity = 1;
+        config.settings.rate_limit.refill_per_second = 0.000_001;
+        config.settings.rate_limit.algorithm = RateLimitAlgorithm::TokenBucket;
+        config.settings.rate_limit.layer = RateLimitLayer::Application;
+        config.settings.rate_limit.failure_mode = RateLimitFailureMode::LocalOnly;
+        let stack = MiddlewareStack::new(config)
+            .unwrap()
+            .with_rate_limiter(Arc::new(FailingLimiter));
+
+        let first = stack
+            .begin(request("203.0.113.9", None, true))
+            .await
+            .unwrap();
+        stack.finish(first, 200, None).await;
+        let error = match stack
+            .begin(request("203.0.113.9", None, true))
+            .await
+        {
+            Ok(_) => panic!("second request should be rate limited"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, 429);
+        assert_eq!(error.code, "rate_limited");
+        assert!(error.headers.contains_key("retry-after"));
     }
 }
