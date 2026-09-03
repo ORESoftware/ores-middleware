@@ -21,6 +21,7 @@ outputs = [
   "target/gleam",
   "target/elixir",
   "target/erlang",
+  "target/package",
 ]
 
 [install]
@@ -29,7 +30,10 @@ dir = ".vendor/.zed"
 [publish]
 include_readme = true
 tag_format = "v{version}"
-smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/scripts/check_zpkg.py\" --root \"$ZED_PKG_TEST_TARGET\" && python3 \"$ZED_PKG_TEST_TARGET/scripts/cross_translate.py\" --root \"$ZED_PKG_TEST_TARGET\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/authority-topology.json\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.tsp\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.schema.json\""
+# r2g runs this after installing only the declared build outputs. The packaged
+# script reruns the TypeSpec/JSON Schema cross-translation witness from copied,
+# digest-bound evidence and executes all six installed runtime artifacts.
+smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/target/package/scripts/installed_package_smoke.py\" --root \"$ZED_PKG_TEST_TARGET\""
 exclude = [
   ".env",
   ".env.*",
