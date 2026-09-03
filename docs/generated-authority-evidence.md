@@ -60,6 +60,42 @@ incomplete declared scope is `partial`. A previously green receipt cannot be
 reused after either source, generator, dependency lock, compiler, database
 version, formatter, or comparison option changes.
 
+## Native peer-authority proof
+
+The repair and proof workflow run `33793351801`, job `100775009601`, executed
+both independently generated authority lanes against the same bounded positive
+and negative corpus in all six native runtime families:
+
+| Authority | Rust | TypeScript | Go | Gleam | Elixir | Erlang |
+| --- | --- | --- | --- | --- | --- | --- |
+| TypeSpec | executed | executed | executed | executed | executed | executed |
+| JSON Schema/OpenAPI | executed | executed | executed | executed | executed | executed |
+
+Before publishing the source repairs, that job proved all of the following:
+
+- eight base peer-authority parity tests passed;
+- seven independent persistence-generator tests passed;
+- three layered rate-limit contract tests passed;
+- both authorities generated matching common SQL, types/interfaces, executable
+  validators/code, Diesel witnesses, and SeaORM witnesses;
+- the generated-runtime convergence receipt reported `status=passed`,
+  `zeroUnexplainedFindings=true`, twelve executed witnesses, and zero
+  discrepancies;
+- generated Go was `gofmt`-canonical, generated Gleam was formatter-canonical,
+  and the Rust, TypeScript, Go, Gleam, Elixir, and Erlang witnesses compiled and
+  replayed the shared corpus;
+- no authority was selected as a winner and no generated artifact was copied
+  back into an authored source directory.
+
+The defects repaired during that proof belonged to their owning implementation
+layers rather than to either authority: optional-value handling in the Rust
+witness, canonical formatting in the Gleam renderer, argument forwarding in the
+Elixir witness, and a legal Erlang type declaration whose runtime validator
+still preserves the exact enum vocabulary. The final source commit was
+`0c21145edd132f4b2d73aa1548b0801cf71aa18e`. This record is historical evidence,
+not permission to reuse that result after the branch head changes; normal
+exact-head workflows must execute again before promotion.
+
 ## Promotion boundary
 
 No generated artifact is published, copied into an authority directory, used to
