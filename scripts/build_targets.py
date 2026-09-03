@@ -3,12 +3,15 @@
 
 The orchestrator never treats generated output as a contract authority. It can
 build selected languages for CI jobs with different toolchains, while the
-zero-argument form builds all six zed-pkg targets.
+zero-argument form builds all six zed-pkg targets plus a self-contained
+installed-package evidence closure.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -17,6 +20,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = ROOT / "target"
 LANGUAGES = ("rust", "ts", "golang", "gleam", "elixir", "erlang")
+PACKAGE_EVIDENCE_INPUTS = (
+    Path("contracts/authority-topology.json"),
+    Path("contracts/persistence/idempotency-record.tsp"),
+    Path("contracts/persistence/idempotency-record.schema.json"),
+    Path("scripts/cross_translate.py"),
+    Path("scripts/installed_package_smoke.py"),
+)
 
 
 def run(command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
@@ -38,6 +48,10 @@ def copy_if_present(source: Path, destination: Path) -> None:
     if source.exists():
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def assert_output_is_self_contained(output: Path) -> None:
@@ -169,6 +183,39 @@ def build_erlang() -> None:
     copy_if_present(source / "rebar.lock", output / "rebar.lock")
 
 
+def build_package_evidence() -> None:
+    """Materialize the contract/tool closure required by installed smoke tests.
+
+    Zed installs declared build outputs, not the full source checkout. Keep the
+    two authored persistence contracts and the non-authoritative comparison
+    tool in a distinct output; this lets ``r2g`` rerun the comparison after the
+    source checkout has disappeared without presenting the copy as an authority.
+    """
+
+    output = reset_output("package")
+    source_digests: dict[str, str] = {}
+    for relative in PACKAGE_EVIDENCE_INPUTS:
+        source = ROOT / relative
+        if not source.is_file():
+            raise ValueError(f"required installed-package evidence is missing: {relative}")
+        destination = output / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        source_digests[relative.as_posix()] = sha256(destination)
+
+    manifest = {
+        "schema": "ores.zed-installed-package/v1",
+        "authoritative": False,
+        "purpose": "installed-package-release-evidence",
+        "targets": list(LANGUAGES),
+        "sourceDigests": source_digests,
+    }
+    (output / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 BUILDERS = {
     "rust": build_rust,
     "ts": build_ts,
@@ -207,6 +254,10 @@ def main() -> int:
         BUILDERS[language]()
         assert_output_is_self_contained(TARGET / language)
         print(f"built target/{language}")
+    if set(selected) == set(LANGUAGES):
+        build_package_evidence()
+        assert_output_is_self_contained(TARGET / "package")
+        print("built target/package")
     return 0
 
 
