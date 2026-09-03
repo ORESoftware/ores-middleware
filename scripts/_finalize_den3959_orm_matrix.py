@@ -19,6 +19,78 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+def patch_rust_topology() -> None:
+    path = Path("tools/contract-parity/src/lib.rs")
+    replace_once(
+        path,
+        '''    let expected_flows = json!({
+        "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
+        "json-schema-openapi": [
+            "interfaces-types",
+            "sql-when-applicable",
+            "write-clients"
+        ]
+    });
+''',
+        '''    let expected_flows = json!({
+        "typespec": [
+            "interfaces-types",
+            "runtime-code",
+            "sql-when-applicable",
+            "diesel",
+            "seaorm",
+            "protobuf",
+            "grpc",
+            "wire-clients"
+        ],
+        "json-schema-openapi": [
+            "interfaces-types",
+            "runtime-code",
+            "sql-when-applicable",
+            "diesel",
+            "seaorm",
+            "openapi",
+            "write-clients"
+        ]
+    });
+''',
+        "Rust authority flow expectations",
+    )
+    replace_once(
+        path,
+        '''    #[test]
+    fn current_peer_contracts_match() {
+        assert_eq!(run(&repository_root()).expect("parity run"), Vec::new());
+    }
+
+''',
+        '''    #[test]
+    fn current_peer_contracts_match() {
+        assert_eq!(run(&repository_root()).expect("parity run"), Vec::new());
+    }
+
+    #[test]
+    fn missing_orm_from_authority_flow_stops_evaluation() {
+        let temp = fixture_root();
+        let path = temp.path().join("contracts/authority-topology.json");
+        let mut topology: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        topology["flows"]["typespec"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|item| item.as_str() != Some("diesel"));
+        fs::write(&path, serde_json::to_vec_pretty(&topology).unwrap()).unwrap();
+        let findings = run(temp.path()).expect("parity run");
+        assert!(findings.iter().any(|item| {
+            item.kind == "authority-topology"
+                && item.detail.contains("required peer TypeSpec")
+        }));
+    }
+
+''',
+        "Rust missing-ORM topology regression",
+    )
+
+
 def patch_check_zpkg() -> None:
     path = Path("scripts/check_zpkg.py")
     replace_once(
@@ -258,6 +330,7 @@ def verify_json_documents() -> None:
 
 
 def main() -> None:
+    patch_rust_topology()
     patch_check_zpkg()
     patch_audit()
     patch_architecture()
