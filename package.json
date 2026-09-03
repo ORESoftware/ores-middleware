@@ -12,6 +12,7 @@
     "contracts:compare": "node scripts/compare-authorities.mjs && python3 scripts/check_contract_parity.py && python3 scripts/schema_convergence.py && npm run contracts:cross-translate",
     "contracts:validate": "node scripts/validate-contracts.mjs && node scripts/validate-docs-serving.mjs",
     "contracts:check": "npm run contracts:compare && npm run contracts:validate",
+    "persistence:check": "python3 scripts/orm_catalog_gate_entrypoint.py",
     "descriptors:check": "node scripts/check-descriptors.mjs --require-all",
     "zpkg:check": "python3 scripts/check_zpkg.py",
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
