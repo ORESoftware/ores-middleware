@@ -205,7 +205,8 @@ pub fn create_middleware(
         base(request, fn(scoped_request) {
           case middleware.current_context() {
             Error(_) -> {
-              let fallback = RequestLogger(logger: logger, context: log_context.new())
+              let fallback =
+                RequestLogger(logger: logger, context: log_context.new())
               next(scoped_request, fallback)
             }
             Ok(context) -> {
@@ -221,12 +222,16 @@ pub fn create_middleware(
 
               with_request_context(request_log, fn() {
                 let response = next(scoped_request, request_log)
+                let response_fields =
+                  list.append(request_fields, [
+                    #(
+                      "http.response.status_code",
+                      json.int(response.status),
+                    ),
+                  ])
                 let _ =
                   info(request_log, "request handler completed", [])
-                  |> log.add_fields([
-                    ..request_fields,
-                    #("http.response.status_code", json.int(response.status)),
-                  ])
+                  |> log.add_fields(response_fields)
                   |> log.send
                 response
               })
