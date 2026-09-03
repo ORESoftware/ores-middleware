@@ -1,0 +1,52 @@
+name: bootstrap-io-autofix
+
+on:
+  push:
+    branches: [feat/cross-language-middleware-contract-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/cross-language-middleware-contract-v1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Add standard I/O conversion and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("src/rust/src/bootstrap.rs")
+          text = path.read_text()
+          text = text.replace(
+              "use std::{env, fmt, str::FromStr};",
+              "use std::{env, fmt, io, str::FromStr};",
+          )
+          marker = "impl std::error::Error for BootstrapError {}\n"
+          replacement = marker + "\nimpl From<BootstrapError> for io::Error {\n    fn from(error: BootstrapError) -> Self {\n        io::Error::new(io::ErrorKind::InvalidInput, error)\n    }\n}\n"
+          if marker not in text:
+              raise SystemExit("BootstrapError marker not found")
+          path.write_text(text.replace(marker, replacement, 1))
+          PY
+          cargo fmt --manifest-path src/rust/Cargo.toml --all
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+      - name: Commit verified compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/bootstrap-io-autofix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(rust): convert bootstrap configuration errors to std::io::Error"
+          git push origin HEAD:feat/cross-language-middleware-contract-v1
