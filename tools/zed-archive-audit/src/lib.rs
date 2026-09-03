@@ -134,7 +134,12 @@ fn valid_lower_hex(value: &str, length: usize) -> bool {
 }
 
 fn canonical_path(path: &Path) -> Result<String> {
-    let rendered = path.to_string_lossy();
+    let rendered = path.to_str().ok_or_else(|| {
+        failure(
+            AuditErrorCode::InvalidPath,
+            "archive path is not valid UTF-8",
+        )
+    })?;
     if rendered.is_empty()
         || rendered.len() > MAX_PATH_BYTES
         || rendered.starts_with('/')
@@ -157,7 +162,7 @@ fn canonical_path(path: &Path) -> Result<String> {
             ));
         }
     }
-    Ok(rendered.into_owned())
+    Ok(rendered.to_owned())
 }
 
 fn path_is_forbidden(path: &str) -> bool {
@@ -210,7 +215,6 @@ pub fn inspect_archive(path: &Path) -> Result<ArchiveSummary> {
     })?;
 
     let mut seen = BTreeSet::new();
-    let mut all_paths = Vec::new();
     let mut files = BTreeMap::new();
     let mut unpacked_bytes = 0_u64;
     let mut entry_count = 0_usize;
@@ -249,7 +253,6 @@ pub fn inspect_archive(path: &Path) -> Result<ArchiveSummary> {
                 format!("archive contains excluded path: {path}"),
             ));
         }
-        all_paths.push(path.clone());
 
         let kind = entry.header().entry_type();
         if kind.is_dir() {
@@ -301,15 +304,15 @@ pub fn inspect_archive(path: &Path) -> Result<ArchiveSummary> {
 
     let mut required_entries = BTreeMap::new();
     for suffix in REQUIRED_SUFFIXES {
-        let matches: Vec<&String> = all_paths
-            .iter()
+        let matches: Vec<&String> = files
+            .keys()
             .filter(|path| path.as_str() == *suffix || path.ends_with(&format!("/{suffix}")))
             .collect();
         match matches.as_slice() {
             [] => {
                 return Err(failure(
                     AuditErrorCode::MissingRequiredEntry,
-                    format!("archive is missing required entry suffix: {suffix}"),
+                    format!("archive is missing required regular-file entry suffix: {suffix}"),
                 ));
             }
             [path] => {
@@ -318,7 +321,9 @@ pub fn inspect_archive(path: &Path) -> Result<ArchiveSummary> {
             _ => {
                 return Err(failure(
                     AuditErrorCode::DuplicateRequiredEntry,
-                    format!("archive contains multiple entries for required suffix: {suffix}"),
+                    format!(
+                        "archive contains multiple regular files for required suffix: {suffix}"
+                    ),
                 ));
             }
         }
@@ -398,9 +403,28 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use std::io::Cursor;
-    use tar::{Builder, Header};
+    use tar::{Builder, EntryType, Header};
 
     const SOURCE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    fn finish_archive(output: &tempfile::NamedTempFile, builder: Builder<GzEncoder<Vec<u8>>>) {
+        let encoder = builder.into_inner().expect("tar finish");
+        let bytes = encoder.finish().expect("gzip finish");
+        fs::write(output.path(), bytes).expect("write archive");
+    }
+
+    fn append_regular_file(builder: &mut Builder<GzEncoder<Vec<u8>>>, path: &str, content: &[u8]) {
+        let mut header = Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, Cursor::new(content))
+            .expect("append entry");
+    }
 
     fn archive(entries: &[(&str, &[u8])]) -> tempfile::NamedTempFile {
         let output = tempfile::NamedTempFile::new().expect("archive file");
@@ -408,20 +432,63 @@ mod tests {
         let mut builder = Builder::new(encoder);
         builder.mode(tar::HeaderMode::Deterministic);
         for (path, content) in entries {
-            let mut header = Header::new_gnu();
-            header.set_size(content.len() as u64);
-            header.set_mode(0o644);
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_mtime(0);
-            header.set_cksum();
-            builder
-                .append_data(&mut header, path, Cursor::new(*content))
-                .expect("append entry");
+            append_regular_file(&mut builder, path, content);
         }
-        let encoder = builder.into_inner().expect("tar finish");
-        let bytes = encoder.finish().expect("gzip finish");
-        fs::write(output.path(), bytes).expect("write archive");
+        finish_archive(&output, builder);
+        output
+    }
+
+    fn archive_with_required_directory() -> tempfile::NamedTempFile {
+        let output = tempfile::NamedTempFile::new().expect("archive file");
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        builder.mode(tar::HeaderMode::Deterministic);
+
+        for (path, content) in valid_entries().into_iter().skip(1) {
+            append_regular_file(&mut builder, path, content);
+        }
+
+        let mut header = Header::new_gnu();
+        header.set_entry_type(EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_cksum();
+        builder
+            .append_data(
+                &mut header,
+                "package/.zpkg.toml",
+                Cursor::new(Vec::<u8>::new()),
+            )
+            .expect("append required-shaped directory");
+
+        finish_archive(&output, builder);
+        output
+    }
+
+    #[cfg(unix)]
+    fn archive_with_non_utf8_path() -> tempfile::NamedTempFile {
+        let output = tempfile::NamedTempFile::new().expect("archive file");
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+        builder.mode(tar::HeaderMode::Deterministic);
+
+        let mut header = Header::new_gnu();
+        let invalid_path = b"package/invalid-\xff-name";
+        header.as_mut_bytes()[..invalid_path.len()].copy_from_slice(invalid_path);
+        header.set_size(1);
+        header.set_mode(0o644);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_cksum();
+        builder
+            .append(&header, Cursor::new(b"x"))
+            .expect("append non-UTF-8 entry");
+
+        finish_archive(&output, builder);
         output
     }
 
@@ -468,6 +535,25 @@ mod tests {
         let candidate = archive(&entries);
         let error = inspect_archive(candidate.path()).expect_err("duplicate path must fail");
         assert_eq!(error.code(), AuditErrorCode::DuplicatePath);
+    }
+
+    #[test]
+    fn required_directory_does_not_satisfy_regular_file_requirement() {
+        let candidate = archive_with_required_directory();
+        let error = inspect_archive(candidate.path())
+            .expect_err("a directory named like a manifest must not satisfy the requirement");
+        assert_eq!(error.code(), AuditErrorCode::MissingRequiredEntry);
+        assert!(error.detail().contains("required regular-file entry"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_archive_path_is_rejected_without_lossy_normalization() {
+        let candidate = archive_with_non_utf8_path();
+        let error = inspect_archive(candidate.path()).expect_err("non-UTF-8 path must fail");
+        assert_eq!(error.code(), AuditErrorCode::InvalidPath);
+        assert_eq!(error.detail(), "archive path is not valid UTF-8");
+        assert!(!error.detail().contains('\u{fffd}'));
     }
 
     #[test]
