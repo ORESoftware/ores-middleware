@@ -8,6 +8,7 @@ erlang_applications = ["crypto"]
 
 [dependencies]
 gleam_stdlib = ">= 0.60.0 and < 2.0.0"
+oresoftware_next_loggers = { git = "https://github.com/ores-otel/ores.otel.log.git", ref = "b55271c047be761c4711d87cbd500a49eefda3d9", path = "sdk/gleam" }
 
 [dev-dependencies]
 gleeunit = ">= 1.11.0 and < 2.0.0"
