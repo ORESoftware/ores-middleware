@@ -16,7 +16,7 @@ ts:
     npm --prefix src/ts install
     npm --prefix src/ts run build
     npm --prefix src/ts test
-    npm --prefix src/ts run descriptor > target/descriptors/ts.json
+    node src/ts/dist/contractcheck.js > target/descriptors/ts.json
 
 golang:
     mkdir -p target/golang target/descriptors
