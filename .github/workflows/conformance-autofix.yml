@@ -1,0 +1,105 @@
+name: conformance-autofix
+
+on:
+  push:
+    branches:
+      - feat/cross-language-middleware-contract-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/cross-language-middleware-contract-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27'
+          elixir-version: '1.18'
+          gleam-version: 'latest'
+          rebar3-version: 'latest'
+      - name: Patch language sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          go = Path('src/golang/middleware.go')
+          text = go.read_text()
+          text = text.replace('"crypto/rand"', 'crand "crypto/rand"')
+          text = text.replace('"math/rand/v2"', 'mrand "math/rand/v2"')
+          text = text.replace('dependencies.RandomFloat64 = rand.Float64', 'dependencies.RandomFloat64 = mrand.Float64')
+          text = text.replace('rand.Read(value)', 'crand.Read(value)')
+          text = text.replace('\t\tcapture := newBufferedResponse()\n\t\tdone := make(chan any, 1)', '\t\thandlerCapture := newBufferedResponse()\n\t\tdone := make(chan any, 1)')
+          text = text.replace('next.ServeHTTP(capture, request)', 'next.ServeHTTP(handlerCapture, request)')
+          text = text.replace('\t\tvar panicValue any\n\t\tselect {', '\t\tcapture := handlerCapture\n\t\tvar panicValue any\n\t\tselect {')
+          text = text.replace('func writeProblem(writer http.ResponseWriter, status int, code, detail string) { value := problemResponse(status, code, detail); copyResponse(writer, value.snapshot()) }', 'func writeProblem(writer http.ResponseWriter, status int, code, detail string) {\n\tvalue := problemResponse(status, code, detail)\n\tresponseStatus, headers, body := value.snapshot()\n\tcopyResponse(writer, responseStatus, headers, body)\n}')
+          go.write_text(text)
+
+          gleam = Path('src/gleam/src/ores_middleware.gleam')
+          text = gleam.read_text()
+          text = text.replace('dict.from_list([["content-type", "application/problem+json"]])', 'dict.from_list([#("content-type", "application/problem+json")])')
+          for left, right in [
+              ('["descriptor", "descriptor"]', '#("descriptor", "descriptor")'),
+              ('["defaultConfig", "default_config"]', '#("defaultConfig", "default_config")'),
+              ('["validateConfig", "validate_config"]', '#("validateConfig", "validate_config")'),
+              ('["createMiddleware", "create_middleware"]', '#("createMiddleware", "create_middleware")'),
+              ('["runWithContext", "run_with_context"]', '#("runWithContext", "run_with_context")'),
+              ('["currentContext", "current_context"]', '#("currentContext", "current_context")'),
+              ('["capabilities", "capabilities"]', '#("capabilities", "capabilities")'),
+          ]:
+              text = text.replace(left, right)
+          text = text.replace('  case idempotency_key != "" && hooks.idempotency_get(idempotency_key) |> result_is_ok {\n    True -> result_value(hooks.idempotency_get(idempotency_key), problem(500, "idempotency_error", "idempotency lookup failed"))', '  let cached = hooks.idempotency_get(idempotency_key)\n  case idempotency_key != "" && result_is_ok(cached) {\n    True -> result_value(cached, problem(500, "idempotency_error", "idempotency lookup failed"))')
+          gleam.write_text(text)
+
+          ffi = Path('src/gleam/src/ores_middleware_context_ffi.erl')
+          text = ffi.read_text().replace('string:lowercase(binary:encode_hex(crypto:strong_rand_bytes(16))).', 'binary:encode_hex(crypto:strong_rand_bytes(16), lowercase).')
+          ffi.write_text(text)
+
+          test = Path('src/gleam/test/ores_middleware_test.gleam')
+          text = test.read_text().replace('import gleam/list\n', 'import gleam/dict\nimport gleam/list\n')
+          text = text.replace('descriptor.operation_symbols |> gleam/dict.to_list', 'descriptor.operation_symbols |> dict.to_list')
+          test.write_text(text)
+
+          erlang = Path('src/erlang/src/ores_middleware.erl')
+          text = erlang.read_text()
+          text = re.sub(r'maps:get\(([^,\n()]+), Hooks\)\(', r'(maps:get(\1, Hooks))(', text)
+          erlang.write_text(text)
+          PY
+
+          gofmt -w src/golang
+          gleam format src/gleam/src src/gleam/test
+      - name: Generate dependency locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only
+          npm --prefix src/ts install --package-lock-only
+          (cd src/golang && go mod tidy)
+          (cd src/gleam && gleam deps download)
+          (cd src/elixir && mix deps.get)
+          (cd src/erlang && rebar3 get-deps || true)
+      - name: Commit generated fixes and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/conformance-autofix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: apply conformance formatting and dependency locks"
+          git push origin HEAD:feat/cross-language-middleware-contract-v1
