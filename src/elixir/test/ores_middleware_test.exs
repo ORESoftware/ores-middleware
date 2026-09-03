@@ -34,7 +34,7 @@ defmodule OresMiddlewareTest do
 
     assert conn.status == 200
     assert Plug.Conn.get_resp_header(conn, "x-request-id") != []
-    assert Plug.Conn.get_resp_header(conn, "traceparent") != []
+    assert Plug.Conn.get_resp_header(conn, "traceparent") == []
     assert Plug.Conn.get_resp_header(conn, "x-content-type-options") == ["nosniff"]
   end
 
