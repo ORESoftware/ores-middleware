@@ -49,9 +49,10 @@ oresoftware-ores-middleware-rust-0.1.0.tar.gz
 oresoftware-ores-middleware-typescript-0.1.0.tar.gz
 EOF
 
-# Isolated r2g does not require registry authentication. Remove credential and
-# provider variables from every Zed subprocess so a hosted runner or developer
-# shell cannot accidentally change the trust boundary or leak a value.
+# Zed r2g itself creates a throwaway file:// registry and consumer workspace.
+# Remove credential and provider variables from every Zed subprocess so a
+# hosted runner or developer shell cannot change that trust boundary or leak a
+# value into validation, packaging, or the isolated consumer round trip.
 zed_clean_env() {
   env \
     -u ZED_PKG_TOKEN \
@@ -117,9 +118,11 @@ cargo run --quiet --locked \
   --zed-version "$ZED_VERSION" \
   --receipt "$RECEIPT"
 
-zed_clean_env "$ZED_BIN" r2g \
-  --registry-mode isolated \
-  --r2g-root "$R2G_ROOT"
+# In Zed 0.2.3 `r2g` has no `--registry-mode` flag. Its defined behavior is
+# already the isolated one we need: pack, publish to a throwaway file://
+# registry, install into a mock consumer below --r2g-root, and execute the
+# package smoke test. Leave the failed workspace available for inspection.
+zed_clean_env "$ZED_BIN" r2g --r2g-root "$R2G_ROOT"
 
 (
   cd "$R2G_ROOT"
