@@ -59,6 +59,36 @@ def assert_output_is_self_contained(output: Path) -> None:
             )
 
 
+def materialize_project_directory(
+    destination: Path,
+    source: Path,
+    *,
+    required: bool,
+) -> None:
+    """Replace a rebar3 project link with an in-output directory copy.
+
+    rebar3 intentionally links the current application's ``src``, ``include``,
+    and ``priv`` directories back to the checkout. Dependency applications are
+    already rooted below ``REBAR_BASE_DIR`` and remain untouched. A declared
+    Zed output cannot depend on the checkout path, so project-owned links are
+    copied into the output closure; absent optional directories become empty.
+    """
+
+    if destination.is_symlink():
+        destination.unlink()
+    elif destination.exists():
+        if not destination.is_dir():
+            raise ValueError(f"project output path is not a directory: {destination}")
+        return
+
+    if source.is_dir() and not source.is_symlink():
+        shutil.copytree(source, destination, symlinks=False)
+    elif required:
+        raise ValueError(f"required project source directory is missing: {source}")
+    else:
+        destination.mkdir(parents=True, exist_ok=True)
+
+
 def build_rust() -> None:
     output = reset_output("rust")
     run([
@@ -127,6 +157,14 @@ def build_erlang() -> None:
     output = reset_output("erlang")
     source = ROOT / "src/erlang"
     run(["rebar3", "compile"], cwd=source, env={"REBAR_BASE_DIR": str(output / "_build")})
+
+    application = output / "_build" / "default" / "lib" / "ores_middleware"
+    if not application.is_dir() or application.is_symlink():
+        raise ValueError(f"compiled Erlang application is missing: {application}")
+    materialize_project_directory(application / "src", source / "src", required=True)
+    materialize_project_directory(application / "include", source / "include", required=False)
+    materialize_project_directory(application / "priv", source / "priv", required=False)
+
     copy_if_present(source / "rebar.config", output / "rebar.config")
     copy_if_present(source / "rebar.lock", output / "rebar.lock")
 
