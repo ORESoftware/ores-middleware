@@ -16,7 +16,7 @@ request_logger_is_pinned_to_authenticated_context_test() ->
     ?assertEqual(<<"tenant-7">>, maps:get(<<"tenant.id">>, Fields)),
     ?assertEqual(#{<<"otel.vendor">> => <<"allowed">>}, maps:get(<<"otel.baggage">>, Fields)),
     ?assertEqual(false, maps:is_key(<<"authorization">>, maps:get(<<"otel.baggage">>, Fields))),
-    ?assertEqual(#{id => <<"user-42">>}, maps:get(loggedInUser, Record)),
+    ?assertEqual(#{<<"id">> => <<"user-42">>}, maps:get(loggedInUser, Record)),
     receive {record, Record} -> ok after 1000 -> ?assert(false) end,
     ?assertEqual(undefined, next_loggers:current_context()).
 
