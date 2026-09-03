@@ -167,10 +167,19 @@ jobs:
             elixirc \
               -o "target/generated-compile/elixir/${lane}" \
               "target/schema-convergence/${lane}/elixir/idempotency_record.ex"
-            mkdir -p "target/generated-compile/erlang/${lane}"
+
+            # Erlang requires the source filename to match its declared module.
+            # The generator emits a stable cross-lane artifact name for storage,
+            # so compile the same bytes from a module-matching temporary path.
+            erlang_compile_dir="target/generated-compile/erlang/${lane}"
+            mkdir -p "$erlang_compile_dir"
+            cp \
+              "target/schema-convergence/${lane}/erlang/idempotency_record.erl" \
+              "$erlang_compile_dir/ores_middleware_generated_idempotency_record.erl"
             erlc \
-              -o "target/generated-compile/erlang/${lane}" \
-              "target/schema-convergence/${lane}/erlang/idempotency_record.erl"
+              -o "$erlang_compile_dir" \
+              "$erlang_compile_dir/ores_middleware_generated_idempotency_record.erl"
+            test -s "$erlang_compile_dir/ores_middleware_generated_idempotency_record.beam"
           done
       - name: Upload independently compiled polyglot evidence
         if: ${{ always() }}
