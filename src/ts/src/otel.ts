@@ -1,12 +1,20 @@
 import defaultLogger from "@oresoftware/next-loggers";
 import {
-  installLogContextProvider,
-  runWithLogContext
-} from "@oresoftware/next-loggers/context";
+  installExecutionLogContextProvider,
+  runWithExecutionLogContext,
+  toLoggerLogContext,
+  type ExecutionLogContext
+} from "@oresoftware/next-loggers/execution-context";
 
 import {
-  createMiddleware,
+  bindRequestContext,
+  contextForRequest,
   currentContext,
+  toExecutionLogContext,
+  type OresRequestContext
+} from "./context.js";
+import {
+  createMiddleware,
   type MiddlewareConfig,
   type MiddlewareDependencies,
   type PortableMiddleware,
@@ -14,21 +22,14 @@ import {
 } from "./index.js";
 
 export * from "@oresoftware/next-loggers";
-export * from "@oresoftware/next-loggers/context";
+export * from "@oresoftware/next-loggers/execution-context";
+export * from "./context.js";
 
 /** Instance type of the canonical ores-otel default logger export. */
 export type OresLogger = typeof defaultLogger;
 export type OresLoggerOptions = Parameters<OresLogger["anew"]>[0];
 export type OresLogFields = Record<string, unknown>;
-export interface OresLogContext {
-  loggedInUser?: OresLogFields & { id?: string };
-  users?: Array<OresLogFields & { id?: string }>;
-  fields?: OresLogFields;
-  traceId?: string;
-  traceIds?: string[];
-  routineId?: string;
-  tags?: string[];
-}
+export type OresLogContext = ExecutionLogContext;
 
 /** Canonical process/file logger exported by ores-otel. */
 export const logger: OresLogger = defaultLogger;
@@ -83,41 +84,30 @@ export interface OresOtelMiddlewareDependencies extends MiddlewareDependencies {
 }
 
 /**
- * Installs the ores-otel AsyncLocalStorage provider once for this process.
- * This is a log-context provider only; it does not install or replace a global
- * OpenTelemetry SDK/provider.
+ * Installs the ores-otel execution-context provider once for this process.
+ * This is a logger context provider only; it does not install or replace a
+ * global OpenTelemetry SDK/provider.
  */
 export function ensureOresLogContextProvider(): void {
   if (contextProviderInstalled) return;
-  installLogContextProvider();
+  installExecutionLogContextProvider();
   contextProviderInstalled = true;
 }
 
-/** Maps the portable, data-only middleware context into ores-otel fields. */
+/** Maps the portable middleware request into the canonical execution context. */
 export function toOresLogContext(context: RequestContext): OresLogContext {
-  const fields: OresLogFields = {
-    "request.id": context.requestId,
-    "trace.id": context.traceId,
-    "request.started_at_unix_ms": context.startedAtUnixMs
-  };
-  if (context.userId) fields["user.id"] = context.userId;
-  if (context.tenantId) fields["tenant.id"] = context.tenantId;
-  if (context.locale) fields["request.locale"] = context.locale;
-  if (context.deadlineUnixMs !== undefined) {
-    fields["request.deadline_unix_ms"] = context.deadlineUnixMs;
-  }
-  for (const [key, value] of Object.entries(context.baggage)) {
-    // The portable core only admits authenticated `otel.*` claims here.
-    if (key.startsWith("otel.")) fields[`baggage.${key}`] = value;
-  }
-
+  const execution = toExecutionLogContext(context as OresRequestContext);
+  const projected = toLoggerLogContext(execution);
   return {
-    traceId: context.traceId,
-    traceIds: [context.traceId],
-    routineId: context.requestId,
-    fields,
-    ...(context.userId ? { loggedInUser: { id: context.userId } } : {}),
-    tags: ["ores-middleware", "request"]
+    ...execution,
+    fields: {
+      ...(projected.fields ?? {}),
+      "trace.id": context.traceId
+    },
+    loggedInUser: projected.loggedInUser,
+    traceIds: projected.traceIds,
+    routineId: projected.routineId,
+    tags: projected.tags
   };
 }
 
@@ -168,13 +158,14 @@ export function runWithOresLogContext<T>(
   operation: () => T
 ): T {
   ensureOresLogContextProvider();
-  return runWithLogContext(toOresLogContext(context), operation);
+  return runWithExecutionLogContext(toOresLogContext(context), operation);
 }
 
 /**
- * Composes the portable middleware with ores-otel. Authentication remains owned
- * by the portable stack; the request child is created only after user/tenant
- * identity has been resolved and is available through both ALS and `req.log`.
+ * Composes portable middleware with ores-otel. The telemetry package owns the
+ * native carrier; middleware writes one request snapshot into it after auth.
+ * The same immutable snapshot is also bound to Fetch Request for workerd/Next
+ * Edge runtimes where native async context tracking is unavailable.
  */
 export function createOresOtelMiddleware(
   config: MiddlewareConfig,
@@ -185,27 +176,27 @@ export function createOresOtelMiddleware(
   const telemetry = dependencies.telemetry;
   const middleware = createMiddleware(config, {
     ...dependencies,
-    ...(telemetry
-      ? {
-          telemetry: {
-            started(context, request) {
-              return runWithOresLogContext(context, () =>
-                telemetry.started(context, request)
-              );
-            },
-            finished(context, request, response, durationMs) {
-              return runWithOresLogContext(context, () =>
-                telemetry.finished(context, request, response, durationMs)
-              );
-            }
-          }
-        }
-      : {})
+    telemetry: {
+      started(context, request) {
+        bindRequestContext(request, context);
+        if (!telemetry) return;
+        return runWithOresLogContext(context, () =>
+          telemetry.started(context, request)
+        );
+      },
+      finished(context, request, response, durationMs) {
+        bindRequestContext(request, context);
+        if (!telemetry) return;
+        return runWithOresLogContext(context, () =>
+          telemetry.finished(context, request, response, durationMs)
+        );
+      }
+    }
   });
 
   return (request, next) =>
     middleware(request, async (scopedRequest) => {
-      const context = currentContext();
+      const context = contextForRequest(scopedRequest) ?? currentContext();
       if (!context) {
         throw new Error("ores middleware request context is unavailable");
       }
