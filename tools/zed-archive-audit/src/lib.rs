@@ -407,20 +407,13 @@ mod tests {
 
     const SOURCE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
-    fn finish_archive(
-        output: &tempfile::NamedTempFile,
-        builder: Builder<GzEncoder<Vec<u8>>>,
-    ) {
+    fn finish_archive(output: &tempfile::NamedTempFile, builder: Builder<GzEncoder<Vec<u8>>>) {
         let encoder = builder.into_inner().expect("tar finish");
         let bytes = encoder.finish().expect("gzip finish");
         fs::write(output.path(), bytes).expect("write archive");
     }
 
-    fn append_regular_file(
-        builder: &mut Builder<GzEncoder<Vec<u8>>>,
-        path: &str,
-        content: &[u8],
-    ) {
+    fn append_regular_file(builder: &mut Builder<GzEncoder<Vec<u8>>>, path: &str, content: &[u8]) {
         let mut header = Header::new_gnu();
         header.set_size(content.len() as u64);
         header.set_mode(0o644);
@@ -507,10 +500,7 @@ mod tests {
             ("package/src/ts/package.json", b"{}\n"),
             ("package/src/golang/go.mod", b"module example\n"),
             ("package/src/gleam/gleam.toml", b"name = \"example\"\n"),
-            (
-                "package/src/elixir/mix.exs",
-                b"defmodule Example do\nend\n",
-            ),
+            ("package/src/elixir/mix.exs", b"defmodule Example do\nend\n"),
             ("package/src/erlang/rebar.config", b"[].\n"),
         ]
     }
