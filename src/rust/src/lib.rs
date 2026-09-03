@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod bootstrap;
+mod compat;
 mod config;
 mod context;
 pub mod frameworks;
