@@ -79,8 +79,8 @@ parallel_request_processes_never_cross_contaminate_test() ->
         ?assertEqual(204, Status),
         ?assertEqual(undefined, PortableContext),
         ?assertEqual(undefined, LogContext),
-        verify_correlated_record(Records, <<"request:", Slot/binary>>, Slot),
-        verify_correlated_record(Records, <<"file:", Slot/binary>>, Slot)
+        verify_correlated_record(Records, <<"request:", Slot/binary>>, Slot, true),
+        verify_correlated_record(Records, <<"file:", Slot/binary>>, Slot, false)
     end, WorkerResults).
 
 timeout_is_logged_without_late_completion_and_context_is_restored_test() ->
@@ -140,7 +140,7 @@ logger_transport_failure_does_not_change_response_test() ->
         restore_metadata(PreviousMetadata)
     end.
 
-verify_correlated_record(Records, Message, Slot) ->
+verify_correlated_record(Records, Message, Slot, ExpectRequestChildUser) ->
     Matches = [Record || Record <- Records, maps:get(message, Record) =:= Message],
     ?assertEqual(1, length(Matches)),
     [Record] = Matches,
@@ -151,10 +151,15 @@ verify_correlated_record(Records, Message, Slot) ->
     Baggage = maps:get(<<"otel.baggage">>, Fields),
     ?assertEqual(Slot, maps:get(<<"otel.slot">>, Baggage)),
     ?assertEqual(false, maps:is_key(<<"authorization">>, Baggage)),
-    ?assertEqual(
-        #{<<"id">> => <<"user-", Slot/binary>>},
-        maps:get(loggedInUser, Record)
-    ),
+    case ExpectRequestChildUser of
+        true ->
+            ?assertEqual(
+                #{<<"id">> => <<"user-", Slot/binary>>},
+                maps:get(loggedInUser, Record)
+            );
+        false ->
+            ?assertEqual(false, maps:is_key(loggedInUser, Record))
+    end,
     ?assertEqual(nomatch, binary:match(term_to_binary(Record), <<"must-not-propagate">>)).
 
 fixed_auth_hooks() -> #{
