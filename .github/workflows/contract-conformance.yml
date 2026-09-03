@@ -60,6 +60,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Configure private dependency access
+        uses: ./.github/actions/configure-private-dependencies
+        with:
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
