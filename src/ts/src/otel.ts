@@ -45,6 +45,28 @@ export function createLogger(options: OresLoggerOptions = {}): OresLogger {
 const requestLoggers = new WeakMap<Request, OresLogger>();
 let contextProviderInstalled = false;
 
+interface SendableLogEvent {
+  send(store?: boolean): Promise<void>;
+}
+
+function reportRequestLogFailure(phase: string, error: unknown): void {
+  try {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[ores-middleware] request log delivery failed", { phase, message });
+  } catch {
+    // Diagnostics must never replace or delay the request outcome.
+  }
+}
+
+/**
+ * Lifecycle telemetry is intentionally detached from the response path. Even a
+ * transport hook that throws, rejects, or reports its own failure cannot prevent
+ * the handler from running or replace the handler's original response/error.
+ */
+function emitRequestLog(event: SendableLogEvent, phase: string): void {
+  void event.send().catch((error: unknown) => reportRequestLogFailure(phase, error));
+}
+
 export interface RequestWithLog extends Request {
   readonly log: OresLogger;
 }
@@ -199,20 +221,67 @@ export function createOresOtelMiddleware(
       };
 
       return runWithOresLogContext(context, async () => {
-        await logger.info("request handler started").addFields(requestFields).send();
+        const handlerStartedAt = Date.now();
+        const timeoutMs = Math.max(1, config.settings.timeoutMs);
+        let deadlineExceeded = false;
+
+        const emitTimeout = (): void => {
+          if (deadlineExceeded) return;
+          deadlineExceeded = true;
+          emitRequestLog(
+            logger
+              .error("request handler timed out")
+              .addFields({
+                ...requestFields,
+                "http.response.status_code": 504,
+                "request.outcome": "timeout",
+                "request.duration_ms": Math.max(0, Date.now() - handlerStartedAt)
+              }),
+            "timeout"
+          );
+        };
+
+        const deadlineTimer = setTimeout(emitTimeout, timeoutMs);
+        emitRequestLog(
+          logger.info("request handler started").addFields(requestFields),
+          "started"
+        );
+
         try {
           const response = await next(requestWithLog);
-          await logger
-            .info("request handler completed")
-            .addFields({ ...requestFields, "http.response.status_code": response.status })
-            .send();
+          const durationMs = Math.max(0, Date.now() - handlerStartedAt);
+          if (deadlineExceeded || durationMs >= timeoutMs) {
+            emitTimeout();
+          } else {
+            emitRequestLog(
+              logger
+                .info("request handler completed")
+                .addFields({
+                  ...requestFields,
+                  "http.response.status_code": response.status,
+                  "request.outcome": "completed",
+                  "request.duration_ms": durationMs
+                }),
+              "completed"
+            );
+          }
           return response;
         } catch (error) {
-          await logger
-            .error("request handler failed", error)
-            .addFields(requestFields)
-            .send();
+          if (!deadlineExceeded) {
+            emitRequestLog(
+              logger
+                .error("request handler failed", error)
+                .addFields({
+                  ...requestFields,
+                  "request.outcome": "failed",
+                  "request.duration_ms": Math.max(0, Date.now() - handlerStartedAt)
+                }),
+              "failed"
+            );
+          }
           throw error;
+        } finally {
+          clearTimeout(deadlineTimer);
         }
       });
     });
