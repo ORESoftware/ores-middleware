@@ -103,6 +103,83 @@ def materialize_project_directory(
         destination.mkdir(parents=True, exist_ok=True)
 
 
+def materialize_node_runtime_dependencies(project: Path, output: Path) -> None:
+    """Copy the lock-defined production dependency closure into a Zed output.
+
+    Zed installs build outputs after the source checkout has disappeared. A
+    generated JavaScript module that imports a package must therefore carry the
+    exact production packages selected by the native npm lock. Development-only
+    packages remain excluded. Missing required or malformed lock entries fail
+    closed rather than producing an artifact that works only in the checkout.
+    """
+
+    lock_path = project / "package-lock.json"
+    document = json.loads(lock_path.read_text(encoding="utf-8"))
+    packages = document.get("packages")
+    if not isinstance(packages, dict):
+        raise ValueError(f"npm lock lacks a packages object: {lock_path}")
+
+    materialized: list[dict[str, str | None]] = []
+    for relative, metadata in sorted(packages.items()):
+        if not relative.startswith("node_modules/"):
+            continue
+        if not isinstance(metadata, dict):
+            raise ValueError(f"npm lock package metadata is not an object: {relative}")
+        if metadata.get("dev") is True:
+            continue
+
+        source = project / relative
+        if not source.exists():
+            if metadata.get("optional") is True:
+                continue
+            raise ValueError(f"required npm runtime dependency is missing: {source}")
+
+        destination = output / relative
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                destination,
+                symlinks=False,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("node_modules", ".git"),
+            )
+        elif source.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+        else:
+            raise ValueError(f"unsupported npm runtime dependency path: {source}")
+
+        materialized.append(
+            {
+                "path": relative,
+                "version": metadata.get("version"),
+                "integrity": metadata.get("integrity"),
+            }
+        )
+
+    package = json.loads((project / "package.json").read_text(encoding="utf-8"))
+    declared = package.get("dependencies", {})
+    if declared and not materialized:
+        raise ValueError(
+            "package declares runtime dependencies but the npm lock produced no "
+            "materialized production dependency closure"
+        )
+
+    (output / "runtime-dependencies.json").write_text(
+        json.dumps(
+            {
+                "schema": "ores.node-runtime-dependency-closure/v1",
+                "packageLockSha256": sha256(lock_path),
+                "packages": materialized,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def build_rust() -> None:
     output = reset_output("rust")
     run([
@@ -128,9 +205,23 @@ def build_ts() -> None:
         "--no-fund",
     ])
     run(["npm", "run", "build", "--prefix", "src/ts"])
-    shutil.copytree(ROOT / "src/ts/dist", output / "dist")
-    copy_if_present(ROOT / "src/ts/package.json", output / "package.json")
-    copy_if_present(ROOT / "src/ts/package-lock.json", output / "package-lock.json")
+    source = ROOT / "src/ts"
+    shutil.copytree(source / "dist", output / "dist")
+    copy_if_present(source / "package.json", output / "package.json")
+    copy_if_present(source / "package-lock.json", output / "package-lock.json")
+    materialize_node_runtime_dependencies(source, output)
+
+    # Detect checkout-only module resolution before packaging. The import uses
+    # the output file URL, so Node resolves only from target/ts and its copied
+    # production dependency closure.
+    run(
+        [
+            "node",
+            "--input-type=module",
+            "--eval",
+            f"await import({json.dumps((output / 'dist/index.js').resolve().as_uri())});",
+        ]
+    )
 
 
 def build_golang() -> None:
