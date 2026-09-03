@@ -70,9 +70,20 @@ def validate(root: Path) -> list[str]:
         errors.append(f"build.outputs mismatch: expected {sorted(EXPECTED_OUTPUTS)}, got {sorted(outputs)}")
 
     scripts = manifest.get("scripts", {})
-    for required in ("audit", "build", "contracts", "projection-parity", "test", "zpkg-check"):
+    for required in (
+        "audit",
+        "build",
+        "contracts",
+        "cross-translation",
+        "projection-parity",
+        "test",
+        "zpkg-check",
+    ):
         if required not in scripts:
             errors.append(f"missing scripts.{required}")
+    smoke_test = manifest.get("publish", {}).get("smoke_test", "")
+    if "scripts/cross_translate.py" not in smoke_test:
+        errors.append("publish.smoke_test must execute the cross-translation gate")
 
     topology = json.loads((root / "contracts/authority-topology.json").read_text(encoding="utf-8"))
     authorities = {
@@ -84,6 +95,9 @@ def validate(root: Path) -> list[str]:
         errors.append("authority topology must retain TypeSpec and JSON Schema/OpenAPI as top-level peers")
     if topology.get("flows") != EXPECTED_FLOWS:
         errors.append("authority topology flow mismatch")
+    gates = set(topology.get("convergenceGates", []))
+    if not {"cross-translation-witnesses", "round-trip-witnesses"}.issubset(gates):
+        errors.append("authority topology must require cross-translation and round-trip witnesses")
     if topology.get("onUnexplainedMismatch") != "STOPPED_FOR_EVALUATION":
         errors.append("unexplained mismatches must stop for evaluation")
     return errors
@@ -99,7 +113,10 @@ def main() -> int:
         for item in errors:
             print(f"- {item}")
         return 1
-    print(".zpkg.toml polyglot contract passed: repository + rust + typescript + golang + gleam + elixir + erlang")
+    print(
+        ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
+        "golang + gleam + elixir + erlang + bidirectional shadow gate"
+    )
     return 0
 
 
