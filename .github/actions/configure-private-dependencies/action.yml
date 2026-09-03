@@ -1,0 +1,23 @@
+name: Configure private GitHub dependency access
+description: Configure ephemeral, read-only access for private cross-organization Git dependencies.
+
+inputs:
+  token:
+    description: Read-only GitHub token supplied by the repository secret store.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure ephemeral Git and Cargo access
+      shell: bash
+      env:
+        PRIVATE_GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${PRIVATE_GITHUB_TOKEN:-}" ]]; then
+          echo "FLEET_GITHUB_READ_TOKEN is required for private dependency verification." >&2
+          exit 2
+        fi
+        git config --global url."https://x-access-token:${PRIVATE_GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        printf '%s\n' 'CARGO_NET_GIT_FETCH_WITH_CLI=true' >> "$GITHUB_ENV"
