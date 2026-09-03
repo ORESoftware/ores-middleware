@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{net::valid_cidr, CAPABILITIES, CONTRACT_VERSION};
+use crate::{
+    net::valid_cidr,
+    rate_limit::{
+        RateLimitAlgorithm, RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitLayer,
+        RateLimitSignal,
+    },
+    CAPABILITIES, CONTRACT_VERSION,
+};
+
+const MAX_LOCAL_RATE_LIMIT_ENTRIES: usize = 10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -25,7 +34,51 @@ pub struct RateLimitPolicy {
     pub enabled: bool,
     pub capacity: u32,
     pub refill_per_second: f64,
-    pub key_by: Vec<String>,
+    pub key_by: Vec<RateLimitSignal>,
+    #[serde(default = "default_rate_limit_policy_id")]
+    pub policy_id: String,
+    #[serde(default)]
+    pub algorithm: RateLimitAlgorithm,
+    #[serde(default)]
+    pub layer: RateLimitLayer,
+    #[serde(default)]
+    pub failure_mode: RateLimitFailureMode,
+    #[serde(default = "default_rate_limit_window_ms")]
+    pub window_ms: u64,
+    #[serde(default = "default_rate_limit_local_cache_max_entries")]
+    pub local_cache_max_entries: usize,
+    #[serde(default = "default_rate_limit_local_cache_ttl_ms")]
+    pub local_cache_ttl_ms: u64,
+    #[serde(default = "default_rate_limit_key_namespace")]
+    pub key_namespace: String,
+    #[serde(default = "default_rate_limit_key_version")]
+    pub key_version: String,
+    #[serde(default)]
+    pub key_derivation: RateLimitKeyDerivationMode,
+}
+
+fn default_rate_limit_policy_id() -> String {
+    "default".into()
+}
+
+const fn default_rate_limit_window_ms() -> u64 {
+    1_000
+}
+
+const fn default_rate_limit_local_cache_max_entries() -> usize {
+    MAX_LOCAL_RATE_LIMIT_ENTRIES
+}
+
+const fn default_rate_limit_local_cache_ttl_ms() -> u64 {
+    30_000
+}
+
+fn default_rate_limit_key_namespace() -> String {
+    "ores-middleware".into()
+}
+
+fn default_rate_limit_key_version() -> String {
+    "v1".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,7 +208,11 @@ pub struct ValidationIssue {
 }
 
 impl ValidationIssue {
-    fn new(path: impl Into<String>, code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        path: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             path: path.into(),
             code: code.into(),
@@ -187,16 +244,9 @@ pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
             "body limit must be positive",
         ));
     }
-    if config.settings.rate_limit.enabled
-        && (config.settings.rate_limit.capacity == 0
-            || config.settings.rate_limit.refill_per_second <= 0.0)
-    {
-        issues.push(ValidationIssue::new(
-            "/settings/rateLimit",
-            "invalid_rate_limit",
-            "enabled token buckets require positive capacity and refill",
-        ));
-    }
+
+    validate_rate_limit_policy(config, &mut issues);
+
     if !(0.0..=1.0).contains(&config.settings.fault_injection.error_rate)
         || !(0.0..=1.0).contains(&config.settings.fault_injection.drop_rate)
     {
@@ -279,7 +329,118 @@ pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     issues
 }
 
+fn validate_rate_limit_policy(config: &MiddlewareConfig, issues: &mut Vec<ValidationIssue>) {
+    let policy = &config.settings.rate_limit;
+    if !policy.enabled {
+        return;
+    }
+
+    if policy.capacity == 0
+        || !policy.refill_per_second.is_finite()
+        || policy.refill_per_second <= 0.0
+    {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit",
+            "invalid_rate_limit",
+            "enabled rate limits require positive finite capacity and refill",
+        ));
+    }
+    if policy.policy_id.trim().is_empty() {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/policyId",
+            "required",
+            "rate-limit policy IDs must not be empty",
+        ));
+    }
+    if policy.key_by.is_empty() {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/keyBy",
+            "required",
+            "at least one rate-limit signal is required",
+        ));
+    }
+    if !policy
+        .key_by
+        .iter()
+        .copied()
+        .any(RateLimitSignal::is_principal_signal)
+    {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/keyBy",
+            "principal_required",
+            "route and method alone cannot identify a rate-limit principal",
+        ));
+    }
+    if matches!(policy.layer, RateLimitLayer::CloudflareEdge)
+        && policy
+            .key_by
+            .iter()
+            .copied()
+            .any(|signal| !signal.is_edge_safe())
+    {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/keyBy",
+            "edge_identity_forbidden",
+            "Cloudflare edge policies may use only IP, IP prefix, route, and method signals",
+        ));
+    }
+    if matches!(policy.layer, RateLimitLayer::Authorization)
+        && matches!(policy.failure_mode, RateLimitFailureMode::FailOpen)
+    {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/failureMode",
+            "authorization_fail_open_forbidden",
+            "authorization-layer rate limiting must not fail open",
+        ));
+    }
+    if policy.window_ms == 0 {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/windowMs",
+            "range",
+            "rate-limit windows must be positive",
+        ));
+    }
+    if policy.local_cache_max_entries == 0
+        || policy.local_cache_max_entries > MAX_LOCAL_RATE_LIMIT_ENTRIES
+    {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/localCacheMaxEntries",
+            "range",
+            format!(
+                "local rate-limit caches must contain between 1 and {MAX_LOCAL_RATE_LIMIT_ENTRIES} entries"
+            ),
+        ));
+    }
+    if policy.local_cache_ttl_ms < policy.window_ms {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/localCacheTtlMs",
+            "ttl_shorter_than_window",
+            "local cache TTL must be at least one policy window",
+        ));
+    }
+    if policy.key_namespace.trim().is_empty() || policy.key_version.trim().is_empty() {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit",
+            "key_domain_required",
+            "rate-limit key namespace and version must not be empty",
+        ));
+    }
+    if matches!(config.environment, RuntimeEnvironment::Production)
+        && matches!(
+            policy.key_derivation,
+            RateLimitKeyDerivationMode::EphemeralHmacSha256
+        )
+    {
+        issues.push(ValidationIssue::new(
+            "/settings/rateLimit/keyDerivation",
+            "production_requires_external_hmac",
+            "production rate limiting requires a stable external HMAC key",
+        ));
+    }
+}
+
 pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
+    let service_name = service_name.into();
     MiddlewareConfig {
         contract_version: CONTRACT_VERSION.to_owned(),
         environment: RuntimeEnvironment::Development,
@@ -298,7 +459,22 @@ pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
                 enabled: true,
                 capacity: 100,
                 refill_per_second: 20.0,
-                key_by: vec!["tenant".into(), "user".into(), "ip".into(), "route".into()],
+                key_by: vec![
+                    RateLimitSignal::Tenant,
+                    RateLimitSignal::User,
+                    RateLimitSignal::Ip,
+                    RateLimitSignal::Route,
+                ],
+                policy_id: "application-default".into(),
+                algorithm: RateLimitAlgorithm::TokenBucket,
+                layer: RateLimitLayer::Application,
+                failure_mode: RateLimitFailureMode::LocalOnly,
+                window_ms: 1_000,
+                local_cache_max_entries: MAX_LOCAL_RATE_LIMIT_ENTRIES,
+                local_cache_ttl_ms: 30_000,
+                key_namespace: service_name.clone(),
+                key_version: "v1".into(),
+                key_derivation: RateLimitKeyDerivationMode::EphemeralHmacSha256,
             },
             compression: CompressionPolicy {
                 enabled: true,
@@ -358,10 +534,73 @@ pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
             },
             ores_otel: OresOtelIntegration {
                 enabled: true,
-                service_name: service_name.into(),
+                service_name,
                 exporter_endpoint: None,
                 propagators: vec!["tracecontext".into(), "baggage".into()],
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_requires_stable_hmac_key_derivation() {
+        let mut config = default_config("test-service");
+        config.environment = RuntimeEnvironment::Production;
+        assert!(
+            validate_config(&config)
+                .iter()
+                .any(|issue| issue.code == "production_requires_external_hmac")
+        );
+
+        config.settings.rate_limit.key_derivation =
+            RateLimitKeyDerivationMode::ExternalHmacSha256;
+        assert!(
+            !validate_config(&config)
+                .iter()
+                .any(|issue| issue.code == "production_requires_external_hmac")
+        );
+    }
+
+    #[test]
+    fn edge_policy_rejects_authenticated_identity_signals() {
+        let mut config = default_config("test-service");
+        config.settings.rate_limit.layer = RateLimitLayer::CloudflareEdge;
+        config.settings.rate_limit.key_by = vec![
+            RateLimitSignal::Ip,
+            RateLimitSignal::User,
+            RateLimitSignal::Route,
+        ];
+        assert!(
+            validate_config(&config)
+                .iter()
+                .any(|issue| issue.code == "edge_identity_forbidden")
+        );
+    }
+
+    #[test]
+    fn local_cache_is_bounded_to_ten_thousand_entries() {
+        let mut config = default_config("test-service");
+        config.settings.rate_limit.local_cache_max_entries = 10_001;
+        assert!(
+            validate_config(&config)
+                .iter()
+                .any(|issue| issue.path.ends_with("localCacheMaxEntries"))
+        );
+    }
+
+    #[test]
+    fn authorization_layer_cannot_fail_open() {
+        let mut config = default_config("test-service");
+        config.settings.rate_limit.layer = RateLimitLayer::Authorization;
+        config.settings.rate_limit.failure_mode = RateLimitFailureMode::FailOpen;
+        assert!(
+            validate_config(&config)
+                .iter()
+                .any(|issue| issue.code == "authorization_fail_open_forbidden")
+        );
     }
 }
