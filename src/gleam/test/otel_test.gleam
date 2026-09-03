@@ -7,12 +7,9 @@ import oresoftware_next_loggers as log
 
 pub fn request_logger_is_pinned_to_authenticated_context_test() {
   let logger =
-    otel.options(
-      "middleware-test",
-      "gleam",
-      fn() { "record-1" },
-      fn() { "2026-09-03T00:00:00Z" },
-    )
+    otel.options("middleware-test", "gleam", fn() { "record-1" }, fn() {
+      "2026-09-03T00:00:00Z"
+    })
     |> otel.new_logger(otel.noop_transport())
   let context =
     ores_middleware.RequestContext(
@@ -33,8 +30,7 @@ pub fn request_logger_is_pinned_to_authenticated_context_test() {
   let record = log.record(event)
   let encoded = log.record_to_string(record)
 
-  assert record.trace_id
-    == Some("0123456789abcdef0123456789abcdef")
+  assert record.trace_id == Some("0123456789abcdef0123456789abcdef")
   assert record.routine_id == Some("request-42")
   assert string.contains(encoded, "\"request.id\":\"request-42\"")
   assert string.contains(encoded, "\"tenant.id\":\"tenant-7\"")
