@@ -5,6 +5,20 @@ use tokio::sync::Mutex;
 
 use crate::context::RequestContext;
 
+/// Trusted transport metadata inserted by the listener or framework adapter.
+///
+/// Never derive this value from a public request header. In-process TLS listeners
+/// should insert `TransportSecurity::secure()` into request extensions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TransportSecurity {
+    pub secure: bool,
+}
+
+impl TransportSecurity {
+    pub const fn secure() -> Self { Self { secure: true } }
+    pub const fn insecure() -> Self { Self { secure: false } }
+}
+
 #[derive(Debug, Clone)]
 pub struct RequestMetadata {
     pub method: String,
@@ -12,6 +26,7 @@ pub struct RequestMetadata {
     pub headers: BTreeMap<String, String>,
     pub remote_ip: Option<String>,
     pub content_length: Option<u64>,
+    pub transport_secure: bool,
 }
 
 #[derive(Debug, Clone)]
