@@ -114,6 +114,11 @@ jobs:
             ${{ runner.temp }}/zed-acceptance/receipt.json
             ${{ runner.temp }}/zed-acceptance/validate.json
             ${{ runner.temp }}/zed-acceptance/zed-version.txt
+            ${{ runner.temp }}/zed-acceptance/expected-archives.txt
+            ${{ runner.temp }}/zed-acceptance/package-first-names.txt
+            ${{ runner.temp }}/zed-acceptance/package-second-names.txt
+            ${{ runner.temp }}/zed-acceptance/package-first-digests.txt
+            ${{ runner.temp }}/zed-acceptance/package-second-digests.txt
             ${{ runner.temp }}/zed-acceptance/r2g-installed-file-digests.txt
           if-no-files-found: error
           retention-days: 90
