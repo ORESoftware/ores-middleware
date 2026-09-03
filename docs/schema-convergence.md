@@ -46,33 +46,59 @@ zed-pkg publication smoke test. The polyglot package remains one canonical
 repository artifact plus independently consumable Rust, TypeScript, Go, Gleam,
 Elixir, and Erlang slices.
 
-## SQL and ORM admission algorithm
+## Real SQL and ORM admission gate
 
-1. Parse each authored source independently.
-2. Emit lane-specific artifacts into separate target directories.
-3. Compare normalized types and requiredness.
-4. Compare normalized SQL definitions.
-5. Compare Diesel and SeaORM persistence semantics.
-6. Compile the generated Rust witnesses.
-7. Emit receipts with source digests, artifact digests, and tool versions.
-8. Admit only when there are zero unexplained findings.
+`scripts/orm_catalog_gate.py` executes a separate four-witness admission stage:
+
+1. Parse the TypeSpec and JSON Schema/OpenAPI authorities independently.
+2. Re-run normalized model, SQL, client-type, and ORM-shape projection parity.
+3. Generate an isolated Rust crate containing a real Diesel table/model from
+   the TypeSpec lane and a real SeaORM entity from the JSON Schema/OpenAPI lane.
+4. Generate and retain the crate lockfile, then compile both ORM implementations
+   against exact top-level Diesel and SeaORM versions.
+5. Execute the compiled witness to emit authority-tagged normalized manifests.
+6. Apply SQL_T and SQL_J to separate `typespec_lane` and `json_schema_lane`
+   schemas in a disposable PostgreSQL service.
+7. Read columns from `information_schema`, constraints from `pg_constraint`,
+   and indexes from `pg_indexes`.
+8. Compare each catalog with its own authority, compare SQL_T with SQL_J by
+   normalized catalog read-back, and compare the compiled Diesel/SeaORM contract
+   manifests.
+9. Retain source, SQL, ORM source, Cargo lockfile, catalog, tool-version, and
+   SHA-256 evidence in `ores.orm-catalog-convergence-report/v1`.
+
+Run it with a disposable PostgreSQL database:
+
+```bash
+python3 -m unittest scripts/test_orm_catalog_gate.py -v
+DATABASE_URL=postgresql://... python3 scripts/orm_catalog_gate.py
+```
+
+The dedicated `persistence-convergence` workflow runs on pull requests, pushes,
+manual dispatch, and a daily schedule. It uploads receipts even when the gate
+fails. The command is exposed as `scripts.orm-catalog` in `.zpkg.toml`, but is
+not part of the package-install smoke test because it intentionally requires a
+real PostgreSQL control plane.
+
+## Admission semantics
 
 A mismatch produces an immutable fingerprint and the state
-`STOPPED_FOR_EVALUATION`. Generation, publication, downstream bumps, and server
-adoption must not proceed until a human-reviewed resolution changes an authored
-source or records a narrowly scoped, owned, tested, expiring exception. A
-translation witness never decides which authored authority is correct.
+`STOPPED_FOR_EVALUATION`. Generation, publication, downstream bumps, migration,
+and server adoption must not proceed until a human-reviewed resolution changes
+an authored source or records a narrowly scoped, owned, tested, expiring
+exception. A translation or ORM witness never decides which authored authority
+is correct.
 
-## Current scope and next gate
+Passing proves convergence for the checked-in middleware idempotency contract
+and the exact retained compiler, ORM, SQL, and PostgreSQL evidence. It does not
+establish every future TypeSpec/JSON Schema construct, every database dialect,
+or every product repository. Each newly admitted construct needs fixtures and
+negative tests before the supported subset expands.
 
-The checked-in projection witness proves the mechanism with the middleware
-idempotency record. It catches property, type, nullability, enum, table,
-primary-key, unique-constraint, generated SQL, generated client type, and
-ORM-shape drift. The bidirectional shadow gate additionally catches lossy
-TypeSpec/JSON Schema conversion and both round-trip directions.
+## Fleet follow-through
 
-Issue #5 remains open for the database-backed admission stage: compile actual
-Diesel and SeaORM models, apply SQL_T and SQL_J independently to disposable
-PostgreSQL databases, normalize `pg_catalog`/`information_schema` read-back, and
-compare the TypeSpec, JSON Schema/OpenAPI, Diesel, and SeaORM witnesses. Linear
-DEN-3321, DEN-3959, DEN-3982, and DEN-4078 are the durable control-plane records.
+Issue #5 owns this repository-local database-backed gate. Fleet adoption remains
+tracked separately: applicable `*-lib-core` repositories must copy or depend on
+the versioned mechanism, retain independent source provenance, use disposable
+databases, and stop publication/promotion on discrepancies. Linear DEN-3321,
+DEN-3959, DEN-3982, and DEN-4078 remain the durable control-plane records.
