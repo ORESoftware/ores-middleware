@@ -13,6 +13,14 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
     },
+    "./nextjs": {
+      "types": "./dist/nextjs.d.ts",
+      "import": "./dist/nextjs.js"
+    },
+    "./proxy-auth": {
+      "types": "./dist/proxy-auth.d.ts",
+      "import": "./dist/proxy-auth.js"
+    },
     "./context": {
       "types": "./dist/context.d.ts",
       "import": "./dist/context.js"
