@@ -113,6 +113,33 @@ export function captureOperationContext(): CapturedOperationContext {
 }
 
 /**
+ * Builds a fresh immutable operation carrier from an explicit request context.
+ * This is used by framework adapters before policy hooks run and again after
+ * authentication enriches the actor/tenant fields. Only allow-listed values
+ * become ambient log fields.
+ */
+export function operationContextFromRequestContext(
+  context: RequestContext
+): CapturedOperationContext {
+  const fields: Record<string, unknown> = {
+    "request.id": context.requestId,
+    "trace.id": context.traceId,
+    "request.started_at_unix_ms": context.startedAtUnixMs
+  };
+  if (context.spanId) fields["span.id"] = context.spanId;
+  if (context.userId) fields["user.id"] = context.userId;
+  if (context.tenantId) fields["tenant.id"] = context.tenantId;
+  if (context.locale) fields["request.locale"] = context.locale;
+  if (context.deadlineUnixMs !== undefined) {
+    fields["request.deadline_unix_ms"] = context.deadlineUnixMs;
+  }
+  for (const [key, value] of Object.entries(context.baggage)) {
+    if (key.startsWith("otel.")) fields[`baggage.${key}`] = value;
+  }
+  return { requestContext: context, logContext: { fields } };
+}
+
+/**
  * Re-enters both captured carriers. Explicitly absent frames mask unrelated
  * ambient state while the callback runs and are restored afterward.
  */
