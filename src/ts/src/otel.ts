@@ -1,4 +1,4 @@
-import type { BaseLogger, LogContext, LogFields } from "@oresoftware/next-loggers";
+import defaultLogger from "@oresoftware/next-loggers";
 import {
   installLogContextProvider,
   runWithLogContext
@@ -16,22 +16,35 @@ import {
 export * from "@oresoftware/next-loggers";
 export * from "@oresoftware/next-loggers/context";
 
-const requestLoggers = new WeakMap<Request, BaseLogger>();
+/** Instance type of the canonical ores-otel default logger export. */
+export type OresLogger = typeof defaultLogger;
+export type OresLogFields = Record<string, unknown>;
+export interface OresLogContext {
+  loggedInUser?: OresLogFields & { id?: string };
+  users?: Array<OresLogFields & { id?: string }>;
+  fields?: OresLogFields;
+  traceId?: string;
+  traceIds?: string[];
+  routineId?: string;
+  tags?: string[];
+}
+
+const requestLoggers = new WeakMap<Request, OresLogger>();
 let contextProviderInstalled = false;
 
 export interface RequestWithLog extends Request {
-  readonly log: BaseLogger;
+  readonly log: OresLogger;
 }
 
 export interface OresOtelMiddlewareDependencies extends MiddlewareDependencies {
   /** File/service logger from ores-otel. A child is derived for every request. */
-  logger: BaseLogger;
+  logger: OresLogger;
   /** Optional framework-specific request-child factory. */
   requestLogger?: (
-    root: BaseLogger,
+    root: OresLogger,
     request: Request,
     context: RequestContext
-  ) => BaseLogger;
+  ) => OresLogger;
 }
 
 /**
@@ -46,8 +59,8 @@ export function ensureOresLogContextProvider(): void {
 }
 
 /** Maps the portable, data-only middleware context into ores-otel fields. */
-export function toOresLogContext(context: RequestContext): LogContext {
-  const fields: LogFields = {
+export function toOresLogContext(context: RequestContext): OresLogContext {
+  const fields: OresLogFields = {
     "request.id": context.requestId,
     "trace.id": context.traceId,
     "request.started_at_unix_ms": context.startedAtUnixMs
@@ -75,15 +88,15 @@ export function toOresLogContext(context: RequestContext): LogContext {
 
 /** Creates the default per-request child while preserving root transports. */
 export function createRequestLogger(
-  root: BaseLogger,
+  root: OresLogger,
   context: RequestContext
-): BaseLogger {
+): OresLogger {
   const logContext = toOresLogContext(context);
   return root.anew({
     name: root.name ? `${root.name}:request` : "request",
     fields: logContext.fields,
     loggedInUser: logContext.loggedInUser
-  });
+  }) as OresLogger;
 }
 
 /**
@@ -92,7 +105,7 @@ export function createRequestLogger(
  */
 export function attachRequestLogger(
   request: Request,
-  logger: BaseLogger
+  logger: OresLogger
 ): RequestWithLog {
   requestLoggers.set(request, logger);
   try {
@@ -108,10 +121,10 @@ export function attachRequestLogger(
   return request as RequestWithLog;
 }
 
-export function requestLogger(request: Request): BaseLogger | undefined {
+export function requestLogger(request: Request): OresLogger | undefined {
   const direct = (request as Request & { log?: unknown }).log;
   return direct && typeof direct === "object"
-    ? (direct as BaseLogger)
+    ? (direct as OresLogger)
     : requestLoggers.get(request);
 }
 
