@@ -366,8 +366,7 @@ fn write_receipt(
     results: &[RunResult],
     passed: bool,
 ) -> io::Result<()> {
-    let commit = git_value(root, &["rev-parse", "HEAD"])
-        .unwrap_or_else(|| "unknown".to_owned());
+    let commit = git_value(root, &["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -465,9 +464,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_iterations_and_unknown_suites() {
-        assert!(
-            parse_cli(["--iterations", "0"].into_iter().map(OsString::from)).is_err()
-        );
+        assert!(parse_cli(["--iterations", "0"].into_iter().map(OsString::from)).is_err());
         assert!(selected_suites(Some("python")).is_err());
     }
 
@@ -496,8 +493,7 @@ mod tests {
                 .any(|value| value.as_os_str() == OsStr::new("-shuffle=123"))
         );
         assert!(elixir_args.windows(2).any(|pair| {
-            pair[0].as_os_str() == OsStr::new("--seed")
-                && pair[1].as_os_str() == OsStr::new("123")
+            pair[0].as_os_str() == OsStr::new("--seed") && pair[1].as_os_str() == OsStr::new("123")
         }));
     }
 
