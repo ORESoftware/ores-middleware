@@ -102,34 +102,42 @@ a second independent authority pair for a representative idempotency record:
 - `contracts/persistence/idempotency-record.tsp`
 - `contracts/persistence/idempotency-record.schema.json`
 
-`scripts/schema_convergence.py` projects both lanes independently and compares:
+`tools/contract-parity/src/bin/persistence_codegen.rs` reads each authored
+source independently. Both lanes generate the same common products without
+copying or translating one authority into the other:
 
-1. field names, logical types, requiredness, enum values, table names, primary
-   keys, and unique constraints;
-2. SQL_T and SQL_J;
-3. independently generated TypeScript client types;
-4. a TypeSpec/Diesel-shaped Rust witness and a JSON-Schema/SeaORM-shaped Rust
-   witness; and
-5. the normalized persistence semantics of both ORM witnesses.
+1. normalized field, type, requiredness, enum, table, primary-key, and unique
+   constraint semantics;
+2. `SQL_T` and `SQL_J`;
+3. TypeScript interfaces and executable validators;
+4. Rust, Go, Gleam, Elixir, and Erlang types/runtime code;
+5. `Diesel_T` and `SeaORM_T`; and
+6. `Diesel_J` and `SeaORM_J`.
 
-Both Rust witnesses are compiled when `rustc` is available. Any difference
-writes a deterministic discrepancy fingerprint and exits with code 2 and
-`STOPPED_FOR_EVALUATION`. The checker never selects a winning authority or ORM.
+The only executable database admission path is `scripts/orm_matrix_gate.py`.
+The older `scripts/orm_catalog_gate.py` remains a helper import for catalog and
+code-generation functions, but its command-line entrypoint delegates to the
+complete matrix. A green result can therefore never mean only
+TypeSpec-to-Diesel and JSON-Schema-to-SeaORM were tested.
 
-These lightweight witnesses prove the fail-closed projection mechanism; they do
-not pretend to be complete Diesel or SeaORM integrations. Before generated
-persistence artifacts are released, issue #5 requires:
+| Human-authored authority | Diesel | SeaORM | SQL/catalog |
+| --- | --- | --- | --- |
+| TypeSpec | `typespec-diesel` | `typespec-seaorm` | `SQL_T` / `typespec_lane` |
+| JSON Schema/OpenAPI | `json-schema-openapi-diesel` | `json-schema-openapi-seaorm` | `SQL_J` / `json_schema_lane` |
 
-1. actual Diesel and SeaORM model/migration compilation;
-2. independent application of SQL_T and SQL_J to disposable PostgreSQL
-   databases;
-3. `pg_catalog`/`information_schema` read-back into one normalized catalog;
-4. four-way comparison among both database catalogs and both ORMs; and
-5. an immutable receipt with source digests and exact tool versions.
+The gate pins and compiles real Diesel and SeaORM implementations, executes all
+four authority/ORM manifests, applies independently generated SQL to separate
+disposable PostgreSQL schemas, and normalizes `pg_catalog` plus
+`information_schema` read-back. It compares ORM semantics within each
+authority, each ORM across authorities, and both database catalogs. Relative
+CLI evidence paths are resolved against the selected repository root before
+artifacts are hashed, so a valid custom `--output-root` cannot fail only during
+receipt construction.
 
-Generation, publication, dependency bumps, and server adoption stop on every
-unexplained mismatch until a human-reviewed source change or a narrow, owned,
-tested, expiring exception resolves it.
+Any source, generated-code, ORM, SQL, compiler, runtime, or catalog mismatch
+receives a deterministic fingerprint and enters `STOPPED_FOR_EVALUATION`.
+Generation, publication, migration, dependency promotion, server adoption, and
+deployment remain blocked. No authority or ORM wins by precedence or fallback.
 
 ## Header, path, and representation behavior
 

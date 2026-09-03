@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from scripts.orm_catalog_gate import (
@@ -109,6 +110,13 @@ class OrmCatalogGateTests(unittest.TestCase):
         self.assertNotIn("sensitive-user", rendered)
         self.assertNotIn("sensitive-password", rendered)
         self.assertNotIn("sslmode", rendered)
+
+    def test_compatibility_entrypoint_delegates_to_full_matrix(self) -> None:
+        from scripts.orm_catalog_gate import main
+
+        with patch("scripts.orm_matrix_gate.main", return_value=17) as matrix_main:
+            self.assertEqual(main(), 17)
+        matrix_main.assert_called_once_with()
 
 
 if __name__ == "__main__":

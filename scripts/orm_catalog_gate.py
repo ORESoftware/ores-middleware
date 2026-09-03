@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Compile real Diesel/SeaORM witnesses and compare two PostgreSQL catalogs.
+"""Compatibility helpers for the full peer-authority ORM matrix.
 
-TypeSpec and JSON Schema/OpenAPI stay independent top-level authorities. The
-TypeSpec lane generates the Diesel witness and SQL_T; the JSON Schema/OpenAPI
-lane generates the SeaORM witness and SQL_J. Both SQL lanes are applied to
-separate PostgreSQL schemas and read back through information_schema/pg_catalog.
-Any source, ORM, SQL, or catalog mismatch stops evaluation with exit code 2.
+TypeSpec and JSON Schema/OpenAPI remain independent top-level authorities. Each
+source must generate SQL plus both Diesel and SeaORM code. This module retains
+shared catalog and code-generation helpers for compatibility; its executable
+entrypoint delegates to ``scripts.orm_matrix_gate`` so no command can admit the
+old asymmetric TypeSpec-to-Diesel / JSON-Schema-to-SeaORM pairing.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -744,7 +743,7 @@ def run(
     return findings, report
 
 
-def main() -> int:
+def legacy_main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--output-root", type=Path)
@@ -795,6 +794,13 @@ def main() -> int:
         f"report={report_path}"
     )
     return 0
+
+
+def main() -> int:
+    """Run the only supported four-way ORM and PostgreSQL admission gate."""
+    from scripts.orm_matrix_gate import main as matrix_main
+
+    return matrix_main()
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from scripts.orm_matrix_gate import (
     compare_orm_matrix,
     expected_manifests,
     render_rust_matrix,
+    resolve_cli_path,
 )
 from scripts.orm_catalog_gate import Discrepancy
 from scripts.schema_convergence import ROOT, parse_json_schema, parse_typespec
@@ -82,6 +83,18 @@ class OrmMatrixGateTests(unittest.TestCase):
         kinds = {finding.kind for finding in findings}
         self.assertIn("typespec-seaorm-compiled-manifest-mismatch", kinds)
         self.assertIn("four-way-orm-contract-mismatch", kinds)
+
+    def test_relative_evidence_paths_are_root_anchored(self) -> None:
+        resolved = resolve_cli_path(
+            self.root,
+            Path("target/relative-evidence"),
+            self.root / "unused",
+        )
+        self.assertEqual(
+            resolved,
+            (self.root / "target/relative-evidence").resolve(),
+        )
+        self.assertTrue(resolved.is_relative_to(self.root.resolve()))
 
 
 if __name__ == "__main__":

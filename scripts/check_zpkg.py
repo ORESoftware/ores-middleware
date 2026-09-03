@@ -136,6 +136,38 @@ def validate(root: Path) -> list[str]:
         if not (root / required_path).is_file():
             errors.append(f"missing required convergence/package gate file: {required_path}")
 
+    matrix_source = (root / "scripts/orm_matrix_gate.py").read_text(encoding="utf-8")
+    for lane in (
+        "typespec-diesel",
+        "typespec-seaorm",
+        "json-schema-openapi-diesel",
+        "json-schema-openapi-seaorm",
+    ):
+        if lane not in matrix_source:
+            errors.append(f"four-way ORM matrix must retain lane {lane!r}")
+    for required_text in (
+        "def resolve_cli_path(",
+        "output_root = resolve_cli_path(",
+        "report_path = resolve_cli_path(",
+    ):
+        if required_text not in matrix_source:
+            errors.append(
+                f"ORM matrix must root-anchor relative evidence paths: missing {required_text!r}"
+            )
+
+    compatibility_source = (root / "scripts/orm_catalog_gate.py").read_text(
+        encoding="utf-8"
+    )
+    for required_text in (
+        "from scripts.orm_matrix_gate import main as matrix_main",
+        "return matrix_main()",
+    ):
+        if required_text not in compatibility_source:
+            errors.append(
+                "legacy ORM entrypoint must delegate to the complete "
+                f"TypeSpec/JSON-Schema x Diesel/SeaORM matrix: missing {required_text!r}"
+            )
+
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
     if smoke_test != EXPECTED_INSTALLED_SMOKE_TEST:
         errors.append(
