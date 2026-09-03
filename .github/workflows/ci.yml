@@ -99,7 +99,7 @@ jobs:
         with:
           otp-version: "27.3.4.14"
           elixir-version: "1.18.4"
-          gleam-version: "1.14.0"
+          gleam-version: "1.18.1"
           rebar3-version: "3.24.0"
 
       - name: Compile and test the three BEAM packages
