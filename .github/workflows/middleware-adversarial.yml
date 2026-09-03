@@ -32,25 +32,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
-      - name: Test the compiled stress runner
+          components: rustfmt, clippy
+      - name: Format, lint, and test the compiled stress runner
         shell: bash
         run: |
           set -euo pipefail
+          manifest="tools/middleware-adversarial-runner/Cargo.toml"
+          package="middleware-adversarial-runner"
+          cargo fmt \
+            --manifest-path "$manifest" \
+            --package "$package" \
+            -- \
+            --check
+          cargo clippy \
+            --manifest-path "$manifest" \
+            --package "$package" \
+            --all-targets \
+            -- \
+            -D warnings
           cargo test \
-            --manifest-path tools/middleware-adversarial-runner/Cargo.toml
+            --manifest-path "$manifest" \
+            --package "$package"
           mapfile -t suites < <(
             cargo run \
               --quiet \
-              --manifest-path tools/middleware-adversarial-runner/Cargo.toml \
+              --manifest-path "$manifest" \
+              --package "$package" \
               -- \
               --list
           )
-          test "${#suites[@]}" -eq 6
+          expected=(typescript golang rust gleam elixir erlang)
+          test "${#suites[@]}" -eq "${#expected[@]}"
+          for index in "${!expected[@]}"; do
+            test "${suites[$index]}" = "${expected[$index]}"
+          done
 
   native-stress:
     needs: runner-unit
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -128,7 +148,7 @@ jobs:
               count="$(jq -r '.inputs.iterations // 10' "$GITHUB_EVENT_PATH")"
               ;;
             *)
-              count=3
+              count=5
               ;;
           esac
           if ! [[ "$count" =~ ^([1-9]|[1-9][0-9]|100)$ ]]; then
@@ -144,11 +164,48 @@ jobs:
           cargo run \
             --quiet \
             --manifest-path tools/middleware-adversarial-runner/Cargo.toml \
+            --package middleware-adversarial-runner \
             -- \
             --language "${{ matrix.language }}" \
             --iterations "${{ steps.iterations.outputs.count }}" \
             --output-dir "target/adversarial/${{ matrix.language }}/logs" \
             --receipt "target/adversarial/${{ matrix.language }}/receipt.json"
+
+      - name: Validate deterministic receipt and log inventory
+        shell: bash
+        env:
+          LANGUAGE_NAME: ${{ matrix.language }}
+          ITERATION_COUNT: ${{ steps.iterations.outputs.count }}
+        run: |
+          set -euo pipefail
+          receipt="target/adversarial/${LANGUAGE_NAME}/receipt.json"
+          head_sha="$(git rev-parse HEAD)"
+          jq -e \
+            --arg language "$LANGUAGE_NAME" \
+            --arg commit "$head_sha" \
+            --argjson count "$ITERATION_COUNT" \
+            '
+              .schema == "ores-middleware/adversarial-receipt/v1" and
+              .commit == $commit and
+              .passed == true and
+              (.runs | length) == $count and
+              ([.runs[].iteration] == [range(1; $count + 1)]) and
+              (([.runs[].seed] | unique | length) == $count) and
+              all(
+                .runs[];
+                .suite == $language and
+                .passed == true and
+                .exit_code == 0 and
+                (.seed | type) == "number" and
+                (.duration_ms | type) == "number" and
+                (.command | type) == "string" and
+                (.log | type) == "string"
+              )
+            ' \
+            "$receipt"
+          while IFS= read -r log_path; do
+            test -f "$log_path"
+          done < <(jq -r '.runs[].log' "$receipt")
 
       - name: Upload deterministic receipt and per-run logs
         if: ${{ always() }}

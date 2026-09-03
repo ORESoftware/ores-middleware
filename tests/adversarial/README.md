@@ -2,7 +2,7 @@
 
 The ordinary language test suites prove adapter behavior once. The adversarial runner repeats those same native suites under strict runtime settings, randomized native test order where supported, high test concurrency, and Go's race detector.
 
-The runner is implemented in Rust so orchestration, option parsing, deterministic seed derivation, process execution, and receipt generation are compiled and type checked.
+The runner is implemented in Rust so orchestration, option parsing, deterministic seed derivation, process execution, and receipt generation are compiled and type checked. It is a member of the repository Cargo workspace and is gated by `rustfmt`, Clippy with warnings denied, and unit tests before any native runtime matrix starts.
 
 ## Invariants exercised
 
@@ -17,11 +17,11 @@ Each run must preserve the properties asserted by the native adapter tests:
 
 ## Local use
 
-Run all six native suites three times:
+Run all six native suites five times:
 
 ```bash
 cargo run --manifest-path tools/middleware-adversarial-runner/Cargo.toml -- \
-  --iterations 3 \
+  --iterations 5 \
   --receipt target/adversarial/receipt.json
 ```
 
@@ -37,4 +37,4 @@ Set `ORES_MIDDLEWARE_STRESS_SEED` to replay a recorded run. Each native invocati
 
 ## CI policy
 
-Pull requests and default-branch pushes run three iterations per language. Scheduled runs use ten iterations. Manual runs accept an explicit value from 1 through 100. Any failed iteration fails the job, while all completed logs and the receipt are uploaded even after a test failure.
+Pull requests and default-branch pushes run five complete iterations per language. Scheduled runs use ten iterations. Manual runs accept an explicit value from 1 through 100. The workflow validates the receipt schema, exact checked-out commit, suite name, iteration sequence, unique replay seeds, successful exit codes, and existence of every referenced log file. Any failed iteration or malformed receipt fails the job, while all completed logs and the receipt are uploaded even after a test failure.
