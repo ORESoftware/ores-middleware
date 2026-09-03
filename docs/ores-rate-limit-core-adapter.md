@@ -48,12 +48,17 @@ promotion:
 - VCS tag;
 - exact VCS commit.
 
-The first admitted release is expected to be
-`ores-rate-limit/ores-rl-lib-core@0.1.0`, tag `v0.1.0`, from reviewed core
-commit `f66103b6ea619a033fc1750219226d53f461a459`.
+The first admitted release is
+`ores-rate-limit/ores-rl-lib-core@0.1.0`, annotated tag `v0.1.0`, at reviewed
+merge commit `cfc81aef5d1de60ff6c46798745a6b3f970bc39d`. The tag was created only
+after the source, live Redis, backend-free, formal, Zed pack, archive, and local
+consumer checks passed. Remote publication is still fail-closed because the
+protected `zed-pkg` environment did not provide `ZED_PKG_TOKEN`; no lock may be
+created until that approved secret channel is repaired and the package is
+actually published.
 
 There is no direct Cargo Git fallback, authenticated Git URL, copied source
-fallback, or branch-based dependency. Missing release, lock, authorization,
+fallback, or branch-based dependency. Missing publication, lock, authorization,
 artifact, provenance, or installed path is a release-blocking failure.
 
 ## Runtime role
@@ -97,7 +102,8 @@ never raw IP, email, token, subject, tenant, or a full principal digest.
 The dedicated workflow must:
 
 1. verify the root Zed dependency and absence of private Git fallbacks;
-2. validate the exact frozen lock and expected core source commit;
+2. validate the exact frozen lock, `v0.1.0` tag, and commit
+   `cfc81aef5d1de60ff6c46798745a6b3f970bc39d`;
 3. install with `zed install --frozen --install-mode copy`;
 4. prove the installed package manifest exists;
 5. compile with warnings denied and run the adapter tests;
