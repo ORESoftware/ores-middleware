@@ -1,0 +1,49 @@
+name: apply-ts-http-lifecycle-boundary
+
+on:
+  push:
+    branches:
+      - agent/ts-http-lifecycle-boundary-20260903
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-ts-http-lifecycle-boundary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/ts-http-lifecycle-boundary-20260903
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
+
+      - name: Apply exact source transformations
+        run: python3 .agent-patches/apply_ts_lifecycle.py
+
+      - name: Install and test TypeScript package
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts
+          npm test --prefix src/ts
+
+      - name: Commit verified source-only result
+        run: |
+          set -euo pipefail
+          rm -f .agent-patches/apply_ts_lifecycle.py
+          rmdir .agent-patches 2>/dev/null || true
+          rm -f .github/workflows/apply-ts-http-lifecycle-boundary.yml
+          git diff --check
+          git config user.name "ores-gh-bot"
+          git config user.email "ores-gh-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ts): scope the full HTTP middleware lifecycle"
+          git push origin HEAD:agent/ts-http-lifecycle-boundary-20260903
