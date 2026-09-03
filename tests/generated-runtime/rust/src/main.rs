@@ -7,12 +7,14 @@ use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
+use std::io::{Error, ErrorKind};
 use std::path::Path;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 const WITNESS_SCHEMA: &str = "ores.generated-runtime-witness/v1";
 const GENERATED_SOURCE: &str = include_str!("generated.rs");
+const USAGE: &str = "usage: generated-rust-witness <fixture.json> <authority>";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,7 +75,9 @@ fn source_shape_guard() -> Result<(), String> {
     ];
     for fragment in required_fragments {
         if !GENERATED_SOURCE.contains(fragment) {
-            return Err(format!("generated Rust source is missing required fragment: {fragment}"));
+            return Err(format!(
+                "generated Rust source is missing required fragment: {fragment}"
+            ));
         }
     }
     Ok(())
@@ -157,7 +161,10 @@ fn normalize(record: generated::IdempotencyRecord) -> Value {
     object.insert("createdAt".to_owned(), json!(record.created_at));
     object.insert("expiresAt".to_owned(), json!(record.expires_at));
     object.insert("id".to_owned(), json!(record.id));
-    object.insert("idempotencyKey".to_owned(), json!(record.idempotency_key));
+    object.insert(
+        "idempotencyKey".to_owned(),
+        json!(record.idempotency_key),
+    );
     object.insert("requestHash".to_owned(), json!(record.request_hash));
     if let Some(value) = record.response_body {
         object.insert("responseBody".to_owned(), json!(value));
@@ -174,19 +181,25 @@ fn load_fixture(path: &Path) -> Result<Fixture, Box<dyn std::error::Error>> {
     Ok(serde_json::from_slice(&fs::read(path)?)?)
 }
 
+fn invalid_input(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::InvalidInput, message.into())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = env::args().skip(1);
-    let fixture_path = arguments
-        .next()
-        .ok_or("usage: generated-rust-witness <fixture.json> <authority>")?;
-    let authority = arguments
-        .next()
-        .ok_or("usage: generated-rust-witness <fixture.json> <authority>")?;
+    let fixture_path = arguments.next().ok_or_else(|| invalid_input(USAGE))?;
+    let authority = arguments.next().ok_or_else(|| invalid_input(USAGE))?;
     if arguments.next().is_some() {
-        return Err("usage: generated-rust-witness <fixture.json> <authority>".into());
+        return Err(invalid_input(USAGE).into());
     }
 
-    source_shape_guard().map_err(|message| format!("Rust source-shape witness failed: {message}"))?;
+    if let Err(message) = source_shape_guard() {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Rust source-shape witness failed: {message}"),
+        )
+        .into());
+    }
     let fixture = load_fixture(Path::new(&fixture_path))?;
 
     let mut cases = Vec::with_capacity(fixture.cases.len());
