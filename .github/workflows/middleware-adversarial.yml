@@ -1,0 +1,217 @@
+name: middleware-adversarial
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Native-suite repetitions per language
+        required: false
+        default: 10
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: middleware-adversarial-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runner-unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+      - name: Format, lint, and test the compiled stress runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="tools/middleware-adversarial-runner/Cargo.toml"
+          package="middleware-adversarial-runner"
+          cargo fmt \
+            --manifest-path "$manifest" \
+            --package "$package" \
+            -- \
+            --check
+          cargo clippy \
+            --manifest-path "$manifest" \
+            --package "$package" \
+            --all-targets \
+            -- \
+            -D warnings
+          cargo test \
+            --manifest-path "$manifest" \
+            --package "$package"
+          mapfile -t suites < <(
+            cargo run \
+              --quiet \
+              --manifest-path "$manifest" \
+              --package "$package" \
+              -- \
+              --list
+          )
+          expected=(typescript golang rust gleam elixir erlang)
+          test "${#suites[@]}" -eq "${#expected[@]}"
+          for index in "${!expected[@]}"; do
+            test "${suites[$index]}" = "${expected[$index]}"
+          done
+
+  native-stress:
+    needs: runner-unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        language:
+          - typescript
+          - golang
+          - rust
+          - gleam
+          - elixir
+          - erlang
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+
+      - if: ${{ matrix.language == 'typescript' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
+
+      - if: ${{ matrix.language == 'golang' }}
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25.0"
+          cache: false
+
+      - if: ${{ matrix.language == 'gleam' || matrix.language == 'elixir' || matrix.language == 'erlang' }}
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+          gleam-version: "1.18.1"
+          rebar3-version: latest
+
+      - if: ${{ matrix.language == 'typescript' }}
+        name: Install TypeScript dependencies
+        run: npm ci --prefix src/ts
+
+      - if: ${{ matrix.language == 'golang' }}
+        name: Download Go modules
+        run: cd src/golang && go mod download
+
+      - if: ${{ matrix.language == 'rust' }}
+        name: Fetch Rust middleware dependencies
+        run: cargo fetch --manifest-path src/rust/Cargo.toml
+
+      - if: ${{ matrix.language == 'gleam' }}
+        name: Resolve and compile Gleam dependencies
+        run: cd src/gleam && gleam build
+
+      - if: ${{ matrix.language == 'elixir' }}
+        name: Fetch Elixir dependencies
+        run: cd src/elixir && mix deps.get
+
+      - if: ${{ matrix.language == 'erlang' }}
+        name: Resolve and compile Erlang dependencies
+        run: cd src/erlang && rebar3 compile
+
+      - id: iterations
+        name: Resolve bounded repetition count
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            schedule)
+              count=10
+              ;;
+            workflow_dispatch)
+              count="$(jq -r '.inputs.iterations // 10' "$GITHUB_EVENT_PATH")"
+              ;;
+            *)
+              count=5
+              ;;
+          esac
+          if ! [[ "$count" =~ ^([1-9]|[1-9][0-9]|100)$ ]]; then
+            echo "iterations must be an integer from 1 through 100" >&2
+            exit 2
+          fi
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Repeat the native ${{ matrix.language }} middleware suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run \
+            --quiet \
+            --manifest-path tools/middleware-adversarial-runner/Cargo.toml \
+            --package middleware-adversarial-runner \
+            -- \
+            --language "${{ matrix.language }}" \
+            --iterations "${{ steps.iterations.outputs.count }}" \
+            --output-dir "target/adversarial/${{ matrix.language }}/logs" \
+            --receipt "target/adversarial/${{ matrix.language }}/receipt.json"
+
+      - name: Validate deterministic receipt and log inventory
+        shell: bash
+        env:
+          LANGUAGE_NAME: ${{ matrix.language }}
+          ITERATION_COUNT: ${{ steps.iterations.outputs.count }}
+        run: |
+          set -euo pipefail
+          receipt="target/adversarial/${LANGUAGE_NAME}/receipt.json"
+          head_sha="$(git rev-parse HEAD)"
+          jq -e \
+            --arg language "$LANGUAGE_NAME" \
+            --arg commit "$head_sha" \
+            --argjson count "$ITERATION_COUNT" \
+            '
+              .schema == "ores-middleware/adversarial-receipt/v1" and
+              .commit == $commit and
+              .passed == true and
+              (.runs | length) == $count and
+              ([.runs[].iteration] == [range(1; $count + 1)]) and
+              (([.runs[].seed] | unique | length) == $count) and
+              all(
+                .runs[];
+                .suite == $language and
+                .passed == true and
+                .exit_code == 0 and
+                (.seed | type) == "number" and
+                (.duration_ms | type) == "number" and
+                (.command | type) == "string" and
+                (.log | type) == "string"
+              )
+            ' \
+            "$receipt"
+          while IFS= read -r log_path; do
+            test -f "$log_path"
+          done < <(jq -r '.runs[].log' "$receipt")
+
+      - name: Upload deterministic receipt and per-run logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: middleware-adversarial-${{ matrix.language }}-${{ github.run_id }}
+          path: target/adversarial/${{ matrix.language }}
+          if-no-files-found: warn
+          retention-days: 90

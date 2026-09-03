@@ -1,3 +1,6 @@
 [workspace]
-members = ["src/rust"]
+members = [
+    "src/rust",
+    "tools/middleware-adversarial-runner",
+]
 resolver = "2"
