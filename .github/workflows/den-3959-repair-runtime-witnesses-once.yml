@@ -49,7 +49,6 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           generator = Path('tools/contract-parity/src/bin/persistence_codegen.rs')
           text = generator.read_text(encoding='utf-8')
@@ -63,29 +62,36 @@ jobs:
               '  value: String,\\n'
               ') -> Result(IdempotencyStatus, Nil) {{\\n'
           )
-          if text.count(old_gleam_signature) != 1:
+          old_count = text.count(old_gleam_signature)
+          new_count = text.count(new_gleam_signature)
+          if old_count == 1 and new_count == 0:
+              text = text.replace(old_gleam_signature, new_gleam_signature, 1)
+          elif old_count == 0 and new_count == 1:
+              pass
+          else:
               raise SystemExit(
-                  f'expected one generated Gleam signature, found '
-                  f'{text.count(old_gleam_signature)}'
+                  'unexpected generated Gleam signature state: '
+                  f'old={old_count}, new={new_count}'
               )
-          text = text.replace(old_gleam_signature, new_gleam_signature, 1)
 
-          status_pattern = re.compile(
-              r'    let status_type = enum_values\n'
-              r'        \.iter\(\)\n'
-              r'        \.map\(\|value\| format!\("<<\\\\"\{value\}\\\\">>"\)\)\n'
-              r'        \.collect::<Vec<_>>\(\)\n'
-              r'        \.join\(" \| "\);'
-          )
-          text, count = status_pattern.subn(
+          erlang_replacement = (
               '    // Erlang types cannot express singleton binary literals. The wire\n'
               '    // vocabulary remains exact in valid_idempotency_status/1 below.\n'
-              '    let status_type = "binary()";',
-              text,
-              count=1,
+              '    let status_type = "binary()";'
           )
-          if count != 1:
-              raise SystemExit(f'expected one Erlang singleton-binary type renderer, found {count}')
+          if erlang_replacement not in text:
+              start_marker = '    let status_type = enum_values\n'
+              end_marker = '        .join(" | ");'
+              start = text.find(start_marker)
+              end = text.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+              if start < 0 or end < 0:
+                  raise SystemExit(
+                      'could not locate the generated Erlang status-type renderer'
+                  )
+              end += len(end_marker)
+              text = text[:start] + erlang_replacement + text[end:]
+          if text.count('let status_type = "binary()";') != 1:
+              raise SystemExit('expected exactly one normalized Erlang status renderer')
           generator.write_text(text, encoding='utf-8')
 
           rust_witness = Path('tests/generated-runtime/rust/src/main.rs')
@@ -97,26 +103,37 @@ jobs:
                   'optional_i32(object, "responseStatus")?',
           }
           for old, new in replacements.items():
-              if rust_text.count(old) != 1:
-                  raise SystemExit(f'expected one Rust witness expression: {old}')
-              rust_text = rust_text.replace(old, new, 1)
+              old_count = rust_text.count(old)
+              new_count = rust_text.count(new)
+              if old_count == 1 and new_count == 0:
+                  rust_text = rust_text.replace(old, new, 1)
+              elif old_count == 0 and new_count == 1:
+                  pass
+              else:
+                  raise SystemExit(
+                      f'unexpected Rust witness state for {old!r}: '
+                      f'old={old_count}, new={new_count}'
+                  )
           rust_witness.write_text(rust_text, encoding='utf-8')
 
           elixir_witness = Path('tests/generated-runtime/elixir_witness.exs')
           elixir_text = elixir_witness.read_text(encoding='utf-8')
           anchor = '  def main([fixture_path, generated_path, authority]) do\n'
-          replacement = (
-              '  def main(["--" | arguments]), do: main(arguments)\n\n'
-              + anchor
-          )
-          if elixir_text.count(anchor) != 1:
-              raise SystemExit(f'expected one Elixir main clause, found {elixir_text.count(anchor)}')
-          if 'def main(["--" | arguments])' in elixir_text:
-              raise SystemExit('Elixir argument-normalization clause already exists')
-          elixir_witness.write_text(
-              elixir_text.replace(anchor, replacement, 1),
-              encoding='utf-8',
-          )
+          normalized = '  def main(["--" | arguments]), do: main(arguments)\n'
+          if normalized not in elixir_text:
+              if elixir_text.count(anchor) != 1:
+                  raise SystemExit(
+                      f'expected one Elixir main clause, found '
+                      f'{elixir_text.count(anchor)}'
+                  )
+              elixir_text = elixir_text.replace(
+                  anchor,
+                  normalized + '\n' + anchor,
+                  1,
+              )
+          if elixir_text.count(normalized) != 1:
+              raise SystemExit('expected exactly one Elixir argument-normalization clause')
+          elixir_witness.write_text(elixir_text, encoding='utf-8')
           PY
           rustfmt --edition 2024 \
             tools/contract-parity/src/bin/persistence_codegen.rs \
