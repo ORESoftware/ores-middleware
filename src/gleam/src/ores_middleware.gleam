@@ -235,7 +235,7 @@ pub fn validate_config(config: Config) -> List(ValidationIssue) {
     config.rate_limit_enabled
     && {
       config.rate_limit_capacity <= 0
-      || config.rate_limit_refill_per_second <= 0.0
+      || config.rate_limit_refill_per_second <=. 0.0
     }
   {
     True -> [
@@ -249,10 +249,10 @@ pub fn validate_config(config: Config) -> List(ValidationIssue) {
     False -> issues
   }
   let issues = case
-    config.fault_error_rate < 0.0
-    || config.fault_error_rate > 1.0
-    || config.fault_drop_rate < 0.0
-    || config.fault_drop_rate > 1.0
+    config.fault_error_rate <. 0.0
+    || config.fault_error_rate >. 1.0
+    || config.fault_drop_rate <. 0.0
+    || config.fault_drop_rate >. 1.0
   {
     True -> [
       ValidationIssue(
@@ -451,13 +451,13 @@ fn dispatch(
     False -> Nil
   }
   case
-    config.fault_injection_enabled && random_float() < config.fault_drop_rate
+    config.fault_injection_enabled && random_float() <. config.fault_drop_rate
   {
     True -> problem(503, "fault_drop", "injected transport drop")
     False ->
       case
         config.fault_injection_enabled
-        && random_float() < config.fault_error_rate
+        && random_float() <. config.fault_error_rate
       {
         True -> problem(500, "fault_error", "injected middleware error")
         False -> execute(config, hooks, request, next, context)
