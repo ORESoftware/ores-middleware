@@ -60,9 +60,60 @@ enum IntegrationMode {
 
 enum RateLimitKey {
   ip: "ip",
+  ipPrefix: "ip-prefix",
   user: "user",
+  subject: "subject",
+  email: "email",
   tenant: "tenant",
+  organization: "organization",
+  session: "session",
+  device: "device",
+  apiKey: "api-key",
   route: "route",
+  method: "method",
+}
+
+enum RateLimitAlgorithm {
+  tokenBucket: "token-bucket",
+  slidingWindowCounter: "sliding-window-counter",
+  fixedWindow: "fixed-window",
+  concurrency: "concurrency",
+}
+
+enum RateLimitLayer {
+  cloudflareEdge: "cloudflare-edge",
+  kubernetesIngress: "kubernetes-ingress",
+  serviceMesh: "service-mesh",
+  application: "application",
+  authorization: "authorization",
+}
+
+enum RateLimitFailureMode {
+  failOpen: "fail-open",
+  failClosed: "fail-closed",
+  localOnly: "local-only",
+}
+
+enum RateLimitKeyDerivationMode {
+  ephemeralHmacSha256: "ephemeral-hmac-sha256",
+  externalHmacSha256: "external-hmac-sha256",
+}
+
+enum RateLimitDecisionKind {
+  allowed: "allowed",
+  denied: "denied",
+  degradedAllowed: "degraded-allowed",
+  degradedDenied: "degraded-denied",
+}
+
+enum RateLimitDecisionSource {
+  localMemory: "local-memory",
+  redis: "redis",
+  cloudflareCache: "cloudflare-cache",
+  kubernetesIngress: "kubernetes-ingress",
+  serviceMesh: "service-mesh",
+  authorization: "authorization",
+  unknown: "unknown",
 }
 
 enum ContentRepresentation {
@@ -86,11 +137,43 @@ model RequestContext {
   baggage: StringMap;
 }
 
+/**
+ * Layered rate-limit policy. New fields are optional for 1.0 compatibility;
+ * adapters apply the documented defaults and must never persist raw identity values.
+ */
 model RateLimitPolicy {
   enabled: boolean;
   capacity: int32;
   refillPerSecond: float64;
   keyBy: RateLimitKey[];
+  policyId?: string;
+  algorithm?: RateLimitAlgorithm;
+  layer?: RateLimitLayer;
+  failureMode?: RateLimitFailureMode;
+  windowMs?: int64;
+  localCacheMaxEntries?: int32;
+  localCacheTtlMs?: int64;
+  keyNamespace?: string;
+  keyVersion?: string;
+  keyDerivation?: RateLimitKeyDerivationMode;
+}
+
+model RateLimitPrincipal {
+  digest: string;
+  keyVersion: string;
+}
+
+model RateLimitDecision {
+  kind: RateLimitDecisionKind;
+  source: RateLimitDecisionSource;
+  policyId: string;
+  layer: RateLimitLayer;
+  algorithm: RateLimitAlgorithm;
+  limit: int32;
+  remaining: int32;
+  retryAfterMs?: int64;
+  resetAfterMs?: int64;
+  reasonCode?: string;
 }
 
 model CompressionPolicy {
