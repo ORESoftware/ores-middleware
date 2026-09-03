@@ -694,36 +694,77 @@ fn render_go(model: &Model) -> String {
         .find(|field| field.logical_type == "enum")
         .map(|field| field.enum_values.clone())
         .unwrap_or_default();
-    let constants = enum_values
+    let constant_rows = enum_values
         .iter()
-        .map(|value| {
+        .map(|value| (format!("IdempotencyStatus{}", pascal_case(value)), value))
+        .collect::<Vec<_>>();
+    let constant_width = constant_rows
+        .iter()
+        .map(|(name, _)| name.len())
+        .max()
+        .unwrap_or(0);
+    let constants = constant_rows
+        .iter()
+        .map(|(name, value)| {
             format!(
-                "\tIdempotencyStatus{} IdempotencyStatus = \"{}\"",
-                pascal_case(value),
-                value
+                "	{:<width$} IdempotencyStatus = \"{}\"",
+                name,
+                value,
+                width = constant_width
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join(
+            "
+",
+        );
     let cases = enum_values
         .iter()
         .map(|value| format!("IdempotencyStatus{}", pascal_case(value)))
         .collect::<Vec<_>>()
         .join(",\n\t\t");
-    let fields = model
+    let field_rows = model
         .fields
         .iter()
         .map(|field| {
-            format!(
-                "\t{} {} `json:\"{}{}\"`",
+            (
                 pascal_case(&field.name),
                 go_type(field),
-                field.name,
-                if field.nullable { ",omitempty" } else { "" }
+                format!(
+                    "{}{}",
+                    field.name,
+                    if field.nullable { ",omitempty" } else { "" }
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    let field_name_width = field_rows
+        .iter()
+        .map(|(name, _, _)| name.len())
+        .max()
+        .unwrap_or(0);
+    let field_type_width = field_rows
+        .iter()
+        .map(|(_, field_type, _)| field_type.len())
+        .max()
+        .unwrap_or(0);
+    let fields = field_rows
+        .iter()
+        .map(|(name, field_type, json_name)| {
+            format!(
+                "	{:<name_width$} {:<type_width$} `json:\"{}\"`",
+                name,
+                field_type,
+                json_name,
+                name_width = field_name_width,
+                type_width = field_type_width
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join(
+            "
+",
+        );
     format!(
         "package persistence\n\ntype IdempotencyStatus string\n\nconst (\n{constants}\n)\n\nfunc (value IdempotencyStatus) Valid() bool {{\n\tswitch value {{\n\tcase {cases}:\n\t\treturn true\n\tdefault:\n\t\treturn false\n\t}}\n}}\n\ntype {} struct {{\n{fields}\n}}\n",
         model.name
