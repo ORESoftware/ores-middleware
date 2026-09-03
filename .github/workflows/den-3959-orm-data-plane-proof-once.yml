@@ -53,7 +53,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libpq-dev postgresql-client
-      - name: Admit only the four isolated convergence schemas
+      - name: Apply fail-closed schema and dependency hardening
         shell: bash
         run: |
           set -euo pipefail
@@ -114,15 +114,56 @@ jobs:
                   raise SystemExit("missing ORM catalog test footer")
               text = text.replace(footer, method + footer, 1)
           tests.write_text(text, encoding="utf-8")
+
+          data_plane = Path("scripts/orm_data_plane_gate.py")
+          text = data_plane.read_text(encoding="utf-8")
+          dependency_anchor = '''sea-orm = {{ version = "={SEA_ORM_VERSION}", default-features = false, features = ["macros", "with-chrono", "sqlx-postgres", "runtime-tokio-rustls"] }}
+          serde_json = "1"
+          '''
+          dependency_replacement = '''sea-orm = {{ version = "={SEA_ORM_VERSION}", default-features = false, features = ["macros", "with-chrono", "sqlx-postgres", "runtime-tokio-rustls"] }}
+          # SQLx's PostgreSQL stringprep path enables tinyvec's alloc surface.
+          # Explicit std feature unification keeps tinyvec 1.13.0 compilable on
+          # the pinned Rust toolchain without broadening database backends.
+          tinyvec = {{ version = "=1.13.0", default-features = false, features = ["std"] }}
+          serde_json = "1"
+          '''
+          if text.count(dependency_anchor) != 1:
+              raise SystemExit(
+                  "expected one SeaORM dependency anchor, found "
+                  f"{text.count(dependency_anchor)}"
+              )
+          data_plane.write_text(
+              text.replace(dependency_anchor, dependency_replacement, 1),
+              encoding="utf-8",
+          )
+
+          tests = Path("scripts/test_orm_data_plane_gate.py")
+          text = tests.read_text(encoding="utf-8")
+          assertion_anchor = '''        self.assertIn('"runtime-tokio-rustls"', cargo)
+          '''
+          assertion_replacement = assertion_anchor + '''        self.assertIn(
+              'tinyvec = { version = "=1.13.0", default-features = false, features = ["std"] }',
+              cargo,
+          )
+          '''
+          if text.count(assertion_anchor) != 1:
+              raise SystemExit(
+                  f"expected one runtime feature assertion, found {text.count(assertion_anchor)}"
+              )
+          tests.write_text(
+              text.replace(assertion_anchor, assertion_replacement, 1),
+              encoding="utf-8",
+          )
           PY
           python3 -m py_compile \
             scripts/orm_catalog_gate.py \
-            scripts/test_orm_catalog_gate.py
+            scripts/test_orm_catalog_gate.py \
+            scripts/orm_data_plane_gate.py \
+            scripts/test_orm_data_plane_gate.py
       - name: Run fail-closed generator tests
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/orm_data_plane_gate.py scripts/test_orm_data_plane_gate.py
           python3 -m unittest \
             scripts/test_orm_catalog_gate.py \
             scripts/test_orm_data_plane_gate.py \
@@ -163,16 +204,20 @@ jobs:
             target/orm-data-plane-gate/rust-data-plane/src/main.rs
           if-no-files-found: error
           retention-days: 90
-      - name: Commit only proven schema guard changes and remove this workflow
+      - name: Commit only proven source changes and remove this workflow
         if: ${{ success() }}
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- scripts/orm_catalog_gate.py scripts/test_orm_catalog_gate.py
+          git add -- \
+            scripts/orm_catalog_gate.py \
+            scripts/test_orm_catalog_gate.py \
+            scripts/orm_data_plane_gate.py \
+            scripts/test_orm_data_plane_gate.py
           git rm -- .github/workflows/den-3959-orm-data-plane-proof-once.yml
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(scripts/orm_catalog_gate.py|scripts/test_orm_catalog_gate.py|\.github/workflows/den-3959-orm-data-plane-proof-once\.yml)$' || true)"
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(scripts/orm_catalog_gate.py|scripts/test_orm_catalog_gate.py|scripts/orm_data_plane_gate.py|scripts/test_orm_data_plane_gate.py|\.github/workflows/den-3959-orm-data-plane-proof-once\.yml)$' || true)"
           test -z "$unexpected"
-          git commit -m 'fix(DEN-3959): admit isolated ORM data-plane schemas'
+          git commit -m 'fix(DEN-3959): prove four ORM data-plane lanes'
           git push origin HEAD:refs/heads/fix/den-3959-no-asymmetric-orm-gate
