@@ -1,0 +1,16 @@
+{
+  "policyId": "public-read-v2",
+  "operationClass": "public-read",
+  "algorithm": "token-bucket",
+  "consistency": "bounded",
+  "enforcementMode": "audit",
+  "failureMode": "local-only",
+  "layer": "application",
+  "capacity": 120,
+  "refillTokens": 120,
+  "refillIntervalMs": 60000,
+  "maximumOvershoot": 8,
+  "localDenyCacheEntries": 10000,
+  "coordinatorRequired": false,
+  "keyVersion": "v1"
+}

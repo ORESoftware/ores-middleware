@@ -1,0 +1,15 @@
+{
+  "policyId": "invalid-gcra-without-window",
+  "operationClass": "mutation",
+  "algorithm": "gcra",
+  "consistency": "strict",
+  "enforcementMode": "audit",
+  "failureMode": "fail-closed",
+  "layer": "application",
+  "capacity": 20,
+  "refillTokens": 1,
+  "maximumOvershoot": 0,
+  "localDenyCacheEntries": 10000,
+  "coordinatorRequired": true,
+  "keyVersion": "v1"
+}

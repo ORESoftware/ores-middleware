@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/rate-limit-policy-v2.schema.json",
+  "title": "ORES Middleware Rate Limit Policy V2",
+  "description": "Independently authored JSON Schema authority. This file is not generated from TypeSpec and must pass the parity gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policyId",
+    "operationClass",
+    "algorithm",
+    "consistency",
+    "enforcementMode",
+    "failureMode",
+    "layer",
+    "capacity",
+    "maximumOvershoot",
+    "localDenyCacheEntries",
+    "coordinatorRequired",
+    "keyVersion"
+  ],
+  "properties": {
+    "policyId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "operationClass": {
+      "$ref": "#/$defs/operationClass"
+    },
+    "algorithm": {
+      "$ref": "#/$defs/rateLimitAlgorithmV2"
+    },
+    "consistency": {
+      "$ref": "#/$defs/rateLimitConsistency"
+    },
+    "enforcementMode": {
+      "$ref": "#/$defs/rateLimitEnforcementMode"
+    },
+    "failureMode": {
+      "$ref": "#/$defs/rateLimitFailureMode"
+    },
+    "layer": {
+      "$ref": "#/$defs/rateLimitLayer"
+    },
+    "capacity": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000000
+    },
+    "windowMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2678400000
+    },
+    "refillTokens": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000000
+    },
+    "refillIntervalMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2678400000
+    },
+    "maximumOvershoot": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000
+    },
+    "localDenyCacheEntries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "coordinatorRequired": {
+      "type": "boolean"
+    },
+    "keyVersion": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    }
+  },
+  "$defs": {
+    "rateLimitAlgorithmV2": {
+      "type": "string",
+      "enum": [
+        "token-bucket",
+        "sliding-window-counter",
+        "fixed-window",
+        "gcra",
+        "concurrency"
+      ]
+    },
+    "rateLimitConsistency": {
+      "type": "string",
+      "enum": ["strict", "bounded", "advisory"]
+    },
+    "rateLimitEnforcementMode": {
+      "type": "string",
+      "enum": ["disabled", "audit", "enforce"]
+    },
+    "rateLimitFailureMode": {
+      "type": "string",
+      "enum": ["fail-open", "fail-closed", "local-only"]
+    },
+    "rateLimitLayer": {
+      "type": "string",
+      "enum": [
+        "cloudflare-edge",
+        "kubernetes-ingress",
+        "service-mesh",
+        "application",
+        "authorization"
+      ]
+    },
+    "operationClass": {
+      "type": "string",
+      "enum": [
+        "health-read",
+        "public-read",
+        "auth-attempt",
+        "auth-recovery",
+        "mutation",
+        "payment-or-ledger-write",
+        "job-admission"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"algorithm": {"const": "token-bucket"}},
+        "required": ["algorithm"]
+      },
+      "then": {
+        "required": ["refillTokens", "refillIntervalMs"],
+        "not": {"required": ["windowMs"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "algorithm": {
+            "enum": ["sliding-window-counter", "fixed-window", "gcra"]
+          }
+        },
+        "required": ["algorithm"]
+      },
+      "then": {
+        "required": ["windowMs"],
+        "not": {
+          "anyOf": [
+            {"required": ["refillTokens"]},
+            {"required": ["refillIntervalMs"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"algorithm": {"const": "concurrency"}},
+        "required": ["algorithm"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {"required": ["windowMs"]},
+            {"required": ["refillTokens"]},
+            {"required": ["refillIntervalMs"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"consistency": {"const": "strict"}},
+        "required": ["consistency"]
+      },
+      "then": {
+        "properties": {
+          "failureMode": {"const": "fail-closed"},
+          "coordinatorRequired": {"const": true},
+          "maximumOvershoot": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"consistency": {"const": "bounded"}},
+        "required": ["consistency"]
+      },
+      "then": {
+        "properties": {
+          "maximumOvershoot": {"minimum": 1},
+          "localDenyCacheEntries": {"minimum": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"consistency": {"const": "advisory"}},
+        "required": ["consistency"]
+      },
+      "then": {
+        "properties": {
+          "failureMode": {"enum": ["fail-open", "local-only"]},
+          "coordinatorRequired": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operationClass": {
+            "enum": [
+              "auth-attempt",
+              "auth-recovery",
+              "mutation",
+              "payment-or-ledger-write",
+              "job-admission"
+            ]
+          }
+        },
+        "required": ["operationClass"]
+      },
+      "then": {
+        "properties": {
+          "consistency": {"const": "strict"},
+          "failureMode": {"const": "fail-closed"},
+          "coordinatorRequired": {"const": true},
+          "maximumOvershoot": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"layer": {"const": "authorization"}},
+        "required": ["layer"]
+      },
+      "then": {
+        "properties": {
+          "consistency": {"const": "strict"},
+          "failureMode": {"const": "fail-closed"},
+          "coordinatorRequired": {"const": true},
+          "maximumOvershoot": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "allOf": [
+          {
+            "properties": {"layer": {"const": "cloudflare-edge"}},
+            "required": ["layer"]
+          },
+          {
+            "properties": {"enforcementMode": {"const": "enforce"}},
+            "required": ["enforcementMode"]
+          },
+          {
+            "properties": {
+              "operationClass": {
+                "enum": [
+                  "auth-recovery",
+                  "mutation",
+                  "payment-or-ledger-write",
+                  "job-admission"
+                ]
+              }
+            },
+            "required": ["operationClass"]
+          }
+        ]
+      },
+      "then": false
+    }
+  ]
+}
