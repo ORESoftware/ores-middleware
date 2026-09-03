@@ -10,7 +10,7 @@ on:
       - scripts/test_orm_data_plane_gate.py
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: den-3959-orm-data-plane-proof-once
@@ -37,8 +37,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-          fetch-depth: 1
+          persist-credentials: true
+          fetch-depth: 0
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
@@ -52,12 +53,80 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libpq-dev postgresql-client
+      - name: Admit only the four isolated convergence schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gate = Path("scripts/orm_catalog_gate.py")
+          text = gate.read_text(encoding="utf-8")
+          old = '''def apply_lane(database_url: str, schema: str, sql: str) -> None:
+              if schema not in {"typespec_lane", "json_schema_lane"}:
+          '''
+          new = '''ALLOWED_CATALOG_SCHEMAS = frozenset(
+              {
+                  "typespec_lane",
+                  "json_schema_lane",
+                  "typespec_data_plane",
+                  "json_schema_data_plane",
+              }
+          )
+
+
+          def apply_lane(database_url: str, schema: str, sql: str) -> None:
+              if schema not in ALLOWED_CATALOG_SCHEMAS:
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(
+                  f"expected one catalog-schema guard, found {text.count(old)}"
+              )
+          gate.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          tests = Path("scripts/test_orm_catalog_gate.py")
+          text = tests.read_text(encoding="utf-8")
+          import_anchor = "from scripts.orm_catalog_gate import (\n"
+          if "    ALLOWED_CATALOG_SCHEMAS,\n" not in text:
+              if text.count(import_anchor) != 1:
+                  raise SystemExit("missing ORM catalog import anchor")
+              text = text.replace(
+                  import_anchor,
+                  import_anchor + "    ALLOWED_CATALOG_SCHEMAS,\n",
+                  1,
+              )
+          method = '''
+              def test_catalog_schema_allowlist_is_exact(self) -> None:
+                  self.assertEqual(
+                      ALLOWED_CATALOG_SCHEMAS,
+                      {
+                          "typespec_lane",
+                          "json_schema_lane",
+                          "typespec_data_plane",
+                          "json_schema_data_plane",
+                      },
+                  )
+          '''
+          footer = '\n\nif __name__ == "__main__":\n'
+          if method.strip() not in text:
+              if footer not in text:
+                  raise SystemExit("missing ORM catalog test footer")
+              text = text.replace(footer, method + footer, 1)
+          tests.write_text(text, encoding="utf-8")
+          PY
+          python3 -m py_compile \
+            scripts/orm_catalog_gate.py \
+            scripts/test_orm_catalog_gate.py
       - name: Run fail-closed generator tests
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile scripts/orm_data_plane_gate.py scripts/test_orm_data_plane_gate.py
-          python3 -m unittest scripts/test_orm_data_plane_gate.py -v
+          python3 -m unittest \
+            scripts/test_orm_catalog_gate.py \
+            scripts/test_orm_data_plane_gate.py \
+            -v
       - name: Execute TypeSpec and JSON Schema through Diesel and SeaORM
         shell: bash
         env:
@@ -94,3 +163,16 @@ jobs:
             target/orm-data-plane-gate/rust-data-plane/src/main.rs
           if-no-files-found: error
           retention-days: 90
+      - name: Commit only proven schema guard changes and remove this workflow
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- scripts/orm_catalog_gate.py scripts/test_orm_catalog_gate.py
+          git rm -- .github/workflows/den-3959-orm-data-plane-proof-once.yml
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(scripts/orm_catalog_gate.py|scripts/test_orm_catalog_gate.py|\.github/workflows/den-3959-orm-data-plane-proof-once\.yml)$' || true)"
+          test -z "$unexpected"
+          git commit -m 'fix(DEN-3959): admit isolated ORM data-plane schemas'
+          git push origin HEAD:refs/heads/fix/den-3959-no-asymmetric-orm-gate
