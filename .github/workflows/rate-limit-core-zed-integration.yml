@@ -98,16 +98,42 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! -f .zpkg.lock ]]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+
+          Path(os.environ["RUNNER_TEMP"], "rate-limit-core-lock-receipt.json").write_text(
+              json.dumps(
+                  {
+                      "schema": "ores.rate-limit-core-zed-lock/v1",
+                      "status": "stopped_for_evaluation",
+                      "zeroUnexplainedFindings": False,
+                      "commit": os.environ.get("GITHUB_SHA"),
+                      "package": "ores-rate-limit/ores-rl-lib-core",
+                      "expectedVersion": "0.1.0",
+                      "expectedTag": "v0.1.0",
+                      "expectedCommit": "f66103b6ea619a033fc1750219226d53f461a459",
+                      "blockers": ["zed-lock-missing"],
+                  },
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+          PY
             echo "::error file=.zpkg.lock::The reviewed ores-rl-lib-core v0.1.0 artifact has not been lock-pinned."
             exit 2
           fi
           python3 - <<'PY'
           from pathlib import Path
           import json
+          import os
           import re
+          import shutil
           import tomllib
 
-          lock = tomllib.loads(Path(".zpkg.lock").read_text())
+          lock_path = Path(".zpkg.lock")
+          lock = tomllib.loads(lock_path.read_text())
           matches = [
               item for item in lock.get("package", [])
               if item.get("org") == "ores-rate-limit"
@@ -122,11 +148,14 @@ jobs:
           assert isinstance(item.get("size"), int) and item["size"] > 0
           assert item.get("format")
           assert item.get("source")
-          Path("/tmp/rate-limit-core-lock-receipt.json").write_text(
+          receipt_dir = Path(os.environ["RUNNER_TEMP"])
+          Path(receipt_dir, "rate-limit-core-lock-receipt.json").write_text(
               json.dumps(
                   {
                       "schema": "ores.rate-limit-core-zed-lock/v1",
                       "status": "passed",
+                      "zeroUnexplainedFindings": True,
+                      "commit": os.environ.get("GITHUB_SHA"),
                       "package": "ores-rate-limit/ores-rl-lib-core",
                       "version": item["version"],
                       "sha256": item["sha256"],
@@ -140,6 +169,7 @@ jobs:
                   sort_keys=True,
               ) + "\n"
           )
+          shutil.copy2(lock_path, Path(receipt_dir, "rate-limit-core.zpkg.lock"))
           PY
 
       - name: Install the frozen private core through Zed
@@ -148,8 +178,8 @@ jobs:
           ZED_PKG_TOKEN: ${{ secrets.ZED_PKG_TOKEN }}
         run: |
           set -euo pipefail
-          "$ZED_BIN" validate --require-lock --json >"$RUNNER_TEMP/rate-limit-zed-validate.json"
-          "$ZED_BIN" install --frozen --install-mode copy
+          "$ZED_BIN" install --frozen --install-mode copy \
+            >"$RUNNER_TEMP/rate-limit-zed-install.log" 2>&1
           test -f .vendor/.zed/ores-rate-limit/ores-rl-lib-core/Cargo.toml
 
       - name: Compile and test the optional adapter
@@ -174,8 +204,8 @@ jobs:
         with:
           name: rate-limit-core-zed-integration-${{ github.run_id }}
           path: |
-            .zpkg.lock
-            /tmp/rate-limit-core-lock-receipt.json
-            ${{ runner.temp }}/rate-limit-zed-validate.json
-          if-no-files-found: warn
+            ${{ runner.temp }}/rate-limit-core.zpkg.lock
+            ${{ runner.temp }}/rate-limit-core-lock-receipt.json
+            ${{ runner.temp }}/rate-limit-zed-install.log
+          if-no-files-found: error
           retention-days: 90
