@@ -71,6 +71,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 scripts/_finalize_den3959_orm_matrix.py
+          rustfmt --edition 2024 tools/contract-parity/src/lib.rs
           python3 -m py_compile \
             scripts/check_zpkg.py \
             scripts/audit.py \
@@ -141,11 +142,12 @@ jobs:
             docs/architecture.md \
             scripts/audit.py \
             scripts/check_zpkg.py \
-            scripts/test_orm_data_plane_gate.py
+            scripts/test_orm_data_plane_gate.py \
+            tools/contract-parity/src/lib.rs
           git rm -- \
             .github/workflows/den-3959-permanentize-four-way-orm-once.yml \
             scripts/_finalize_den3959_orm_matrix.py
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(\.zpkg\.toml|docs/architecture\.md|scripts/audit\.py|scripts/check_zpkg\.py|scripts/test_orm_data_plane_gate\.py|\.github/workflows/den-3959-permanentize-four-way-orm-once\.yml|scripts/_finalize_den3959_orm_matrix\.py)$' || true)"
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(\.zpkg\.toml|docs/architecture\.md|scripts/audit\.py|scripts/check_zpkg\.py|scripts/test_orm_data_plane_gate\.py|tools/contract-parity/src/lib\.rs|\.github/workflows/den-3959-permanentize-four-way-orm-once\.yml|scripts/_finalize_den3959_orm_matrix\.py)$' || true)"
           test -z "$unexpected"
           git commit -m 'fix(DEN-3959): make both ORMs mandatory for both authorities'
           git push origin HEAD:refs/heads/fix/den-3959-no-asymmetric-orm-gate
