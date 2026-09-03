@@ -40,21 +40,19 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("tools/contract-parity/src/bin/persistence_codegen.rs")
           text = path.read_text(encoding="utf-8")
-          before_constants = r'''    let constants = enum_values
-              .iter()
-              .map(|value| {
-                  format!(
-                      "\tIdempotencyStatus{} IdempotencyStatus = \"{}\"",
-                      pascal_case(value),
-                      value
-                  )
-              })
-              .collect::<Vec<_>>()
-              .join("\n");'''
-          after_constants = r'''    let constant_rows = enum_values
+          start = text.index("fn render_go(model: &Model) -> String {")
+          end = text.index("\nfn gleam_type", start)
+          section = text[start:end]
+
+          constant_pattern = re.compile(
+              r'    let constants = enum_values\n.*?        \.join\("\\n"\);',
+              re.DOTALL,
+          )
+          constant_replacement = r'''    let constant_rows = enum_values
               .iter()
               .map(|value| (format!("IdempotencyStatus{}", pascal_case(value)), value))
               .collect::<Vec<_>>();
@@ -75,21 +73,21 @@ jobs:
               })
               .collect::<Vec<_>>()
               .join("\n");'''
-          before_fields = r'''    let fields = model
-              .fields
-              .iter()
-              .map(|field| {
-                  format!(
-                      "\t{} {} `json:\"{}{}\"`",
-                      pascal_case(&field.name),
-                      go_type(field),
-                      field.name,
-                      if field.nullable { ",omitempty" } else { "" }
-                  )
-              })
-              .collect::<Vec<_>>()
-              .join("\n");'''
-          after_fields = r'''    let field_rows = model
+          section, constant_count = constant_pattern.subn(
+              constant_replacement,
+              section,
+              count=1,
+          )
+          if constant_count != 1:
+              raise SystemExit(
+                  f"expected one Go constant renderer, changed {constant_count}"
+              )
+
+          field_pattern = re.compile(
+              r'    let fields = model\n.*?        \.join\("\\n"\);',
+              re.DOTALL,
+          )
+          field_replacement = r'''    let field_rows = model
               .fields
               .iter()
               .map(|field| {
@@ -128,12 +126,17 @@ jobs:
               })
               .collect::<Vec<_>>()
               .join("\n");'''
-          if text.count(before_constants) != 1:
-              raise SystemExit("expected exactly one legacy Go constant renderer")
-          if text.count(before_fields) != 1:
-              raise SystemExit("expected exactly one legacy Go field renderer")
-          text = text.replace(before_constants, after_constants)
-          text = text.replace(before_fields, after_fields)
+          section, field_count = field_pattern.subn(
+              field_replacement,
+              section,
+              count=1,
+          )
+          if field_count != 1:
+              raise SystemExit(
+                  f"expected one Go field renderer, changed {field_count}"
+              )
+
+          text = text[:start] + section + text[end:]
           path.write_text(text, encoding="utf-8")
           PY
           rustfmt --edition 2024 tools/contract-parity/src/bin/persistence_codegen.rs
