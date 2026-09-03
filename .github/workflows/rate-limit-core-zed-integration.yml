@@ -1,0 +1,181 @@
+name: rate-limit-core-zed-integration
+
+on:
+  pull_request:
+    paths:
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - "integrations/ores-rate-limit-core-rust/**"
+      - "src/rust/**"
+      - "docs/ores-rate-limit-core-adapter.md"
+      - ".github/workflows/rate-limit-core-zed-integration.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - ".zpkg.toml"
+      - ".zpkg.lock"
+      - "integrations/ores-rate-limit-core-rust/**"
+      - "src/rust/**"
+      - "docs/ores-rate-limit-core-adapter.md"
+      - ".github/workflows/rate-limit-core-zed-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rate-limit-core-zed-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frozen-zed-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Install checksum-verified Zed 0.2.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.2.3/zed-x86_64-unknown-linux-gnu.tar.gz'
+          readonly expected='b8f81a8e4943cbaeb47153386819a911dcf02666a8709c5bd013e4f35b1ba1b9'
+          mkdir -p "$RUNNER_TEMP/zed-dist"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/zed.tar.gz" "$url"
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/zed.tar.gz" |
+            sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/zed.tar.gz" -C "$RUNNER_TEMP/zed-dist"
+          zed_bin="$(find "$RUNNER_TEMP/zed-dist" -type f -name zed -perm -u+x -print -quit)"
+          test -n "$zed_bin"
+          printf 'ZED_BIN=%s\n' "$zed_bin" >>"$GITHUB_ENV"
+          "$zed_bin" --version
+
+      - name: Verify the Zed-only dependency boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          root = Path(".")
+          manifest = tomllib.loads((root / ".zpkg.toml").read_text())
+          assert manifest["dependencies"]["ores-rate-limit/ores-rl-lib-core"] == "^0.1.0"
+
+          cargo_path = root / "integrations/ores-rate-limit-core-rust/Cargo.toml"
+          cargo = tomllib.loads(cargo_path.read_text())
+          dependency = cargo["dependencies"]["ores-rl-lib-core"]
+          assert dependency == {
+              "path": "../../.vendor/.zed/ores-rate-limit/ores-rl-lib-core",
+              "version": "0.1.0",
+          }
+
+          forbidden = "github.com/ores-rate-limit/ores-rl-lib-core"
+          for path in root.rglob("Cargo.toml"):
+              if any(part in {".git", ".vendor", "target", "node_modules"} for part in path.parts):
+                  continue
+              assert forbidden not in path.read_text(), f"private Git fallback in {path}"
+
+          assert "ores-rl-lib-core" not in (root / "src/rust/Cargo.toml").read_text()
+          assert not (root / "src/rust/src/core_rate_limiter.rs").exists()
+          PY
+
+      - name: Require immutable Zed lock provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .zpkg.lock ]]; then
+            echo "::error file=.zpkg.lock::The reviewed ores-rl-lib-core v0.1.0 artifact has not been lock-pinned."
+            exit 2
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import tomllib
+
+          lock = tomllib.loads(Path(".zpkg.lock").read_text())
+          matches = [
+              item for item in lock.get("package", [])
+              if item.get("org") == "ores-rate-limit"
+              and item.get("name") == "ores-rl-lib-core"
+          ]
+          assert len(matches) == 1
+          item = matches[0]
+          assert item.get("version") == "0.1.0"
+          assert item.get("vcs_tag") == "v0.1.0"
+          assert item.get("vcs_commit") == "f66103b6ea619a033fc1750219226d53f461a459"
+          assert re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", ""))
+          assert isinstance(item.get("size"), int) and item["size"] > 0
+          assert item.get("format")
+          assert item.get("source")
+          Path("/tmp/rate-limit-core-lock-receipt.json").write_text(
+              json.dumps(
+                  {
+                      "schema": "ores.rate-limit-core-zed-lock/v1",
+                      "status": "passed",
+                      "package": "ores-rate-limit/ores-rl-lib-core",
+                      "version": item["version"],
+                      "sha256": item["sha256"],
+                      "size": item["size"],
+                      "format": item["format"],
+                      "vcsTag": item["vcs_tag"],
+                      "vcsCommit": item["vcs_commit"],
+                      "source": item["source"],
+                  },
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n"
+          )
+          PY
+
+      - name: Install the frozen private core through Zed
+        shell: bash
+        env:
+          ZED_PKG_TOKEN: ${{ secrets.ZED_PKG_TOKEN }}
+        run: |
+          set -euo pipefail
+          "$ZED_BIN" validate --require-lock --json >"$RUNNER_TEMP/rate-limit-zed-validate.json"
+          "$ZED_BIN" install --frozen --install-mode copy
+          test -f .vendor/.zed/ores-rate-limit/ores-rl-lib-core/Cargo.toml
+
+      - name: Compile and test the optional adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt \
+            --manifest-path integrations/ores-rate-limit-core-rust/Cargo.toml \
+            -- --check
+          cargo clippy \
+            --manifest-path integrations/ores-rate-limit-core-rust/Cargo.toml \
+            --all-targets \
+            -- -D warnings
+          cargo test \
+            --manifest-path integrations/ores-rate-limit-core-rust/Cargo.toml \
+            --all-targets
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+
+      - name: Upload sanitized dependency evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rate-limit-core-zed-integration-${{ github.run_id }}
+          path: |
+            .zpkg.lock
+            /tmp/rate-limit-core-lock-receipt.json
+            ${{ runner.temp }}/rate-limit-zed-validate.json
+          if-no-files-found: warn
+          retention-days: 90
