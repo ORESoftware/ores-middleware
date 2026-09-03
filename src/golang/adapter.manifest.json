@@ -1,0 +1,15 @@
+{
+  "language": "golang",
+  "runtime": "go-net-http",
+  "packageName": "github.com/ORESoftware/ores-middleware/src/golang",
+  "frameworkAdapters": ["net-http", "gorilla-mux", "gin", "echo", "fiber"],
+  "operationSymbols": {
+    "descriptor": "Descriptor",
+    "defaultConfig": "DefaultConfig",
+    "validateConfig": "ValidateConfig",
+    "createMiddleware": "New",
+    "runWithContext": "RunWithContext",
+    "currentContext": "CurrentContext",
+    "capabilities": "Capabilities"
+  }
+}
