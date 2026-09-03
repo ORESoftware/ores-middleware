@@ -2,6 +2,7 @@ import "@typespec/http";
 import "@typespec/json-schema";
 
 using TypeSpec.Http;
+using TypeSpec.JsonSchema;
 
 @service(#{ title: "ORES Middleware Contract" })
 namespace Ores.Middleware;
@@ -71,9 +72,7 @@ enum ContentRepresentation {
   xml: "application/xml",
 }
 
-model StringMap {
-  [key: string]: string;
-}
+model StringMap is Record<string>;
 
 model RequestContext {
   requestId: string;
