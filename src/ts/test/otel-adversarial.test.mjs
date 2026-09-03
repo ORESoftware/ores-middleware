@@ -6,9 +6,11 @@ import {
   createLogger,
   createOresOtelMiddleware,
   getLogContext,
-  requestLogger,
-  waitForPendingLogs
+  requestLogger
 } from "../dist/otel.js";
+
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const settleDetachedLogs = () => delay(25);
 
 function testConfig(timeoutMs = 5_000) {
   const config = defaultConfig("middleware-adversarial-test");
@@ -52,13 +54,11 @@ function requestFor(slot, extraHeaders = {}) {
       "x-test-slot": String(slot),
       "x-test-user": `user-${slot}`,
       "x-test-tenant": `tenant-${slot}`,
-      traceparent: `00-${slot.toString(16).padStart(32, "0")}-0123456789abcdef-01`,
+      traceparent: `00-${Number(slot).toString(16).padStart(32, "0")}-0123456789abcdef-01`,
       ...extraHeaders
     }
   });
 }
-
-const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 test("parallel requests never cross-contaminate request, user, tenant, or baggage context", async () => {
   const records = [];
@@ -95,7 +95,7 @@ test("parallel requests never cross-contaminate request, user, tenant, or baggag
     )
   );
 
-  await waitForPendingLogs({ timeoutMillis: 2_000 });
+  await settleDetachedLogs();
   assert.equal(responses.length, requestCount);
   assert.equal(getLogContext(), undefined);
 
@@ -121,7 +121,7 @@ test("sealed Request objects use the WeakMap logger fallback", async () => {
     logger: root,
     authVerifier: async () => ({ userId: "sealed-user", tenantId: "sealed-tenant" })
   });
-  const request = requestFor("sealed", {
+  const request = requestFor(11, {
     "x-request-id": "request-sealed",
     traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0123456789abcdef-01"
   });
@@ -135,7 +135,7 @@ test("sealed Request objects use the WeakMap logger fallback", async () => {
     return new Response(null, { status: 204 });
   });
 
-  await waitForPendingLogs({ timeoutMillis: 2_000 });
+  await settleDetachedLogs();
   assert.equal(response.status, 204);
   const record = records.find((candidate) => candidate.message === "sealed request reached");
   assert.equal(record?.fields["request.id"], "request-sealed");
@@ -143,7 +143,7 @@ test("sealed Request objects use the WeakMap logger fallback", async () => {
   assert.equal(getLogContext(), undefined);
 });
 
-test("malformed inbound correlation identifiers are replaced and unsafe claims are dropped", async () => {
+test("malformed correlation identifiers are replaced and unsafe claims are dropped", async () => {
   const records = [];
   const { root } = memoryLoggers(records);
   const middleware = createOresOtelMiddleware(testConfig(), {
@@ -176,7 +176,7 @@ test("malformed inbound correlation identifiers are replaced and unsafe claims a
     }
   );
 
-  await waitForPendingLogs({ timeoutMillis: 2_000 });
+  await settleDetachedLogs();
   assert.equal(response.status, 200);
   const requestId = observed?.fields?.["request.id"];
   const traceId = observed?.fields?.["trace.id"];
@@ -193,7 +193,7 @@ test("malformed inbound correlation identifiers are replaced and unsafe claims a
   assert.equal(getLogContext(), undefined);
 });
 
-test("handler failure preserves the 500 response, emits failure, and clears ambient context", async () => {
+test("handler failure preserves the 500 response and clears ambient context", async () => {
   const records = [];
   const { root } = memoryLoggers(records);
   const middleware = createOresOtelMiddleware(testConfig(), {
@@ -201,11 +201,11 @@ test("handler failure preserves the 500 response, emits failure, and clears ambi
     authVerifier: async () => ({ userId: "failure-user", tenantId: "failure-tenant" })
   });
 
-  const response = await middleware(requestFor("failure"), async () => {
+  const response = await middleware(requestFor(12), async () => {
     throw new Error("handler exploded");
   });
 
-  await waitForPendingLogs({ timeoutMillis: 2_000 });
+  await settleDetachedLogs();
   assert.equal(response.status, 500);
   assert.ok(records.some((record) => record.message.startsWith("request handler failed")));
   assert.equal(records.some((record) => record.message === "request handler completed"), false);
@@ -215,16 +215,15 @@ test("handler failure preserves the 500 response, emits failure, and clears ambi
 test("throwing transport diagnostics cannot prevent the handler or alter its response", async () => {
   let handlerRan = false;
   let transportErrors = 0;
-  const failingTransport = {
-    name: "always-fails",
-    write() {
-      throw new Error("sink unavailable");
-    }
-  };
   const root = createLogger({
     appName: "middleware-adversarial-test",
     console: false,
-    transports: failingTransport,
+    transports: {
+      name: "always-fails",
+      write() {
+        throw new Error("sink unavailable");
+      }
+    },
     onTransportError() {
       transportErrors += 1;
       throw new Error("diagnostic callback failed");
@@ -235,19 +234,19 @@ test("throwing transport diagnostics cannot prevent the handler or alter its res
     authVerifier: async () => ({ userId: "transport-user" })
   });
 
-  const response = await middleware(requestFor("transport"), async () => {
+  const response = await middleware(requestFor(13), async () => {
     handlerRan = true;
     return new Response(null, { status: 204 });
   });
 
-  await waitForPendingLogs({ timeoutMillis: 2_000 });
+  await settleDetachedLogs();
   assert.equal(handlerRan, true);
   assert.equal(response.status, 204);
   assert.ok(transportErrors >= 2);
   assert.equal(getLogContext(), undefined);
 });
 
-test("a handler that outlives its deadline emits timeout rather than a late completion", async () => {
+test("a handler that outlives its deadline emits timeout rather than late completion", async () => {
   const records = [];
   const { root } = memoryLoggers(records);
   const middleware = createOresOtelMiddleware(testConfig(15), {
@@ -255,14 +254,14 @@ test("a handler that outlives its deadline emits timeout rather than a late comp
     authVerifier: async () => ({ userId: "timeout-user", tenantId: "timeout-tenant" })
   });
 
-  const response = await middleware(requestFor("timeout"), async () => {
+  const response = await middleware(requestFor(14), async () => {
     await delay(60);
     return new Response(null, { status: 204 });
   });
 
   assert.equal(response.status, 504);
   await delay(80);
-  await waitForPendingLogs({ timeoutMillis: 2_000 });
+  await settleDetachedLogs();
   assert.ok(records.some((record) => record.message === "request handler timed out"));
   assert.equal(records.some((record) => record.message === "request handler completed"), false);
   assert.equal(getLogContext(), undefined);
