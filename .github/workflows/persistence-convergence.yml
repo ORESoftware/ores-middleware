@@ -18,7 +18,7 @@ concurrency:
 jobs:
   orm-catalog:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:17-bookworm
@@ -51,6 +51,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
+          components: rustfmt
 
       - name: Install PostgreSQL client and libpq
         shell: bash
@@ -63,12 +64,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+          cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
           python3 -m unittest \
             scripts/test_orm_catalog_gate.py \
+            scripts/test_orm_matrix_gate.py \
             scripts/test_subprocess_capture.py \
             -v
 
-      - name: Compile real Diesel and SeaORM witnesses and compare catalogs
+      - name: Compile four real ORM witnesses and compare PostgreSQL catalogs
         shell: bash
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
@@ -76,28 +80,26 @@ jobs:
           RUSTFLAGS: -Dwarnings
         run: |
           set -euo pipefail
-          python3 scripts/orm_catalog_gate_entrypoint.py
+          python3 scripts/orm_matrix_gate.py
 
-      - name: Upload execution receipt, lockfile, sources, SQL, and catalogs
+      - name: Upload execution receipts, lockfile, sources, SQL, catalogs, and polyglot outputs
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: persistence-convergence-${{ github.run_id }}
           path: |
             scripts/orm_catalog_gate.py
-            scripts/orm_catalog_gate_entrypoint.py
+            scripts/orm_matrix_gate.py
             scripts/subprocess_capture.py
             scripts/test_orm_catalog_gate.py
+            scripts/test_orm_matrix_gate.py
             scripts/test_subprocess_capture.py
-            target/orm-catalog-gate/receipt.json
-            target/orm-catalog-gate/catalog/*.json
-            target/orm-catalog-gate/sql/*.sql
-            target/orm-catalog-gate/rust-witness/Cargo.toml
-            target/orm-catalog-gate/rust-witness/Cargo.lock
-            target/orm-catalog-gate/rust-witness/src/main.rs
-            target/schema-convergence/**/*.json
-            target/schema-convergence/**/*.sql
-            target/schema-convergence/**/*.d.ts
-            target/schema-convergence/**/*.rs
+            target/orm-matrix-gate/receipt.json
+            target/orm-matrix-gate/catalog/*.json
+            target/orm-matrix-gate/sql/*.sql
+            target/orm-matrix-gate/rust-witness/Cargo.toml
+            target/orm-matrix-gate/rust-witness/Cargo.lock
+            target/orm-matrix-gate/rust-witness/src/main.rs
+            target/schema-convergence/**/*
           if-no-files-found: error
           retention-days: 90
