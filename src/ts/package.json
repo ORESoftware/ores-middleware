@@ -21,6 +21,10 @@
       "types": "./dist/docs-serving.d.ts",
       "import": "./dist/docs-serving.js"
     },
+    "./operation": {
+      "types": "./dist/operation.d.ts",
+      "import": "./dist/operation.js"
+    },
     "./otel": {
       "types": "./dist/otel.d.ts",
       "import": "./dist/otel.js"
