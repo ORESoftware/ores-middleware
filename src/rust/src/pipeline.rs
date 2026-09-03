@@ -1,21 +1,26 @@
 use std::{
     collections::BTreeMap,
+    future::Future,
     net::IpAddr,
+    panic::AssertUnwindSafe,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use futures_util::FutureExt;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
     config::{IntegrationMode, MiddlewareConfig, ValidationIssue, validate_config},
-    context::{ContextRegistry, RequestContext},
+    context::{ContextRegistry, RequestContext, run_with_context},
     integrations::{
         AnonymousAuth, DynAuthVerifier, DynRateLimiter, DynSyncObserver, DynTelemetrySink,
         InMemoryTokenBucket, IntegrationError, NoopSyncObserver, RequestMetadata, ResponseMetadata,
         TracingTelemetry,
     },
     net::cidr_contains,
+    otel::run_with_ores_log_context,
     rate_limit::{
         DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitDecision, RateLimitDecisionKind,
         RateLimitDecisionSource, RateLimitFailureMode, RateLimitKeyDerivationMode,
@@ -143,19 +148,6 @@ impl MiddlewareStack {
     }
 
     pub async fn begin(&self, request: RequestMetadata) -> Result<ActiveRequest, MiddlewareError> {
-        if request
-            .content_length
-            .is_some_and(|length| length > self.config.settings.max_body_bytes as u64)
-        {
-            return Err(MiddlewareError::new(
-                413,
-                "payload_too_large",
-                "request body exceeds configured limit",
-            ));
-        }
-
-        enforce_transport_policy(&self.config, &request)?;
-
         let request_id = request
             .headers
             .get(&self.config.settings.request_id_header)
@@ -165,7 +157,7 @@ impl MiddlewareStack {
         let trace_id = parse_trace_id(request.headers.get(&self.config.settings.trace_header))
             .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
         let now = RequestContext::now_ms();
-        let mut context = RequestContext {
+        let base_context = RequestContext {
             request_id,
             trace_id,
             span_id: None,
@@ -177,56 +169,88 @@ impl MiddlewareStack {
             baggage: BTreeMap::new(),
         };
 
-        let auth = self
-            .auth
-            .verify(&request)
-            .await
-            .map_err(|error| MiddlewareError::new(401, error.code, error.message))?;
-        context.user_id = auth.user_id.clone();
-        context.tenant_id = auth.tenant_id.clone();
-        context.baggage.extend(
-            auth.claims
+        let auth = run_lifecycle_stage(&base_context, "middleware.pre_auth", async {
+            if request
+                .content_length
+                .is_some_and(|length| length > self.config.settings.max_body_bytes as u64)
+            {
+                return Err(MiddlewareError::new(
+                    413,
+                    "payload_too_large",
+                    "request body exceeds configured limit",
+                ));
+            }
+
+            enforce_transport_policy(&self.config, &request)?;
+            self.auth
+                .verify(&request)
+                .await
+                .map_err(|error| MiddlewareError::new(401, error.code, error.message))
+        })
+        .await
+        .map_err(|error| correlate_error(&self.config, &base_context, error))?;
+
+        let context = RequestContext {
+            tenant_id: auth.tenant_id.clone(),
+            user_id: auth.user_id.clone(),
+            baggage: auth
+                .claims
                 .iter()
                 .filter(|(key, _)| key.starts_with("otel."))
-                .map(|(key, value)| (key.clone(), value.clone())),
-        );
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            ..base_context
+        };
 
-        if !matches!(
-            self.config.integrations.shared_auth.mode,
-            IntegrationMode::Disabled
-        ) && context.user_id.is_none()
-        {
-            return Err(MiddlewareError::new(
-                401,
-                "authentication_required",
-                "shared-auth did not establish a user",
-            ));
-        }
-
-        if self.config.settings.rate_limit.enabled {
-            let decision = self.evaluate_rate_limit(&context, &request, &auth).await;
-            self.telemetry
-                .rate_limit_decision(&context, &request, &decision)
-                .await;
-            if !decision.is_allowed() {
-                return Err(rate_limit_error(&decision));
+        let started = run_lifecycle_stage(&context, "middleware.request_start", async {
+            if !matches!(
+                self.config.integrations.shared_auth.mode,
+                IntegrationMode::Disabled
+            ) && context.user_id.is_none()
+            {
+                return Err(MiddlewareError::new(
+                    401,
+                    "authentication_required",
+                    "shared-auth did not establish a user",
+                ));
             }
-        }
 
-        if self.config.settings.fault_injection.enabled
-            && self.config.settings.fault_injection.latency_ms > 0
-        {
-            tokio::time::sleep(Duration::from_millis(
-                self.config.settings.fault_injection.latency_ms,
-            ))
-            .await;
-        }
+            if self.config.settings.rate_limit.enabled {
+                let decision = self.evaluate_rate_limit(&context, &request, &auth).await;
+                self.telemetry
+                    .rate_limit_decision(&context, &request, &decision)
+                    .await;
+                if !decision.is_allowed() {
+                    return Err(rate_limit_error(&decision));
+                }
+            }
 
-        self.registry.insert(context.clone()).await;
-        self.telemetry.request_started(&context, &request).await;
+            if self.config.settings.fault_injection.enabled
+                && self.config.settings.fault_injection.latency_ms > 0
+            {
+                tokio::time::sleep(Duration::from_millis(
+                    self.config.settings.fault_injection.latency_ms,
+                ))
+                .await;
+            }
+
+            self.telemetry.request_started(&context, &request).await;
+            self.registry.insert(context.clone()).await;
+            Ok(Instant::now())
+        })
+        .await;
+
+        let started = match started {
+            Ok(started) => started,
+            Err(error) => {
+                self.registry.remove(&context.request_id).await;
+                return Err(correlate_error(&self.config, &context, error));
+            }
+        };
+
         Ok(ActiveRequest {
             context,
-            started: Instant::now(),
+            started,
             request,
         })
     }
@@ -307,27 +331,44 @@ impl MiddlewareStack {
         status: u16,
         response_bytes: Option<u64>,
     ) -> BTreeMap<String, String> {
+        let ActiveRequest {
+            context,
+            started,
+            request,
+        } = active;
         let response = ResponseMetadata {
             status,
-            duration_ms: active.started.elapsed().as_millis() as u64,
+            duration_ms: started.elapsed().as_millis() as u64,
             response_bytes,
         };
-        self.telemetry
-            .request_finished(&active.context, &active.request, &response)
-            .await;
-        let sync_result = self
-            .sync
-            .observe(&active.context, &active.request, &response)
-            .await;
-        if let Err(error) = sync_result {
-            tracing::warn!(request_id = %active.context.request_id, code = error.code, message = %error.message, "opto-sync observation failed");
-        }
-        self.registry.remove(&active.context.request_id).await;
+
+        let _ = run_lifecycle_stage(&context, "middleware.request_finish", async {
+            self.telemetry
+                .request_finished(&context, &request, &response)
+                .await;
+            if let Err(error) = self.sync.observe(&context, &request, &response).await {
+                tracing::warn!(
+                    request_id = %context.request_id,
+                    trace_id = %context.trace_id,
+                    code = error.code,
+                    "opto-sync observation failed"
+                );
+            }
+            Ok(())
+        })
+        .await;
+
+        let request_id = context.request_id.clone();
+        let _ = run_lifecycle_stage(&context, "middleware.request_cleanup", async {
+            self.registry.remove(&request_id).await;
+            Ok(())
+        })
+        .await;
 
         let mut headers = BTreeMap::new();
         headers.insert(
             self.config.settings.request_id_header.clone(),
-            active.context.request_id,
+            context.request_id,
         );
         if self.config.settings.security_headers.enabled {
             headers.insert("x-content-type-options".into(), "nosniff".into());
@@ -357,6 +398,64 @@ impl MiddlewareStack {
         }
         headers
     }
+}
+
+async fn run_lifecycle_stage<F, T>(
+    context: &RequestContext,
+    operation: &'static str,
+    future: F,
+) -> Result<T, MiddlewareError>
+where
+    F: Future<Output = Result<T, MiddlewareError>>,
+{
+    let request_id = context.request_id.clone();
+    let trace_id = context.trace_id.clone();
+    let span = tracing::info_span!(
+        "ores.middleware.lifecycle",
+        request_id = %context.request_id,
+        trace_id = %context.trace_id,
+        span_id = %context.span_id.as_deref().unwrap_or(""),
+        user_id = %context.user_id.as_deref().unwrap_or(""),
+        tenant_id = %context.tenant_id.as_deref().unwrap_or(""),
+        operation_name = operation,
+        operation_transport = "http",
+        operation_scope = "request",
+    );
+    let guarded = async move {
+        match AssertUnwindSafe(future).catch_unwind().await {
+            Ok(result) => result,
+            Err(_) => {
+                tracing::error!(
+                    operation_outcome = "panic",
+                    error_type = "panic",
+                    failure_code = "middleware_panicked",
+                    request_id = %request_id,
+                    trace_id = %trace_id,
+                    "middleware lifecycle stage failed"
+                );
+                Err(MiddlewareError::new(
+                    500,
+                    "internal_error",
+                    "request processing failed",
+                ))
+            }
+        }
+    }
+    .instrument(span);
+
+    run_with_context(context.clone(), run_with_ores_log_context(context, guarded)).await
+}
+
+fn correlate_error(
+    config: &MiddlewareConfig,
+    context: &RequestContext,
+    mut error: MiddlewareError,
+) -> MiddlewareError {
+    error
+        .headers
+        .entry(config.settings.request_id_header.clone())
+        .or_insert_with(|| context.request_id.clone());
+    error
 }
 
 fn decision_for_failure(
@@ -529,12 +628,17 @@ fn parse_trace_id(header: Option<&String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{future::Future, pin::Pin};
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::{Arc, Mutex},
+    };
 
     use super::*;
     use crate::{
-        default_config,
-        integrations::RateLimiter,
+        current_context, default_config,
+        integrations::{AuthDecision, AuthVerifier, RateLimiter, ResponseMetadata, TelemetrySink},
+        otel::current_log_context,
         rate_limit::{RateLimitAlgorithm, RateLimitLayer},
     };
 
@@ -705,6 +809,194 @@ mod tests {
             parse_trace_id(Some(&valid)).as_deref(),
             Some("0123456789abcdef0123456789abcdef")
         );
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ScopeObservation {
+        phase: &'static str,
+        request_id: Option<String>,
+        user_id: Option<String>,
+        log_request_id: Option<String>,
+        log_user_id: Option<String>,
+    }
+
+    fn observe_scope(phase: &'static str) -> ScopeObservation {
+        let current = current_context();
+        let log_context = current_log_context();
+        ScopeObservation {
+            phase,
+            request_id: current.as_ref().map(|value| value.request_id.clone()),
+            user_id: current.and_then(|value| value.user_id),
+            log_request_id: log_context
+                .fields
+                .get("request.id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            log_user_id: log_context
+                .fields
+                .get("user.id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        }
+    }
+
+    struct PanickingAuth {
+        observations: Arc<Mutex<Vec<ScopeObservation>>>,
+    }
+
+    impl AuthVerifier for PanickingAuth {
+        fn verify<'a>(
+            &'a self,
+            _request: &'a RequestMetadata,
+        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                self.observations
+                    .lock()
+                    .expect("observation lock")
+                    .push(observe_scope("auth"));
+                panic!("private authentication detail")
+            })
+        }
+    }
+
+    struct StaticAuth;
+
+    impl AuthVerifier for StaticAuth {
+        fn verify<'a>(
+            &'a self,
+            _request: &'a RequestMetadata,
+        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Ok(AuthDecision {
+                    user_id: Some("user-42".into()),
+                    tenant_id: Some("tenant-7".into()),
+                    claims: BTreeMap::from([
+                        ("otel.plan".into(), "pro".into()),
+                        ("private".into(), "must-not-propagate".into()),
+                    ]),
+                })
+            })
+        }
+    }
+
+    struct PanickingFinishedTelemetry {
+        observations: Arc<Mutex<Vec<ScopeObservation>>>,
+    }
+
+    impl TelemetrySink for PanickingFinishedTelemetry {
+        fn request_started<'a>(
+            &'a self,
+            _context: &'a RequestContext,
+            _request: &'a RequestMetadata,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                self.observations
+                    .lock()
+                    .expect("observation lock")
+                    .push(observe_scope("started"));
+            })
+        }
+
+        fn request_finished<'a>(
+            &'a self,
+            _context: &'a RequestContext,
+            _request: &'a RequestMetadata,
+            _response: &'a ResponseMetadata,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+            Box::pin(async move {
+                self.observations
+                    .lock()
+                    .expect("observation lock")
+                    .push(observe_scope("finished"));
+                panic!("private telemetry detail")
+            })
+        }
+    }
+
+    fn lifecycle_config() -> MiddlewareConfig {
+        let mut config = default_config("lifecycle-boundary-test");
+        config.settings.tls.mode = "in-process".into();
+        config.settings.tls.trusted_proxy_cidrs.clear();
+        config.settings.rate_limit.enabled = false;
+        config
+    }
+
+    #[tokio::test]
+    async fn authentication_panic_is_correlated_inside_base_task_and_log_context() {
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let stack = MiddlewareStack::new(lifecycle_config())
+            .unwrap()
+            .with_auth_verifier(Arc::new(PanickingAuth {
+                observations: observations.clone(),
+            }));
+        let mut metadata = request("198.51.100.10", None, true);
+        metadata
+            .headers
+            .insert("x-request-id".into(), "auth-panic".into());
+
+        let error = match stack.begin(metadata).await {
+            Ok(_) => panic!("panicking auth must not produce an active request"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, 500);
+        assert_eq!(error.code, "internal_error");
+        assert_eq!(error.message, "request processing failed");
+        assert_eq!(
+            error.headers.get("x-request-id").map(String::as_str),
+            Some("auth-panic")
+        );
+        assert_eq!(
+            observations.lock().expect("observation lock").as_slice(),
+            &[ScopeObservation {
+                phase: "auth",
+                request_id: Some("auth-panic".into()),
+                user_id: None,
+                log_request_id: Some("auth-panic".into()),
+                log_user_id: None,
+            }]
+        );
+        assert!(current_context().is_none());
+        assert_eq!(current_log_context(), Default::default());
+    }
+
+    #[tokio::test]
+    async fn finalization_panic_retains_actor_context_and_registry_cleanup() {
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let stack = MiddlewareStack::new(lifecycle_config())
+            .unwrap()
+            .with_auth_verifier(Arc::new(StaticAuth))
+            .with_telemetry(Arc::new(PanickingFinishedTelemetry {
+                observations: observations.clone(),
+            }));
+        let mut metadata = request("198.51.100.10", None, true);
+        metadata
+            .headers
+            .insert("x-request-id".into(), "finish-panic".into());
+
+        let active = stack.begin(metadata).await.expect("active request");
+        assert!(stack.registry.get("finish-panic").await.is_some());
+        let headers = stack.finish(active, 200, Some(2)).await;
+
+        assert_eq!(
+            headers.get("x-request-id").map(String::as_str),
+            Some("finish-panic")
+        );
+        assert!(stack.registry.get("finish-panic").await.is_none());
+        let observations = observations.lock().expect("observation lock");
+        assert_eq!(observations.len(), 2);
+        for observation in observations.iter() {
+            assert_eq!(observation.request_id.as_deref(), Some("finish-panic"));
+            assert_eq!(observation.user_id.as_deref(), Some("user-42"));
+            assert_eq!(observation.log_request_id.as_deref(), Some("finish-panic"));
+            assert_eq!(observation.log_user_id.as_deref(), Some("user-42"));
+        }
+        assert_eq!(observations[0].phase, "started");
+        assert_eq!(observations[1].phase, "finished");
+        assert!(current_context().is_none());
+        assert_eq!(current_log_context(), Default::default());
     }
 
     #[tokio::test]
