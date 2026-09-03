@@ -8,7 +8,14 @@ defmodule OresMiddleware.Context do
 
   def put(context) when is_map(context) do
     Process.put(@key, context)
-    Logger.metadata(request_id: context.request_id, trace_id: context.trace_id, tenant_id: context.tenant_id, user_id: context.user_id)
+
+    Logger.metadata(
+      request_id: context.request_id,
+      trace_id: context.trace_id,
+      tenant_id: context.tenant_id,
+      user_id: context.user_id
+    )
+
     :ok
   end
 
@@ -23,7 +30,7 @@ defmodule OresMiddleware.Context do
     put(context)
 
     try do
-      operation.()
+      OresMiddleware.OTel.with_context(context, operation)
     after
       case previous_context do
         nil -> clear()
