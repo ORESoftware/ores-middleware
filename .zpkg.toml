@@ -21,6 +21,7 @@ outputs = [
   "target/gleam",
   "target/elixir",
   "target/erlang",
+  "target/package",
 ]
 
 [install]
@@ -29,7 +30,10 @@ dir = ".vendor/.zed"
 [publish]
 include_readme = true
 tag_format = "v{version}"
-smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/scripts/check_zpkg.py\" --root \"$ZED_PKG_TEST_TARGET\" && cargo run --quiet --manifest-path \"$ZED_PKG_TEST_TARGET/tools/contract-parity/Cargo.toml\" --bin persistence_codegen -- --root \"$ZED_PKG_TEST_TARGET\" --output-root \"$ZED_PKG_TEST_TARGET/target/schema-convergence\" --report \"$ZED_PKG_TEST_TARGET/target/schema-convergence/receipt.json\" && node \"$ZED_PKG_TEST_TARGET/scripts/validate-generated-polyglot.mjs\" \"$ZED_PKG_TEST_TARGET\" && python3 \"$ZED_PKG_TEST_TARGET/scripts/cross_translate.py\" --root \"$ZED_PKG_TEST_TARGET\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/authority-topology.json\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.tsp\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.schema.json\""
+# r2g runs this after installing only the declared build outputs. The packaged
+# script reruns the TypeSpec/JSON Schema cross-translation witness from copied,
+# digest-bound evidence and executes all six installed runtime artifacts.
+smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/target/package/scripts/installed_package_smoke.py\" --root \"$ZED_PKG_TEST_TARGET\""
 exclude = [
   ".env",
   ".env.*",
@@ -86,12 +90,7 @@ name = "ores-middleware-erlang"
 adapter = "none"
 
 [scripts]
-audit = "python3 scripts/audit.py --receipt target/audit/receipt.json"
-build = "python3 scripts/build_targets.py"
-contracts = "npm run contracts:compile && npm run contracts:check"
-cross-translation = "python3 scripts/cross_translate.py"
-orm-catalog = "python3 scripts/orm_matrix_gate.py"
-polyglot-generation = "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_codegen -- --output-root target/schema-convergence --report target/schema-convergence/receipt.json"
-projection-parity = "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_codegen -- --output-root target/schema-convergence --report target/schema-convergence/receipt.json"
-test = "python3 scripts/audit.py --receipt target/audit/receipt.json"
-zpkg-check = "python3 scripts/check_zpkg.py"
+# Zed 0.2.3 exposes one closed test hook. Richer commands live in package.json.
+# This hook runs the repository audit plus independent generation/validation;
+# the database-backed four-way ORM/catalog gate remains in service-enabled CI.
+test = "python3 scripts/audit.py --receipt target/audit/receipt.json && npm run contracts:polyglot-generate && npm run contracts:generated-check"
