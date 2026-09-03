@@ -60,8 +60,7 @@ defmodule OresGeneratedRuntimeWitness do
          true <- optional_fields_valid?(value),
          true <- rfc3339?(value["createdAt"]),
          true <- rfc3339?(value["expiresAt"]),
-         true <- @model.valid_idempotency_status?(value["status"]),
-         {:ok, status} <- status_atom(value["status"]) do
+         true <- @model.valid_idempotency_status?(value["status"]) do
       {:ok,
        struct!(@model,
          created_at: value["createdAt"],
@@ -71,7 +70,7 @@ defmodule OresGeneratedRuntimeWitness do
          request_hash: value["requestHash"],
          response_body: Map.get(value, "responseBody"),
          response_status: Map.get(value, "responseStatus"),
-         status: status,
+         status: value["status"],
          tenant_id: value["tenantId"]
        )}
     else
@@ -111,11 +110,6 @@ defmodule OresGeneratedRuntimeWitness do
 
   defp rfc3339?(_value), do: false
 
-  defp status_atom("pending"), do: {:ok, :pending}
-  defp status_atom("succeeded"), do: {:ok, :succeeded}
-  defp status_atom("failed"), do: {:ok, :failed}
-  defp status_atom(_value), do: :error
-
   defp normalize(record) do
     %{
       "createdAt" => record.created_at,
@@ -123,7 +117,7 @@ defmodule OresGeneratedRuntimeWitness do
       "id" => record.id,
       "idempotencyKey" => record.idempotency_key,
       "requestHash" => record.request_hash,
-      "status" => Atom.to_string(record.status),
+      "status" => record.status,
       "tenantId" => record.tenant_id
     }
     |> maybe_put("responseBody", record.response_body)
