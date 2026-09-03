@@ -63,7 +63,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m unittest scripts/test_orm_catalog_gate.py -v
+          python3 -m unittest \
+            scripts/test_orm_catalog_gate.py \
+            scripts/test_subprocess_capture.py \
+            -v
 
       - name: Compile real Diesel and SeaORM witnesses and compare catalogs
         shell: bash
@@ -73,7 +76,7 @@ jobs:
           RUSTFLAGS: -Dwarnings
         run: |
           set -euo pipefail
-          python3 scripts/orm_catalog_gate.py
+          python3 scripts/orm_catalog_gate_entrypoint.py
 
       - name: Upload execution receipt, lockfile, sources, SQL, and catalogs
         if: ${{ always() }}
@@ -82,7 +85,10 @@ jobs:
           name: persistence-convergence-${{ github.run_id }}
           path: |
             scripts/orm_catalog_gate.py
+            scripts/orm_catalog_gate_entrypoint.py
+            scripts/subprocess_capture.py
             scripts/test_orm_catalog_gate.py
+            scripts/test_subprocess_capture.py
             target/orm-catalog-gate/receipt.json
             target/orm-catalog-gate/catalog/*.json
             target/orm-catalog-gate/sql/*.sql
