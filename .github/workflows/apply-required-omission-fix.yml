@@ -1,0 +1,143 @@
+name: apply-required-omission-fix
+
+on:
+  push:
+    branches:
+      - fix/json-schema-required-omission-2026-09-03
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the exact repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+
+      - name: Repair JSON Schema required semantics and add regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tools/contract-parity/src/lib.rs")
+          source = path.read_text(encoding="utf-8")
+          old = '''    let required_values = definition
+              .get("required")
+              .and_then(Value::as_array)
+              .ok_or_else(|| format!("missing required array for JSON Schema definition {name}"))?;
+          let mut required = BTreeSet::new();
+          for item in required_values {
+              let property = item.as_str().ok_or_else(|| {
+                  format!("non-string required property in JSON Schema definition {name}")
+              })?;
+              if !required.insert(property) {
+                  return Err(format!(
+                      "duplicate required property in JSON Schema definition {name}: {property}"
+                  )
+                  .into());
+              }
+              if !source_properties.contains_key(property) {
+                  return Err(format!(
+                      "unknown required property in JSON Schema definition {name}: {property}"
+                  )
+                  .into());
+              }
+          }
+          '''
+          new = '''    let mut required = BTreeSet::new();
+          if let Some(required_value) = definition.get("required") {
+              let required_values = required_value.as_array().ok_or_else(|| {
+                  format!("required must be an array for JSON Schema definition {name}")
+              })?;
+              for item in required_values {
+                  let property = item.as_str().ok_or_else(|| {
+                      format!("non-string required property in JSON Schema definition {name}")
+                  })?;
+                  if !required.insert(property) {
+                      return Err(format!(
+                          "duplicate required property in JSON Schema definition {name}: {property}"
+                      )
+                      .into());
+                  }
+                  if !source_properties.contains_key(property) {
+                      return Err(format!(
+                          "unknown required property in JSON Schema definition {name}: {property}"
+                      )
+                      .into());
+                  }
+              }
+          }
+          '''
+          if source.count(old) != 1:
+              raise SystemExit("expected exactly one required parser block")
+          source = source.replace(old, new, 1)
+
+          marker = '''    #[test]
+          fn repeated_discrepancy_runs_are_byte_stable() {
+          '''
+          tests = '''    #[test]
+          fn omitted_json_required_defaults_to_empty_set() {
+              let temp = fixture_root();
+              let tsp_path = temp.path().join("contracts/docs-serving.tsp");
+              let tsp = fs::read_to_string(&tsp_path).unwrap();
+              let optional_only = tsp
+                  .replace("  method: string;", "  method?: string;")
+                  .replace("  path: string;", "  path?: string;");
+              fs::write(&tsp_path, optional_only).unwrap();
+
+              let schema_path = temp.path().join("contracts/docs-serving.schema.json");
+              let mut schema: Value =
+                  serde_json::from_slice(&fs::read(&schema_path).unwrap()).unwrap();
+              schema["$defs"]["DocsRequest"]
+                  .as_object_mut()
+                  .unwrap()
+                  .remove("required");
+              fs::write(&schema_path, serde_json::to_vec_pretty(&schema).unwrap()).unwrap();
+
+              assert_eq!(run(temp.path()).expect("parity run"), Vec::new());
+          }
+
+          #[test]
+          fn non_array_json_required_is_rejected() {
+              let temp = fixture_root();
+              let path = temp.path().join("contracts/docs-serving.schema.json");
+              let mut schema: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+              schema["$defs"]["DocsRequest"]["required"] = json!("method");
+              fs::write(&path, serde_json::to_vec_pretty(&schema).unwrap()).unwrap();
+
+              let error = run(temp.path()).expect_err("non-array required must fail closed");
+              assert!(error.to_string().contains("required must be an array"));
+          }
+
+          '''
+          if source.count(marker) != 1:
+              raise SystemExit("expected exactly one test insertion marker")
+          source = source.replace(marker, tests + marker, 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml
+          cargo test --manifest-path tools/contract-parity/Cargo.toml
+
+      - name: Commit the focused repair and remove this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -- .github/workflows/apply-required-omission-fix.yml
+          git add -- tools/contract-parity/src/lib.rs .github/workflows/apply-required-omission-fix.yml
+          git commit -m 'fix(parity): accept omitted JSON Schema required arrays'
+          git push origin HEAD:fix/json-schema-required-omission-2026-09-03
