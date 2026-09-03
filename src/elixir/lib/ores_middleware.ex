@@ -1,12 +1,17 @@
 defmodule OresMiddleware do
   @moduledoc "Cross-language ORES middleware contract for Elixir/OTP servers."
 
-  alias OresMiddleware.{Config, Context, Stack}
+  alias OresMiddleware.{Config, Context, ContextAccess, Stack}
 
   def capabilities, do: Config.capabilities()
   def default_config(service_name), do: Config.default(service_name)
   def validate_config(config), do: Config.validate(config)
   def current_context, do: Context.current()
+  def current_request_id, do: ContextAccess.current_request_id()
+  def current_trace_id, do: ContextAccess.current_trace_id()
+  def current_user_id, do: ContextAccess.current_user_id()
+  def current_logged_in_user_id, do: ContextAccess.current_logged_in_user_id()
+  def current_tenant_id, do: ContextAccess.current_tenant_id()
   def run_with_context(context, operation), do: Context.run(context, operation)
 
   def create_middleware(config, hooks \\ %{}) do
