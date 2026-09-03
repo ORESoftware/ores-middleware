@@ -7,6 +7,7 @@ mod context;
 pub mod docs_serving;
 pub mod frameworks;
 mod integrations;
+pub mod middleware_order;
 mod net;
 pub mod operation;
 pub mod otel;
@@ -29,6 +30,10 @@ pub use context::{
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
+};
+pub use middleware_order::{
+    rate_limit_posture, validate_middleware_order, MiddlewareStage, OperationClass,
+    OrderViolation, RateLimitConsistency, RateLimitPosture, DEFAULT_MIDDLEWARE_ORDER,
 };
 pub use operation::{
     run_operation_boundary, run_operation_boundary_with_cancellation,
