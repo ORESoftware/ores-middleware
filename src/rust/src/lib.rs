@@ -4,6 +4,7 @@ mod bootstrap;
 mod compat;
 mod config;
 mod context;
+pub mod core_rate_limiter;
 pub mod docs_serving;
 pub mod frameworks;
 mod integrations;
@@ -24,6 +25,9 @@ pub use config::{
 pub use context::{
     current_context, current_logged_in_user_id, current_request_id, current_tenant_id,
     current_trace_id, current_user_id, run_with_context, ContextRegistry, RequestContext,
+};
+pub use core_rate_limiter::{
+    CoreInMemoryRateLimiter, DEFAULT_CORE_STATE_CAPACITY, DEFAULT_CORE_STATE_TTL,
 };
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
