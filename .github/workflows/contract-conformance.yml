@@ -40,7 +40,7 @@ jobs:
       - run: npm --prefix src/ts install
       - run: npm --prefix src/ts run build
       - run: npm --prefix src/ts test
-      - run: npm --prefix src/ts run descriptor | jq -e '.language == "ts"'
+      - run: node src/ts/dist/contractcheck.js | jq -e '.language == "ts"'
 
   golang:
     runs-on: ubuntu-latest
