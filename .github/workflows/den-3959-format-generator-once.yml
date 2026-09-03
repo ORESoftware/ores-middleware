@@ -1,0 +1,52 @@
+name: Format DEN-3959 Rust generator once
+
+on:
+  push:
+    branches:
+      - feat/den-3959-independent-polyglot-generators
+    paths:
+      - .github/workflows/den-3959-format-generator-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-3959-format-generator-once
+  cancel-in-progress: false
+
+jobs:
+  format:
+    if: github.repository == 'ORESoftware/ores-middleware'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - name: Format only the independent generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          rustfmt --edition 2024 tools/contract-parity/src/bin/persistence_codegen.rs
+          test -n "$(git diff -- tools/contract-parity/src/bin/persistence_codegen.rs)"
+          unexpected="$(git diff --name-only | grep -Ev '^tools/contract-parity/src/bin/persistence_codegen.rs$' || true)"
+          test -z "$unexpected"
+      - name: Commit formatting and remove this one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- tools/contract-parity/src/bin/persistence_codegen.rs
+          git rm -- .github/workflows/den-3959-format-generator-once.yml
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(tools/contract-parity/src/bin/persistence_codegen.rs|\.github/workflows/den-3959-format-generator-once\.yml)$' || true)"
+          test -z "$unexpected"
+          git commit -m 'style(DEN-3959): rustfmt independent polyglot generator'
+          git push origin HEAD:refs/heads/feat/den-3959-independent-polyglot-generators
