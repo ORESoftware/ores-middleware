@@ -288,19 +288,19 @@ def receipt(
             "dieselSeaOrmProjectionWitness": {
                 "state": "applicable",
                 "reason": (
-                    "The TypeSpec lane emits a compile-checked Diesel-shaped "
-                    "witness and the JSON Schema/OpenAPI lane emits a "
-                    "compile-checked SeaORM-shaped witness; normalized "
-                    "persistence semantics are compared."
+                    "TypeSpec and JSON Schema/OpenAPI each emit compile-checked "
+                    "Diesel and SeaORM witnesses; all four manifests and "
+                    "normalized persistence semantics are compared."
                 ),
                 "owner": "ORESoftware/ores-middleware#5",
             },
             "livePostgresCatalogAndOrmIntrospection": {
                 "state": "external_gate",
                 "reason": (
-                    "Real Diesel and SeaORM compilation plus independent "
-                    "PostgreSQL application and pg_catalog read-back remain "
-                    "mandatory before persistence artifacts are admitted."
+                    "Real Diesel and SeaORM compilation, independent SQL "
+                    "application, pg_catalog read-back, and four-way row-level "
+                    "insert/read/rejection convergence remain mandatory before "
+                    "persistence artifacts are admitted."
                 ),
                 "owner": "ORESoftware/ores-middleware#5",
             },

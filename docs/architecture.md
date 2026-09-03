@@ -72,14 +72,18 @@ The required peer flows are:
 
 ```text
 TypeSpec
+  -> interfaces/types/runtime code
   -> SQL_T where applicable
+  -> Diesel_T and SeaORM_T
   -> Protobuf
   -> gRPC
   -> wire clients
 
 JSON Schema/OpenAPI
-  -> interfaces/types/runtime validators
+  -> interfaces/types/runtime code
   -> SQL_J where applicable
+  -> Diesel_J and SeaORM_J
+  -> OpenAPI
   -> write clients
 ```
 
@@ -133,6 +137,14 @@ authority, each ORM across authorities, and both database catalogs. Relative
 CLI evidence paths are resolved against the selected repository root before
 artifacts are hashed, so a valid custom `--output-root` cannot fail only during
 receipt construction.
+
+`scripts/orm_data_plane_gate.py` then executes real insert and read-back paths
+through all four authority/ORM combinations. It verifies optional-null behavior
+and rejects duplicate primary keys, duplicate tenant/idempotency keys, invalid
+enum values, missing required values, int32 overflow, and malformed timestamps.
+Normalized positive rows and all rejection outcomes must agree across the full
+matrix. See `docs/orm-data-plane-convergence.md` for the retained receipt and
+promotion boundary.
 
 Any source, generated-code, ORM, SQL, compiler, runtime, or catalog mismatch
 receives a deterministic fingerprint and enters `STOPPED_FOR_EVALUATION`.
