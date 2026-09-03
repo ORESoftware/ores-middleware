@@ -45,7 +45,7 @@ EXPECTED_INSTALLED_SMOKE_TEST = (
 )
 EXPECTED_WORKSPACE_SCRIPTS = {
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
-    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
     "contracts:polyglot-generate": POLYGLOT_COMMAND,
     "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
