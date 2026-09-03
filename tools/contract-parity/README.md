@@ -39,7 +39,8 @@ node scripts/validate-generated-polyglot.mjs
 
 Every source and artifact is SHA-256 bound. Common generated products are
 compared byte for byte. Outputs remain under `target/` and may never rewrite an
-authored authority.
+authored authority. The checked-in generator source is formatted with the same
+pinned Rust 1.95 toolchain used by exact-head CI.
 
 The persistence authority currently declares a data model but no service
 operations. The generator therefore emits message/component projections with
