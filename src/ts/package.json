@@ -12,10 +12,14 @@
     "./adapters": {
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
+    },
+    "./docs-serving": {
+      "types": "./dist/docs-serving.d.ts",
+      "import": "./dist/docs-serving.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-docs-serving.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "descriptor": "node dist/contractcheck.js"
   },

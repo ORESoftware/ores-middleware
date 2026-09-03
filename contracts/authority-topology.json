@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "ores.contract-authority-topology/v1",
+  "authorities": [
+    {
+      "id": "typespec",
+      "kind": "human-authored",
+      "topLevel": true,
+      "sources": ["contracts/**/*.tsp"]
+    },
+    {
+      "id": "json-schema-openapi",
+      "kind": "human-authored",
+      "topLevel": true,
+      "sources": ["contracts/**/*.schema.json", "openapi/**/*"]
+    }
+  ],
+  "flows": {
+    "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
+    "json-schema-openapi": [
+      "interfaces-types",
+      "sql-when-applicable",
+      "write-clients"
+    ]
+  },
+  "prohibitedAuthorityEdges": [
+    ["typespec", "json-schema-openapi"],
+    ["json-schema-openapi", "typespec"]
+  ],
+  "convergenceGates": [
+    "direct-contract-parity",
+    "cross-translation-witnesses",
+    "round-trip-witnesses",
+    "sql-catalog-readback-when-applicable",
+    "generated-client-type-fixtures",
+    "diesel-seaorm-catalog-parity-when-applicable",
+    "runtime-conformance-fixtures"
+  ],
+  "onUnexplainedMismatch": "STOPPED_FOR_EVALUATION"
+}

@@ -8,56 +8,78 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: contract-conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   contracts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
           cache: npm
-      - run: npm install
+      - run: npm ci
       - run: npm run contracts:compile
       - run: npm run contracts:check
       - run: node scripts/check-source-layout.mjs
+      - run: python3 -m unittest scripts/test_contract_parity.py -v
+      - run: python3 scripts/check_contract_parity.py
+      - run: npx tsp compile contracts/docs-serving.tsp --no-emit
+      - run: node scripts/validate-docs-serving.mjs
       - run: python3 scripts/test-rollout-rust-server.py
 
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - run: cargo fmt --manifest-path src/rust/Cargo.toml --all -- --check
       - run: cargo test --manifest-path src/rust/Cargo.toml --all-features
       - run: cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck | jq -e '.language == "rust"'
 
   typescript:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
-      - run: npm --prefix src/ts install
-      - run: npm --prefix src/ts run build
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
+      - run: npm ci --prefix src/ts
       - run: npm --prefix src/ts test
       - run: node src/ts/dist/contractcheck.js | jq -e '.language == "ts"'
 
   golang:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: '1.24.x'
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25.0'
+          cache: false
       - run: cd src/golang && go test ./...
       - run: cd src/golang && go run ./cmd/contractcheck | jq -e '.language == "golang"'
 
   beam:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: '27'
           elixir-version: '1.18'

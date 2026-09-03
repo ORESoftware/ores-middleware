@@ -4,6 +4,7 @@ mod bootstrap;
 mod compat;
 mod config;
 mod context;
+pub mod docs_serving;
 pub mod frameworks;
 mod integrations;
 mod net;
