@@ -23,7 +23,8 @@ fn parse_args() -> Result<Arguments, String> {
     let mut args = env::args().skip(1);
     while let Some(argument) = args.next() {
         let value = |args: &mut std::iter::Skip<std::env::Args>, flag: &str| {
-            args.next().ok_or_else(|| format!("{flag} requires a value"))
+            args.next()
+                .ok_or_else(|| format!("{flag} requires a value"))
         };
         match argument.as_str() {
             "--first" => first = Some(PathBuf::from(value(&mut args, "--first")?)),

@@ -183,12 +183,8 @@ fn tree_digest(files: &BTreeMap<String, FileRecord>) -> String {
 }
 
 pub fn inspect_archive(path: &Path) -> Result<ArchiveSummary> {
-    let metadata = fs::metadata(path).map_err(|_| {
-        failure(
-            AuditErrorCode::Io,
-            "unable to read archive metadata",
-        )
-    })?;
+    let metadata = fs::metadata(path)
+        .map_err(|_| failure(AuditErrorCode::Io, "unable to read archive metadata"))?;
     if !metadata.is_file() {
         return Err(failure(
             AuditErrorCode::Io,
@@ -202,8 +198,8 @@ pub fn inspect_archive(path: &Path) -> Result<ArchiveSummary> {
         ));
     }
 
-    let archive_bytes = fs::read(path)
-        .map_err(|_| failure(AuditErrorCode::Io, "unable to read archive bytes"))?;
+    let archive_bytes =
+        fs::read(path).map_err(|_| failure(AuditErrorCode::Io, "unable to read archive bytes"))?;
     let decoder = GzDecoder::new(archive_bytes.as_slice());
     let mut archive = Archive::new(decoder);
     let entries = archive.entries().map_err(|_| {
@@ -362,8 +358,8 @@ pub fn audit_pair(
         ));
     }
 
-    let first_bytes = fs::read(first)
-        .map_err(|_| failure(AuditErrorCode::Io, "unable to read first archive"))?;
+    let first_bytes =
+        fs::read(first).map_err(|_| failure(AuditErrorCode::Io, "unable to read first archive"))?;
     let second_bytes = fs::read(second)
         .map_err(|_| failure(AuditErrorCode::Io, "unable to read second archive"))?;
     if first_bytes != second_bytes {
