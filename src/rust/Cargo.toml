@@ -20,6 +20,7 @@ futures-util = "0.3"
 hmac = "0.12"
 http = "1"
 next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log.git", rev = "b55271c047be761c4711d87cbd500a49eefda3d9" }
+ores-rl-lib-core = { git = "https://github.com/ores-rate-limit/ores-rl-lib-core", rev = "1b43c19f0c2e9df4dc0a63a43f6af5dddd61cf03", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
