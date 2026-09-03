@@ -1,4 +1,4 @@
-name: Repair DEN-3959 native runtime witnesses v2 once
+name: Repair DEN-3959 native runtime witnesses once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: den-3959-repair-runtime-witnesses-v2-once
+  group: den-3959-repair-runtime-witnesses
   cancel-in-progress: false
 
 jobs:
@@ -53,9 +53,6 @@ jobs:
           generator = Path('tools/contract-parity/src/bin/persistence_codegen.rs')
           text = generator.read_text(encoding='utf-8')
 
-          gleam_start = text.index('fn render_gleam(model: &Model) -> String {')
-          gleam_end = text.index('\nfn elixir_type', gleam_start)
-          gleam_section = text[gleam_start:gleam_end]
           old_gleam_signature = (
               'pub fn idempotency_status_from_string(value: String) '
               '-> Result(IdempotencyStatus, Nil) {{\\n'
@@ -65,36 +62,34 @@ jobs:
               '  value: String,\\n'
               ') -> Result(IdempotencyStatus, Nil) {{\\n'
           )
-          if gleam_section.count(old_gleam_signature) != 1:
+          old_count = text.count(old_gleam_signature)
+          new_count = text.count(new_gleam_signature)
+          if old_count == 1 and new_count == 0:
+              text = text.replace(old_gleam_signature, new_gleam_signature, 1)
+          elif old_count == 0 and new_count == 1:
+              pass
+          else:
               raise SystemExit(
-                  'expected exactly one generated Gleam status signature; '
-                  f'found {gleam_section.count(old_gleam_signature)}'
+                  'unexpected generated Gleam signature state: '
+                  f'old={old_count}, new={new_count}'
               )
-          gleam_section = gleam_section.replace(
-              old_gleam_signature,
-              new_gleam_signature,
-              1,
-          )
-          text = text[:gleam_start] + gleam_section + text[gleam_end:]
 
-          erlang_start = text.index('fn render_erlang(model: &Model) -> String {')
-          status_start = text.index('    let status_type = enum_values\n', erlang_start)
-          clauses_start = text.index('    let clauses = enum_values\n', status_start)
-          legacy_status_block = text[status_start:clauses_start]
-          for fragment in (
-              '.map(|value| format!("<<\\\"{value}\\\">>"))',
-              '.join(" | ");',
-          ):
-              if fragment not in legacy_status_block:
-                  raise SystemExit(
-                      f'generated Erlang status renderer missing expected fragment: {fragment}'
-                  )
-          replacement_status_block = (
+          erlang_replacement = (
               '    // Erlang types cannot express singleton binary literals. The wire\n'
               '    // vocabulary remains exact in valid_idempotency_status/1 below.\n'
               '    let status_type = "binary()";\n'
           )
-          text = text[:status_start] + replacement_status_block + text[clauses_start:]
+          if erlang_replacement not in text:
+              erlang_start = text.index('fn render_erlang(model: &Model) -> String {')
+              status_start = text.find('    let status_type = enum_values\n', erlang_start)
+              clauses_start = text.find('    let clauses = enum_values\n', status_start)
+              if status_start < 0 or clauses_start < 0:
+                  raise SystemExit(
+                      'could not locate the generated Erlang status-type renderer'
+                  )
+              text = text[:status_start] + erlang_replacement + text[clauses_start:]
+          if text.count('let status_type = "binary()";') != 1:
+              raise SystemExit('expected exactly one normalized Erlang status renderer')
           generator.write_text(text, encoding='utf-8')
 
           rust_witness = Path('tests/generated-runtime/rust/src/main.rs')
@@ -105,30 +100,47 @@ jobs:
               ('optional_i32(object, "responseStatus")??',
                'optional_i32(object, "responseStatus")?'),
           ):
-              if rust_text.count(old) != 1:
-                  raise SystemExit(f'expected exactly one Rust witness expression: {old}')
-              rust_text = rust_text.replace(old, new, 1)
+              old_count = rust_text.count(old)
+              new_count = rust_text.count(new)
+              if old_count == 1 and new_count == 0:
+                  rust_text = rust_text.replace(old, new, 1)
+              elif old_count == 0 and new_count == 1:
+                  pass
+              else:
+                  raise SystemExit(
+                      f'unexpected Rust witness state for {old!r}: '
+                      f'old={old_count}, new={new_count}'
+                  )
           rust_witness.write_text(rust_text, encoding='utf-8')
 
           elixir_witness = Path('tests/generated-runtime/elixir_witness.exs')
           elixir_text = elixir_witness.read_text(encoding='utf-8')
           anchor = '  def main([fixture_path, generated_path, authority]) do\n'
-          normalization = '  def main(["--" | arguments]), do: main(arguments)\n\n'
-          if elixir_text.count(anchor) != 1:
-              raise SystemExit(
-                  f'expected exactly one Elixir main clause; found {elixir_text.count(anchor)}'
+          normalization = '  def main(["--" | arguments]), do: main(arguments)\n'
+          if normalization not in elixir_text:
+              if elixir_text.count(anchor) != 1:
+                  raise SystemExit(
+                      f'expected one Elixir main clause, found '
+                      f'{elixir_text.count(anchor)}'
+                  )
+              elixir_text = elixir_text.replace(
+                  anchor,
+                  normalization + '\n' + anchor,
+                  1,
               )
-          if normalization.strip() in elixir_text:
-              raise SystemExit('Elixir argument-normalization clause already exists')
-          elixir_witness.write_text(
-              elixir_text.replace(anchor, normalization + anchor, 1),
-              encoding='utf-8',
-          )
+          if elixir_text.count(normalization) != 1:
+              raise SystemExit('expected exactly one Elixir argument-normalization clause')
+          elixir_witness.write_text(elixir_text, encoding='utf-8')
           PY
-          rustfmt --edition 2024 \
-            tools/contract-parity/src/bin/persistence_codegen.rs \
-            tests/generated-runtime/rust/src/main.rs
+
+          rustfmt --edition 2024 tools/contract-parity/src/bin/persistence_codegen.rs
+          generated_stub=tests/generated-runtime/rust/src/generated.rs
+          test ! -e "$generated_stub"
+          printf '%s\n' '// temporary rustfmt module stub; removed before verification' > "$generated_stub"
+          rustfmt --edition 2024 tests/generated-runtime/rust/src/main.rs
+          rm -- "$generated_stub"
           gleam format tests/generated-runtime/gleam/src/runtime_witness.gleam
+          test ! -e "$generated_stub"
       - name: Install exact JavaScript dependencies
         shell: bash
         run: |
@@ -162,7 +174,7 @@ jobs:
               gleam format --check src
             )
           done
-      - name: Commit only proven source repairs and remove one-time workflows
+      - name: Commit proven source repairs and remove this one-time workflow
         shell: bash
         run: |
           set -euo pipefail
@@ -173,10 +185,8 @@ jobs:
             tests/generated-runtime/rust/src/main.rs \
             tests/generated-runtime/gleam/src/runtime_witness.gleam \
             tests/generated-runtime/elixir_witness.exs
-          git rm -- \
-            .github/workflows/den-3959-repair-runtime-witnesses-once.yml \
-            .github/workflows/den-3959-repair-runtime-witnesses-v2-once.yml
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(tools/contract-parity/src/bin/persistence_codegen.rs|tests/generated-runtime/rust/src/main.rs|tests/generated-runtime/gleam/src/runtime_witness.gleam|tests/generated-runtime/elixir_witness.exs|\.github/workflows/den-3959-repair-runtime-witnesses-once\.yml|\.github/workflows/den-3959-repair-runtime-witnesses-v2-once\.yml)$' || true)"
+          git rm -- .github/workflows/den-3959-repair-runtime-witnesses-v2-once.yml
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(tools/contract-parity/src/bin/persistence_codegen.rs|tests/generated-runtime/rust/src/main.rs|tests/generated-runtime/gleam/src/runtime_witness.gleam|tests/generated-runtime/elixir_witness.exs|\.github/workflows/den-3959-repair-runtime-witnesses-v2-once\.yml)$' || true)"
           test -z "$unexpected"
           git commit -m 'fix(DEN-3959): prove all generated native runtime witnesses'
           git fetch origin feat/den-3959-independent-polyglot-generators
