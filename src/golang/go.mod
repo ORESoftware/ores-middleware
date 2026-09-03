@@ -7,7 +7,7 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.15
 	github.com/gorilla/mux v1.8.1
 	github.com/labstack/echo/v4 v4.15.3
-	github.com/ores-otel/ores.otel.log/sdk/go v0.0.0-20260903051509-b55271c047be
+	github.com/ores-otel/ores.otel.log/sdk/go v0.0.0-20260903160732-f30374c33ead
 )
 
 require (
