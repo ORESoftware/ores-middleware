@@ -1,0 +1,15 @@
+{
+  "language": "gleam",
+  "runtime": "erlang-otp",
+  "packageName": "ores_middleware",
+  "frameworkAdapters": ["gleam-http", "mist", "wisp", "cowboy", "otp"],
+  "operationSymbols": {
+    "descriptor": "descriptor",
+    "defaultConfig": "default_config",
+    "validateConfig": "validate_config",
+    "createMiddleware": "create_middleware",
+    "runWithContext": "run_with_context",
+    "currentContext": "current_context",
+    "capabilities": "capabilities"
+  }
+}
