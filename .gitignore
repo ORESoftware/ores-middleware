@@ -1,0 +1,33 @@
+# Generated outputs
+/target/*
+!/target/README.md
+!/target/rust/
+!/target/ts/
+!/target/gleam/
+!/target/golang/
+!/target/elixir/
+!/target/erlang/
+!/target/*/.gitkeep
+
+# Language build caches
+/src/rust/target/
+/src/ts/node_modules/
+/src/ts/dist/
+/src/gleam/build/
+/src/golang/bin/
+/src/elixir/_build/
+/src/elixir/deps/
+/src/erlang/_build/
+
+# Local secrets and environment
+.env
+.env.*
+!/env/enc/*.env.enc
+/env/dec/
+*.pem
+*.key
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
