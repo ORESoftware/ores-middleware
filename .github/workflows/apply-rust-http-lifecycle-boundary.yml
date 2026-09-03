@@ -33,6 +33,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path(".agent-patches/apply_rust_lifecycle.py")
           text = path.read_text(encoding="utf-8")
@@ -46,40 +47,55 @@ jobs:
               1,
           )
 
+          deadline = '"request deadline exceeded",'
+          if text.count(deadline) != 1:
+              raise SystemExit("expected one deadline response detail")
           text = text.replace(
-              '                    "request deadline exceeded",\n                ),',
-              '                    "request deadline exceeded",\n                    "request handler timed out",\n                ),',
-              1,
-          )
-          text = text.replace(
-              '                    "request was cancelled",\n                ),',
-              '                    "request was cancelled",\n                    "request handler cancelled",\n                ),',
+              deadline,
+              '"request deadline exceeded",\n                    "request handler timed out",',
               1,
           )
 
-          combined = '''                OperationFailureKind::Error | OperationFailureKind::Panic => (
-                    "panic",
-                    500,
-                    "internal_error",
-                    "request handler failed",
-                ),'''
-          split = '''                OperationFailureKind::Error => (
-                    "error",
-                    500,
-                    "internal_error",
-                    "request handler failed",
-                    "request handler failed",
-                ),
-                OperationFailureKind::Panic => (
-                    "panic",
-                    500,
-                    "internal_error",
-                    "request handler failed",
-                    "request handler panicked",
-                ),'''
-          if text.count(combined) != 1:
+          cancelled = '"request was cancelled",'
+          if text.count(cancelled) != 1:
+              raise SystemExit("expected one cancellation response detail")
+          text = text.replace(
+              cancelled,
+              '"request was cancelled",\n                    "request handler cancelled",',
+              1,
+          )
+
+          arm_pattern = re.compile(
+              r'(?P<indent>^[ \t]*)OperationFailureKind::Error\s*\|\s*'
+              r'OperationFailureKind::Panic\s*=>\s*\(\s*'
+              r'"panic",\s*500,\s*"internal_error",\s*'
+              r'"request handler failed",\s*\),',
+              re.MULTILINE,
+          )
+
+          def split_arm(match: re.Match[str]) -> str:
+              indent = match.group("indent")
+              inner = indent + "    "
+              return (
+                  f'{indent}OperationFailureKind::Error => (\n'
+                  f'{inner}"error",\n'
+                  f'{inner}500,\n'
+                  f'{inner}"internal_error",\n'
+                  f'{inner}"request handler failed",\n'
+                  f'{inner}"request handler failed",\n'
+                  f'{indent}),\n'
+                  f'{indent}OperationFailureKind::Panic => (\n'
+                  f'{inner}"panic",\n'
+                  f'{inner}500,\n'
+                  f'{inner}"internal_error",\n'
+                  f'{inner}"request handler failed",\n'
+                  f'{inner}"request handler panicked",\n'
+                  f'{indent}),' 
+              )
+
+          text, arm_count = arm_pattern.subn(split_arm, text, count=1)
+          if arm_count != 1:
               raise SystemExit("expected one combined error/panic arm")
-          text = text.replace(combined, split, 1)
 
           old_message = '.error(vec![Value::String("request handler failed".into())])'
           if text.count(old_message) != 1:
