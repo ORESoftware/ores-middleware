@@ -36,42 +36,34 @@ jobs:
 
           path = Path(".agent-patches/apply_rust_lifecycle.py")
           text = path.read_text(encoding="utf-8")
-          old = '''            let (outcome, status, code, detail) = match failure.kind {
-                OperationFailureKind::DeadlineExceeded => (
-                    "timeout",
-                    504,
-                    "deadline_exceeded",
-                    "request deadline exceeded",
-                ),
-                OperationFailureKind::Cancelled => (
-                    "cancelled",
-                    499,
-                    "request_cancelled",
-                    "request was cancelled",
-                ),
-                OperationFailureKind::Error | OperationFailureKind::Panic => (
+
+          declaration = "let (outcome, status, code, detail) = match failure.kind {"
+          if text.count(declaration) != 1:
+              raise SystemExit("expected one handler outcome declaration")
+          text = text.replace(
+              declaration,
+              "let (outcome, status, code, detail, log_message) = match failure.kind {",
+              1,
+          )
+
+          text = text.replace(
+              '                    "request deadline exceeded",\n                ),',
+              '                    "request deadline exceeded",\n                    "request handler timed out",\n                ),',
+              1,
+          )
+          text = text.replace(
+              '                    "request was cancelled",\n                ),',
+              '                    "request was cancelled",\n                    "request handler cancelled",\n                ),',
+              1,
+          )
+
+          combined = '''                OperationFailureKind::Error | OperationFailureKind::Panic => (
                     "panic",
                     500,
                     "internal_error",
                     "request handler failed",
-                ),
-            };'''
-          new = '''            let (outcome, status, code, detail, log_message) = match failure.kind {
-                OperationFailureKind::DeadlineExceeded => (
-                    "timeout",
-                    504,
-                    "deadline_exceeded",
-                    "request deadline exceeded",
-                    "request handler timed out",
-                ),
-                OperationFailureKind::Cancelled => (
-                    "cancelled",
-                    499,
-                    "request_cancelled",
-                    "request was cancelled",
-                    "request handler cancelled",
-                ),
-                OperationFailureKind::Error => (
+                ),'''
+          split = '''                OperationFailureKind::Error => (
                     "error",
                     500,
                     "internal_error",
@@ -84,16 +76,20 @@ jobs:
                     "internal_error",
                     "request handler failed",
                     "request handler panicked",
-                ),
-            };'''
-          if text.count(old) != 1:
-              raise SystemExit("expected one handler outcome tuple in patch script")
-          text = text.replace(old, new, 1)
-          old_message = '''                        .error(vec![Value::String("request handler failed".into())])'''
-          new_message = '''                        .error(vec![Value::String(log_message.into())])'''
+                ),'''
+          if text.count(combined) != 1:
+              raise SystemExit("expected one combined error/panic arm")
+          text = text.replace(combined, split, 1)
+
+          old_message = '.error(vec![Value::String("request handler failed".into())])'
           if text.count(old_message) != 1:
-              raise SystemExit("expected one generic handler failure message in patch script")
-          path.write_text(text.replace(old_message, new_message, 1), encoding="utf-8")
+              raise SystemExit("expected one generic handler failure message")
+          text = text.replace(
+              old_message,
+              '.error(vec![Value::String(log_message.into())])',
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
           PY
 
       - name: Apply exact source transformations
