@@ -30,7 +30,10 @@ pub fn options(
   log.options(app_name, runtime, id_generator, clock)
 }
 
-pub fn new_logger(options: log.Options, transport: log.Transport) -> log.Logger {
+pub fn new_logger(
+  options: log.Options,
+  transport: log.Transport,
+) -> log.Logger {
   log.new(options, transport)
 }
 
@@ -224,10 +227,7 @@ pub fn create_middleware(
                 let response = next(scoped_request, request_log)
                 let response_fields =
                   list.append(request_fields, [
-                    #(
-                      "http.response.status_code",
-                      json.int(response.status),
-                    ),
+                    #("http.response.status_code", json.int(response.status)),
                   ])
                 let _ =
                   info(request_log, "request handler completed", [])
