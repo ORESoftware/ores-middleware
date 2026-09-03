@@ -3,6 +3,8 @@ defmodule OresGeneratedRuntimeWitness do
   @witness_schema "ores.generated-runtime-witness/v1"
   @model OresMiddleware.Generated.IdempotencyRecord
 
+  def main(["--" | arguments]), do: main(arguments)
+
   def main([fixture_path, generated_path, authority]) do
     Code.require_file(Path.expand(generated_path))
     fixture = fixture_path |> File.read!() |> Jason.decode!()

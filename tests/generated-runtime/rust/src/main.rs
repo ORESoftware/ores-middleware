@@ -149,8 +149,8 @@ fn strict_decode(value: &Value, fixture: &Fixture) -> Option<generated::Idempote
         id: required_string(object, "id")?,
         idempotency_key: required_string(object, "idempotencyKey")?,
         request_hash: required_string(object, "requestHash")?,
-        response_body: optional_string(object, "responseBody")??,
-        response_status: optional_i32(object, "responseStatus")??,
+        response_body: optional_string(object, "responseBody")?,
+        response_status: optional_i32(object, "responseStatus")?,
         status,
         tenant_id: required_string(object, "tenantId")?,
     })
@@ -161,10 +161,7 @@ fn normalize(record: generated::IdempotencyRecord) -> Value {
     object.insert("createdAt".to_owned(), json!(record.created_at));
     object.insert("expiresAt".to_owned(), json!(record.expires_at));
     object.insert("id".to_owned(), json!(record.id));
-    object.insert(
-        "idempotencyKey".to_owned(),
-        json!(record.idempotency_key),
-    );
+    object.insert("idempotencyKey".to_owned(), json!(record.idempotency_key));
     object.insert("requestHash".to_owned(), json!(record.request_hash));
     if let Some(value) = record.response_body {
         object.insert("responseBody".to_owned(), json!(value));

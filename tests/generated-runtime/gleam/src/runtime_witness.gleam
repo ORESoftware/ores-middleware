@@ -9,7 +9,9 @@ import gleam/result
 import idempotency_record
 
 const witness_schema = "ores.generated-runtime-witness/v1"
+
 const int32_minimum = -2_147_483_648
+
 const int32_maximum = 2_147_483_647
 
 @external(erlang, "runtime_ffi", "get_env")
@@ -93,7 +95,8 @@ fn status_decoder() -> decode.Decoder(idempotency_record.IdempotencyStatus) {
   use value <- decode.then(decode.string)
   case idempotency_record.idempotency_status_from_string(value) {
     Ok(status) -> decode.success(status)
-    Error(_) -> decode.failure(idempotency_record.Pending, expected: "IdempotencyStatus")
+    Error(_) ->
+      decode.failure(idempotency_record.Pending, expected: "IdempotencyStatus")
   }
 }
 
@@ -115,7 +118,9 @@ fn record_decoder(
   allowed_fields: List(String),
 ) -> decode.Decoder(idempotency_record.IdempotencyRecord) {
   use object <- decode.then(decode.dict(decode.string, decode.dynamic))
-  case list.all(dict.keys(object), fn(key) { list.contains(allowed_fields, key) }) {
+  case
+    list.all(dict.keys(object), fn(key) { list.contains(allowed_fields, key) })
+  {
     False -> decode.failure(default_record(), expected: "IdempotencyRecord")
     True -> {
       use created_at <- decode.field("createdAt", date_time_decoder())
@@ -192,11 +197,12 @@ fn normalize(record: idempotency_record.IdempotencyRecord) -> json.Json {
 
 fn run_case(test_case: TestCase, fixture: Fixture) -> CaseResult {
   case decode.run(test_case.value, record_decoder(fixture.wire_fields)) {
-    Ok(record) -> CaseResult(
-      id: test_case.id,
-      accepted: True,
-      normalized: Some(normalize(record)),
-    )
+    Ok(record) ->
+      CaseResult(
+        id: test_case.id,
+        accepted: True,
+        normalized: Some(normalize(record)),
+      )
     Error(_) -> CaseResult(id: test_case.id, accepted: False, normalized: None)
   }
 }
@@ -205,13 +211,10 @@ fn encode_case_result(result: CaseResult) -> json.Json {
   json.object([
     #("id", json.string(result.id)),
     #("accepted", json.bool(result.accepted)),
-    #(
-      "normalized",
-      case result.normalized {
-        Some(value) -> value
-        None -> json.null()
-      },
-    ),
+    #("normalized", case result.normalized {
+      Some(value) -> value
+      None -> json.null()
+    }),
   ])
 }
 
@@ -236,21 +239,21 @@ pub fn main() {
   let assert Ok(fixture_path) = get_env("ORES_RUNTIME_FIXTURE")
   let assert Ok(authority) = get_env("ORES_RUNTIME_AUTHORITY")
   let assert Ok(generated_path) = get_env("ORES_RUNTIME_GENERATED_SOURCE")
-  let assert True = source_contains_all(generated_path, source_shape_fragments())
+  let assert True =
+    source_contains_all(generated_path, source_shape_fragments())
   let assert Ok(fixture_text) = read_text(fixture_path)
   let assert Ok(fixture) = json.parse(fixture_text, fixture_decoder())
 
-  let cases = list.map(fixture.cases, fn(test_case) {
-    run_case(test_case, fixture)
-  })
+  let cases =
+    list.map(fixture.cases, fn(test_case) { run_case(test_case, fixture) })
   let status_acceptance =
     list.append(fixture.statuses, ["__unknown__"])
     |> list.map(fn(status) {
       #(
         status,
         idempotency_record.idempotency_status_from_string(status)
-        |> result.is_ok
-        |> json.bool,
+          |> result.is_ok
+          |> json.bool,
       )
     })
     |> json.object
@@ -261,14 +264,8 @@ pub fn main() {
     #("language", json.string("gleam")),
     #("model", json.string(fixture.model)),
     #("wireFields", json.array(fixture.wire_fields, of: json.string)),
-    #(
-      "requiredFields",
-      json.array(fixture.required_fields, of: json.string),
-    ),
-    #(
-      "optionalFields",
-      json.array(fixture.optional_fields, of: json.string),
-    ),
+    #("requiredFields", json.array(fixture.required_fields, of: json.string)),
+    #("optionalFields", json.array(fixture.optional_fields, of: json.string)),
     #("statuses", json.array(fixture.statuses, of: json.string)),
     #("statusAcceptance", status_acceptance),
     #("cases", json.array(cases, of: encode_case_result)),

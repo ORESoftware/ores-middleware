@@ -806,7 +806,7 @@ fn render_gleam(model: &Model) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "import gleam/option.{{type Option}}\n\npub type IdempotencyStatus {{\n{variants}\n}}\n\npub type {} {{\n  {}(\n{fields}\n  )\n}}\n\npub fn idempotency_status_from_string(value: String) -> Result(IdempotencyStatus, Nil) {{\n  case value {{\n{cases}\n    _ -> Error(Nil)\n  }}\n}}\n",
+        "import gleam/option.{{type Option}}\n\npub type IdempotencyStatus {{\n{variants}\n}}\n\npub type {} {{\n  {}(\n{fields}\n  )\n}}\n\npub fn idempotency_status_from_string(\n  value: String,\n) -> Result(IdempotencyStatus, Nil) {{\n  case value {{\n{cases}\n    _ -> Error(Nil)\n  }}\n}}\n",
         model.name, model.name
     )
 }
@@ -885,11 +885,9 @@ fn render_erlang(model: &Model) -> String {
         .find(|field| field.logical_type == "enum")
         .map(|field| field.enum_values.clone())
         .unwrap_or_default();
-    let status_type = enum_values
-        .iter()
-        .map(|value| format!("<<\"{value}\">>"))
-        .collect::<Vec<_>>()
-        .join(" | ");
+    // Erlang types cannot express singleton binary literals. The wire
+    // vocabulary remains exact in valid_idempotency_status/1 below.
+    let status_type = "binary()";
     let clauses = enum_values
         .iter()
         .map(|value| format!("valid_idempotency_status(<<\"{value}\">>) -> true;"))
