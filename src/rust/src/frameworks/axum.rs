@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
     panic::AssertUnwindSafe,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use axum::{
@@ -15,6 +15,7 @@ use axum::{
     Json, Router,
 };
 use futures_util::FutureExt;
+use next_loggers::{Event, JsonObject, Logger, Value};
 use serde_json::json;
 #[cfg(feature = "compression")]
 use tower_http::compression::CompressionLayer;
@@ -22,8 +23,15 @@ use tower_http::compression::CompressionLayer;
 use crate::{
     context::run_with_context,
     integrations::{RequestMetadata, TransportSecurity},
+    otel::{run_with_ores_log_context, RequestLogger},
     stack_from_env, BootstrapError, MiddlewareError, MiddlewareStack,
 };
+
+#[derive(Clone)]
+struct DispatchState {
+    stack: Arc<MiddlewareStack>,
+    logger: Option<Logger>,
+}
 
 pub fn install_from_env(
     router: Router,
@@ -33,13 +41,49 @@ pub fn install_from_env(
     Ok(install(router, stack))
 }
 
+pub fn install_from_env_with_ores_logger(
+    router: Router,
+    service_name: impl Into<String>,
+    logger: Logger,
+) -> Result<Router, BootstrapError> {
+    let stack = Arc::new(stack_from_env(service_name)?);
+    Ok(install_with_ores_logger(router, stack, logger))
+}
+
 pub fn install(router: Router, stack: Arc<MiddlewareStack>) -> Router {
-    let max_body_bytes = stack.config().settings.max_body_bytes;
+    install_with_state(
+        router,
+        DispatchState {
+            stack,
+            logger: None,
+        },
+    )
+}
+
+/// Installs the portable stack plus an ores-otel request logger. Handlers may
+/// extract [`RequestLogger`] from request extensions, while any file/module
+/// logger can call `info_context` or `warn_context` inside the same task.
+pub fn install_with_ores_logger(
+    router: Router,
+    stack: Arc<MiddlewareStack>,
+    logger: Logger,
+) -> Router {
+    install_with_state(
+        router,
+        DispatchState {
+            stack,
+            logger: Some(logger),
+        },
+    )
+}
+
+fn install_with_state(router: Router, state: DispatchState) -> Router {
+    let max_body_bytes = state.stack.config().settings.max_body_bytes;
     #[cfg(feature = "compression")]
-    let compression_enabled = stack.config().settings.compression.enabled;
+    let compression_enabled = state.stack.config().settings.compression.enabled;
 
     let router = router
-        .layer(middleware::from_fn_with_state(stack, dispatch))
+        .layer(middleware::from_fn_with_state(state, dispatch))
         .layer(DefaultBodyLimit::max(max_body_bytes));
 
     #[cfg(feature = "compression")]
@@ -51,35 +95,105 @@ pub fn install(router: Router, stack: Arc<MiddlewareStack>) -> Router {
 }
 
 async fn dispatch(
-    State(stack): State<Arc<MiddlewareStack>>,
+    State(state): State<DispatchState>,
     mut request: Request,
     next: Next,
 ) -> Response {
     let metadata = request_metadata(&request);
-    let active = match stack.begin(metadata).await {
+    let active = match state.stack.begin(metadata.clone()).await {
         Ok(active) => active,
         Err(error) => return problem(error),
     };
     request.extensions_mut().insert(active.context.clone());
+
+    let request_logger = state
+        .logger
+        .as_ref()
+        .map(|logger| RequestLogger::new(logger.clone(), &active.context));
+    if let Some(logger) = &request_logger {
+        request.extensions_mut().insert(logger.clone());
+        emit_request_log(
+            logger
+                .info(vec![Value::String("request handler started".into())])
+                .add_fields(request_log_fields(&metadata)),
+            "started",
+        );
+    }
+
     let context = active.context.clone();
-    let timeout = Duration::from_millis(stack.config().settings.timeout_ms);
+    let context_for_logs = context.clone();
+    let ores_enabled = request_logger.is_some();
+    let timeout = Duration::from_millis(state.stack.config().settings.timeout_ms);
+    let started = Instant::now();
     let future = run_with_context(context, async move {
-        AssertUnwindSafe(next.run(request)).catch_unwind().await
+        let handler = AssertUnwindSafe(next.run(request)).catch_unwind();
+        if ores_enabled {
+            run_with_ores_log_context(&context_for_logs, handler).await
+        } else {
+            handler.await
+        }
     });
+
     let mut response = match tokio::time::timeout(timeout, future).await {
-        Err(_) => problem(MiddlewareError {
-            status: 504,
-            code: "deadline_exceeded",
-            message: "request deadline exceeded".into(),
-        }),
-        Ok(Err(_)) => problem(MiddlewareError {
-            status: 500,
-            code: "internal_error",
-            message: "request handler failed".into(),
-        }),
-        Ok(Ok(response)) => response,
+        Err(_) => {
+            if let Some(logger) = &request_logger {
+                emit_request_log(
+                    logger
+                        .error(vec![Value::String("request handler timed out".into())])
+                        .add_fields(request_outcome_fields(
+                            &metadata,
+                            "timeout",
+                            started.elapsed(),
+                            Some(504),
+                        )),
+                    "timeout",
+                );
+            }
+            problem(MiddlewareError {
+                status: 504,
+                code: "deadline_exceeded",
+                message: "request deadline exceeded".into(),
+            })
+        }
+        Ok(Err(_)) => {
+            if let Some(logger) = &request_logger {
+                emit_request_log(
+                    logger
+                        .error(vec![Value::String("request handler panicked".into())])
+                        .add_fields(request_outcome_fields(
+                            &metadata,
+                            "panic",
+                            started.elapsed(),
+                            Some(500),
+                        )),
+                    "panic",
+                );
+            }
+            problem(MiddlewareError {
+                status: 500,
+                code: "internal_error",
+                message: "request handler failed".into(),
+            })
+        }
+        Ok(Ok(response)) => {
+            if let Some(logger) = &request_logger {
+                emit_request_log(
+                    logger
+                        .info(vec![Value::String("request handler completed".into())])
+                        .add_fields(request_outcome_fields(
+                            &metadata,
+                            "completed",
+                            started.elapsed(),
+                            Some(response.status().as_u16()),
+                        )),
+                    "completed",
+                );
+            }
+            response
+        }
     };
-    let headers = stack
+    let headers = state
+        .stack
         .finish(active, response.status().as_u16(), None)
         .await;
     for (name, value) in headers {
@@ -91,6 +205,40 @@ async fn dispatch(
         .headers_mut()
         .append("vary", HeaderValue::from_static("accept, accept-encoding"));
     response
+}
+
+fn emit_request_log(event: Event, phase: &'static str) {
+    if let Err(error) = event.send() {
+        tracing::warn!(phase, error = %error, "ores request log delivery failed");
+    }
+}
+
+fn request_log_fields(metadata: &RequestMetadata) -> JsonObject {
+    JsonObject::from_iter([
+        (
+            "http.request.method".into(),
+            Value::String(metadata.method.clone()),
+        ),
+        ("url.path".into(), Value::String(metadata.path.clone())),
+    ])
+}
+
+fn request_outcome_fields(
+    metadata: &RequestMetadata,
+    outcome: &str,
+    duration: Duration,
+    status: Option<u16>,
+) -> JsonObject {
+    let mut fields = request_log_fields(metadata);
+    fields.insert("request.outcome".into(), Value::String(outcome.into()));
+    fields.insert(
+        "request.duration_ms".into(),
+        Value::from(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)),
+    );
+    if let Some(status) = status {
+        fields.insert("http.response.status_code".into(), Value::from(status));
+    }
+    fields
 }
 
 fn request_metadata(request: &Request) -> RequestMetadata {
