@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/schema-audit-receipt/v1.json",
+  "title": "ORES schema audit receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "startedAt",
+    "endedAt",
+    "actor",
+    "scope",
+    "tools",
+    "checks",
+    "applicability",
+    "discrepancies",
+    "status",
+    "zeroUnexplainedFindings"
+  ],
+  "properties": {
+    "schema": { "const": "ores.schema-audit-receipt/v1" },
+    "repository": { "type": "string", "minLength": 1 },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "endedAt": { "type": "string", "format": "date-time" },
+    "actor": { "type": "string", "minLength": 1 },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "files", "sourceDigests", "exclusions"],
+      "properties": {
+        "commit": { "type": ["string", "null"] },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "sourceDigests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "exclusions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "required", "state", "detail"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "state": {
+            "enum": ["executed", "skipped", "failed", "inferred"]
+          },
+          "command": { "type": "string" },
+          "exitCode": { "type": "integer" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "applicability": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "reason", "owner"],
+        "properties": {
+          "state": { "enum": ["applicable", "not_applicable", "external_gate"] },
+          "reason": { "type": "string" },
+          "owner": { "type": "string" }
+        }
+      }
+    },
+    "discrepancies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fingerprint", "kind", "detail", "owner", "resolutionState"],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "kind": { "type": "string" },
+          "detail": { "type": "string" },
+          "owner": { "type": "string" },
+          "resolutionState": {
+            "enum": ["unexplained", "accepted", "resolved"]
+          }
+        }
+      }
+    },
+    "status": {
+      "enum": ["passed", "partial", "failed", "stopped_for_evaluation"]
+    },
+    "zeroUnexplainedFindings": { "type": "boolean" }
+  }
+}

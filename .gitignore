@@ -9,15 +9,24 @@
 !/target/erlang/
 !/target/*/.gitkeep
 
-# Language build caches
-/src/rust/target/
-/src/ts/node_modules/
-/src/ts/dist/
-/src/gleam/build/
+# Language build caches (including nested packages such as docs-serving)
+/src/**/target/
+/src/**/node_modules/
+/src/**/dist/
+/src/**/build/
+/src/**/_build/
+/src/**/deps/
 /src/golang/bin/
-/src/elixir/_build/
-/src/elixir/deps/
-/src/erlang/_build/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local zed-pkg state
+/.zed/
+/.zed-pack/
+/.vendor/.zed/
+/.zpkg.lock.tmp
 
 # Local secrets and environment
 .env

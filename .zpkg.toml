@@ -1,0 +1,94 @@
+[package]
+org = "oresoftware"
+name = "ores-middleware"
+version = "0.1.0"
+description = "Peer-authority, polyglot request-lifecycle middleware SDK for Rust, TypeScript, Go, Gleam, Elixir, and Erlang"
+license = "MIT"
+keywords = ["middleware", "polyglot", "typespec", "json-schema", "opentelemetry", "server"]
+# Intentionally no package.language: this repository has six first-class
+# language packages. Each [targets.*] entry declares its own package slice.
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/ORESoftware/ores-middleware"
+
+[build]
+command = "python3 scripts/build_targets.py"
+outputs = [
+  "target/rust",
+  "target/ts",
+  "target/golang",
+  "target/gleam",
+  "target/elixir",
+  "target/erlang",
+]
+
+[install]
+dir = ".vendor/.zed"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+smoke_test = "python3 \"$ZED_PKG_TEST_TARGET/scripts/check_zpkg.py\" --root \"$ZED_PKG_TEST_TARGET\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/authority-topology.json\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.tsp\" && test -f \"$ZED_PKG_TEST_TARGET/contracts/persistence/idempotency-record.schema.json\""
+exclude = [
+  ".env",
+  ".env.*",
+  ".direnv/**",
+  ".zed/**",
+  ".zed-pack/**",
+  ".vendor/.zed/**",
+  "target/**",
+  "**/target/**",
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/_build/**",
+  "**/deps/**",
+  "tmp/**",
+  "**/*.log",
+  ".DS_Store",
+]
+
+# Canonical whole-repository artifact: both authored authorities, generators,
+# conformance fixtures, every language source package, and operational docs.
+[targets.repository]
+dir = "."
+adapter = "none"
+
+[targets.rust]
+dir = "src/rust"
+name = "ores-middleware-rust"
+adapter = "rust"
+
+[targets.typescript]
+dir = "src/ts"
+name = "ores-middleware-typescript"
+adapter = "node"
+
+[targets.golang]
+dir = "src/golang"
+name = "ores-middleware-golang"
+adapter = "go"
+
+[targets.gleam]
+dir = "src/gleam"
+name = "ores-middleware-gleam"
+adapter = "none"
+
+[targets.elixir]
+dir = "src/elixir"
+name = "ores-middleware-elixir"
+adapter = "none"
+
+[targets.erlang]
+dir = "src/erlang"
+name = "ores-middleware-erlang"
+adapter = "none"
+
+[scripts]
+audit = "python3 scripts/audit.py --receipt target/audit/receipt.json"
+build = "python3 scripts/build_targets.py"
+contracts = "npm run contracts:compile && npm run contracts:check"
+projection-parity = "python3 scripts/schema_convergence.py"
+test = "python3 scripts/audit.py --receipt target/audit/receipt.json"
+zpkg-check = "python3 scripts/check_zpkg.py"

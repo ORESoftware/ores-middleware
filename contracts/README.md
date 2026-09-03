@@ -1,13 +1,44 @@
 # Contract authorities
 
-`contracts/typespec/main.tsp` and the schemas in `contracts/json-schema/` are independent, top-level, human-authored authorities.
+TypeSpec and JSON Schema/OpenAPI are independent, top-level, human-authored
+contract authorities. Neither authority is generated from the other and then
+treated as canonical.
 
-Neither authority is generated from the other. TypeSpec emits SQL/OpenAPI/Protobuf/gRPC-facing artifacts as configured by downstream repositories; JSON Schema/OpenAPI independently drives runtime validation, interface/type generation, SQL projections, and clients. Generated artifacts are evidence, never a replacement authority.
+The required flows are:
 
-The release gate performs three comparisons:
+```text
+TypeSpec -> SQL_T where applicable, Protobuf, gRPC -> wire clients
+JSON Schema/OpenAPI -> interfaces/types/runtime validators, SQL_J where applicable -> write clients
+```
 
-1. Direct parity of capability and SDK-operation vocabularies between TypeSpec and JSON Schema.
-2. Validation of canonical fixtures against the JSON Schema authority and TypeSpec compilation.
-3. Runtime adapter descriptors from every language against `adapter-descriptor.schema.json`, followed by equality checks for the required operation set and capability floor.
+In this repository the standard middleware SDK authorities live in
+`contracts/typespec/main.tsp` and `contracts/json-schema/`. The routing-neutral
+API-document selector has its own directly compared peer pair:
 
-Any discrepancy fails closed and requires a human evaluation. Do not auto-resolve a mismatch by regenerating one authority from the other.
+- `contracts/docs-serving.tsp`
+- `contracts/docs-serving.schema.json`
+
+The persistence-bearing idempotency model has another independently authored
+pair:
+
+- `contracts/persistence/idempotency-record.tsp`
+- `contracts/persistence/idempotency-record.schema.json`
+
+The release gate:
+
+1. compares capability and SDK-operation vocabularies between the primary
+   TypeSpec and JSON Schema authorities;
+2. compares docs-serving enums, properties, requiredness, normalized types, and
+   runtime behavior fixtures;
+3. projects the idempotency pair independently into SQL_T/SQL_J, client types,
+   and Diesel/SeaORM-shaped witnesses;
+4. validates fixtures and Draft 2020-12 schemas and compiles each TypeSpec
+   source; and
+5. compiles and runtime-checks adapter descriptors from every language against
+   the standard operation and capability floor.
+
+Generated artifacts are evidence, never replacement authorities. Any
+unexplained source, SQL, type, ORM, or runtime discrepancy writes a fingerprint,
+blocks publication and adoption, and enters `STOPPED_FOR_EVALUATION`. Never
+auto-resolve drift by regenerating one authority from the other or by choosing
+one ORM as the winner.
