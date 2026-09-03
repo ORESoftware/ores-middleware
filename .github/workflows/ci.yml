@@ -50,6 +50,13 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt
 
+      - name: Enforce response trace-context safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition=2024 scripts/check_traceparent_policy.rs -o "${RUNNER_TEMP}/check-traceparent-policy"
+          "${RUNNER_TEMP}/check-traceparent-policy"
+
       - name: Install exact validators and package dependencies
         shell: bash
         run: |

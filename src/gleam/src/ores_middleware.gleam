@@ -539,10 +539,14 @@ fn attach_headers(
   let headers =
     response.headers
     |> dict.insert(config.request_id_header, context.request_id)
-    |> dict.insert(
-      "traceparent",
-      "00-" <> context.trace_id <> "-0000000000000000-01",
-    )
+  let headers = case dict.get(headers, "traceparent") {
+    Ok(value) ->
+      case normalize_traceparent(value) {
+        Ok(value) -> dict.insert(headers, "traceparent", value)
+        Error(_) -> dict.delete(headers, "traceparent")
+      }
+    Error(_) -> headers
+  }
   let headers = case config.security_headers_enabled {
     True ->
       headers
@@ -584,12 +588,48 @@ fn header(headers: Dict(String, String), name: String) -> String {
 fn trace_id(value: String) -> String {
   case string.split(value, "-") {
     [_, trace, ..] ->
-      case string.length(trace) == 32 {
-        True -> trace
+      case valid_hex_identifier(trace, 32, "00000000000000000000000000000000") {
+        True -> string.lowercase(trace)
         False -> ""
       }
     _ -> ""
   }
+}
+
+fn normalize_traceparent(value: String) -> Result(String, Nil) {
+  case string.split(value, "-") {
+    [version, trace, span, flags] -> {
+      let version = string.lowercase(version)
+      let trace = string.lowercase(trace)
+      let span = string.lowercase(span)
+      let flags = string.lowercase(flags)
+      case
+        version == "00"
+        && valid_hex_identifier(trace, 32, "00000000000000000000000000000000")
+        && valid_hex_identifier(span, 16, "0000000000000000")
+        && valid_hex(flags, 2)
+      {
+        True -> Ok(version <> "-" <> trace <> "-" <> span <> "-" <> flags)
+        False -> Error(Nil)
+      }
+    }
+    _ -> Error(Nil)
+  }
+}
+
+fn valid_hex_identifier(
+  value: String,
+  expected_length: Int,
+  zero_value: String,
+) -> Bool {
+  value != zero_value && valid_hex(value, expected_length)
+}
+
+fn valid_hex(value: String, expected_length: Int) -> Bool {
+  string.length(value) == expected_length
+  && list.all(string.to_graphemes(value), fn(character) {
+    string.contains("0123456789abcdefABCDEF", character)
+  })
 }
 
 fn value_or_new(value: String) -> String {

@@ -8,18 +8,18 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    config::{validate_config, IntegrationMode, MiddlewareConfig, ValidationIssue},
+    config::{IntegrationMode, MiddlewareConfig, ValidationIssue, validate_config},
     context::{ContextRegistry, RequestContext},
     integrations::{
         AnonymousAuth, DynAuthVerifier, DynRateLimiter, DynSyncObserver, DynTelemetrySink,
-        InMemoryTokenBucket, IntegrationError, NoopSyncObserver, RequestMetadata,
-        ResponseMetadata, TracingTelemetry,
+        InMemoryTokenBucket, IntegrationError, NoopSyncObserver, RequestMetadata, ResponseMetadata,
+        TracingTelemetry,
     },
     net::cidr_contains,
     rate_limit::{
-        derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver,
-        RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
-        RateLimitKeyDerivationMode, RateLimitRequest, UnavailableRateLimitKeyDeriver,
+        DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitDecision, RateLimitDecisionKind,
+        RateLimitDecisionSource, RateLimitFailureMode, RateLimitKeyDerivationMode,
+        RateLimitRequest, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
     },
 };
 
@@ -142,10 +142,7 @@ impl MiddlewareStack {
         &self.config
     }
 
-    pub async fn begin(
-        &self,
-        request: RequestMetadata,
-    ) -> Result<ActiveRequest, MiddlewareError> {
+    pub async fn begin(&self, request: RequestMetadata) -> Result<ActiveRequest, MiddlewareError> {
         if request
             .content_length
             .is_some_and(|length| length > self.config.settings.max_body_bytes as u64)
@@ -207,9 +204,7 @@ impl MiddlewareStack {
         }
 
         if self.config.settings.rate_limit.enabled {
-            let decision = self
-                .evaluate_rate_limit(&context, &request, &auth)
-                .await;
+            let decision = self.evaluate_rate_limit(&context, &request, &auth).await;
             self.telemetry
                 .rate_limit_decision(&context, &request, &decision)
                 .await;
@@ -299,9 +294,7 @@ impl MiddlewareStack {
                             decision.reason_code = Some(error.code.into());
                             decision
                         }
-                        Err(local_error) => {
-                            decision_for_failure(policy, false, local_error.code)
-                        }
+                        Err(local_error) => decision_for_failure(policy, false, local_error.code),
                     }
                 }
             },
@@ -336,13 +329,6 @@ impl MiddlewareStack {
             self.config.settings.request_id_header.clone(),
             active.context.request_id,
         );
-        headers.insert(
-            "traceparent".into(),
-            format!(
-                "00-{}-0000000000000000-01",
-                active.context.trace_id
-            ),
-        );
         if self.config.settings.security_headers.enabled {
             headers.insert("x-content-type-options".into(), "nosniff".into());
             headers.insert(
@@ -357,10 +343,7 @@ impl MiddlewareStack {
                 "strict-transport-security".into(),
                 format!(
                     "max-age={}; includeSubDomains",
-                    self.config
-                        .settings
-                        .security_headers
-                        .hsts_max_age_seconds
+                    self.config.settings.security_headers.hsts_max_age_seconds
                 ),
             );
             if let Some(csp) = &self
@@ -415,10 +398,7 @@ fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
 
     let mut headers = BTreeMap::new();
     headers.insert("ratelimit-limit".into(), decision.limit.to_string());
-    headers.insert(
-        "ratelimit-remaining".into(),
-        decision.remaining.to_string(),
-    );
+    headers.insert("ratelimit-remaining".into(), decision.remaining.to_string());
     if let Some(reset_after_ms) = decision.reset_after_ms {
         headers.insert(
             "ratelimit-reset".into(),
@@ -461,10 +441,7 @@ fn enforce_transport_policy(
         .and_then(|value| value.split(',').next())
         .map(str::trim)
         .map(str::to_ascii_lowercase);
-    let trusted_proxy = peer_is_trusted(
-        request.remote_ip.as_deref(),
-        &tls.trusted_proxy_cidrs,
-    );
+    let trusted_proxy = peer_is_trusted(request.remote_ip.as_deref(), &tls.trusted_proxy_cidrs);
     let has_forwarded_identity = request.headers.contains_key("x-forwarded-for")
         || request.headers.contains_key("cf-connecting-ip")
         || request.headers.contains_key("forwarded");
@@ -482,9 +459,7 @@ fn enforce_transport_policy(
     }
 
     let secure = request.transport_secure
-        || (tls.mode == "trusted-proxy"
-            && trusted_proxy
-            && forwarded.as_deref() == Some("https"));
+        || (tls.mode == "trusted-proxy" && trusted_proxy && forwarded.as_deref() == Some("https"));
 
     if tls.require_https && !secure {
         return Err(MiddlewareError::new(
@@ -545,9 +520,11 @@ fn parse_trace_id(header: Option<&String>) -> Option<String> {
     let value = header?;
     let mut parts = value.split('-');
     let _version = parts.next()?;
-    let trace_id = parts.next()?;
-    (trace_id.len() == 32 && trace_id.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| trace_id.to_ascii_lowercase())
+    let trace_id = parts.next()?.to_ascii_lowercase();
+    (trace_id.len() == 32
+        && trace_id != "00000000000000000000000000000000"
+        && trace_id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    .then_some(trace_id)
 }
 
 #[cfg(test)]
@@ -584,11 +561,9 @@ mod tests {
     fn rejects_forwarded_https_from_untrusted_peer() {
         let mut config = default_config("test-service");
         config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
-        let error = enforce_transport_policy(
-            &config,
-            &request("198.51.100.10", Some("https"), false),
-        )
-        .unwrap_err();
+        let error =
+            enforce_transport_policy(&config, &request("198.51.100.10", Some("https"), false))
+                .unwrap_err();
         assert_eq!(error.status, 400);
         assert_eq!(error.code, "untrusted_forwarded_header");
     }
@@ -610,10 +585,9 @@ mod tests {
         let mut config = default_config("test-service");
         config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
         let mut request = request("10.23.4.5", Some("https"), false);
-        request.headers.insert(
-            "x-forwarded-for".into(),
-            "203.0.113.9, 10.23.4.5".into(),
-        );
+        request
+            .headers
+            .insert("x-forwarded-for".into(), "203.0.113.9, 10.23.4.5".into());
         assert_eq!(
             effective_client_ip(&config, &request).as_deref(),
             Some("203.0.113.9")
@@ -625,11 +599,7 @@ mod tests {
         let mut config = default_config("test-service");
         config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
         assert!(
-            enforce_transport_policy(
-                &config,
-                &request("10.23.4.5", Some("https"), false),
-            )
-            .is_ok()
+            enforce_transport_policy(&config, &request("10.23.4.5", Some("https"), false),).is_ok()
         );
     }
 
@@ -638,13 +608,7 @@ mod tests {
         let mut config = default_config("test-service");
         config.settings.tls.mode = "in-process".into();
         config.settings.tls.trusted_proxy_cidrs.clear();
-        assert!(
-            enforce_transport_policy(
-                &config,
-                &request("198.51.100.10", None, true),
-            )
-            .is_ok()
-        );
+        assert!(enforce_transport_policy(&config, &request("198.51.100.10", None, true),).is_ok());
     }
 
     struct FailingLimiter;
@@ -662,13 +626,8 @@ mod tests {
         fn evaluate<'a>(
             &'a self,
             _request: &'a RateLimitRequest,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<RateLimitDecision, IntegrationError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<RateLimitDecision, IntegrationError>> + Send + 'a>>
+        {
             Box::pin(async {
                 Err(IntegrationError {
                     code: "redis_unavailable",
@@ -697,10 +656,7 @@ mod tests {
             .await
             .unwrap();
         stack.finish(first, 200, None).await;
-        let error = match stack
-            .begin(request("203.0.113.9", None, true))
-            .await
-        {
+        let error = match stack.begin(request("203.0.113.9", None, true)).await {
             Ok(_) => panic!("second request should be rate limited"),
             Err(error) => error,
         };
@@ -721,10 +677,7 @@ mod tests {
             .unwrap()
             .with_rate_limiter(Arc::new(FailingLimiter));
 
-        let error = match stack
-            .begin(request("203.0.113.9", None, true))
-            .await
-        {
+        let error = match stack.begin(request("203.0.113.9", None, true)).await {
             Ok(_) => panic!("authorization-layer outage must fail closed"),
             Err(error) => error,
         };
@@ -732,8 +685,42 @@ mod tests {
         assert_eq!(error.status, 503);
         assert_eq!(error.code, "rate_limit_unavailable");
         assert_eq!(
-            error.headers.get("x-ores-rate-limit-decision").map(String::as_str),
+            error
+                .headers
+                .get("x-ores-rate-limit-decision")
+                .map(String::as_str),
             Some("degraded-denied")
         );
+    }
+
+    #[test]
+    fn trace_id_parser_rejects_zero_and_non_hex_values() {
+        let zero = "00-00000000000000000000000000000000-0123456789abcdef-01".to_string();
+        let invalid = "00-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-0123456789abcdef-01".to_string();
+        let valid = "00-0123456789ABCDEF0123456789ABCDEF-0123456789abcdef-01".to_string();
+
+        assert_eq!(parse_trace_id(Some(&zero)), None);
+        assert_eq!(parse_trace_id(Some(&invalid)), None);
+        assert_eq!(
+            parse_trace_id(Some(&valid)).as_deref(),
+            Some("0123456789abcdef0123456789abcdef")
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_does_not_synthesize_response_traceparent_without_server_span() {
+        let mut config = default_config("traceparent-policy-test");
+        config.settings.tls.mode = "in-process".into();
+        config.settings.tls.trusted_proxy_cidrs.clear();
+        config.settings.rate_limit.enabled = false;
+        let stack = MiddlewareStack::new(config).unwrap();
+
+        let active = stack
+            .begin(request("198.51.100.10", None, true))
+            .await
+            .unwrap();
+        let headers = stack.finish(active, 204, None).await;
+
+        assert!(!headers.contains_key("traceparent"));
     }
 }
