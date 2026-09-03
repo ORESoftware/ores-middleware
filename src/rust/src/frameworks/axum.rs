@@ -1,30 +1,33 @@
 use std::{
     collections::BTreeMap,
+    convert::Infallible,
     net::SocketAddr,
-    panic::AssertUnwindSafe,
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use axum::{
+    Json, Router,
     body::Body,
     extract::{ConnectInfo, DefaultBodyLimit, Request, State},
     http::{HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    Json, Router,
 };
-use futures_util::FutureExt;
 use next_loggers::{Event, JsonObject, Logger, Value};
 use serde_json::json;
 #[cfg(feature = "compression")]
 use tower_http::compression::CompressionLayer;
 
 use crate::{
-    context::run_with_context,
+    BootstrapError, MiddlewareError, MiddlewareStack,
     integrations::{RequestMetadata, TransportSecurity},
-    otel::{run_with_ores_log_context, RequestLogger},
-    stack_from_env, BootstrapError, MiddlewareError, MiddlewareStack,
+    operation::{
+        OperationDescriptor, OperationFailureKind, OperationOutcome, OperationScope,
+        OperationTransport, run_operation_boundary_with_timeout,
+    },
+    otel::RequestLogger,
+    stack_from_env,
 };
 
 #[derive(Clone)]
@@ -121,61 +124,22 @@ async fn dispatch(
     }
 
     let context = active.context.clone();
-    let context_for_logs = context.clone();
-    let ores_enabled = request_logger.is_some();
     let timeout = Duration::from_millis(state.stack.config().settings.timeout_ms);
     let started = Instant::now();
-    let future = run_with_context(context, async move {
-        let handler = AssertUnwindSafe(next.run(request)).catch_unwind();
-        if ores_enabled {
-            run_with_ores_log_context(&context_for_logs, handler).await
-        } else {
-            handler.await
-        }
-    });
+    let outcome = run_operation_boundary_with_timeout(
+        context,
+        OperationDescriptor {
+            transport: OperationTransport::Http,
+            scope: OperationScope::Request,
+            name: "middleware.handler".into(),
+        },
+        timeout,
+        async move { Ok::<_, Infallible>(next.run(request).await) },
+    )
+    .await;
 
-    let mut response = match tokio::time::timeout(timeout, future).await {
-        Err(_) => {
-            if let Some(logger) = &request_logger {
-                emit_request_log(
-                    logger
-                        .error(vec![Value::String("request handler timed out".into())])
-                        .add_fields(request_outcome_fields(
-                            &metadata,
-                            "timeout",
-                            started.elapsed(),
-                            Some(504),
-                        )),
-                    "timeout",
-                );
-            }
-            problem(MiddlewareError::new(
-                504,
-                "deadline_exceeded",
-                "request deadline exceeded",
-            ))
-        }
-        Ok(Err(_)) => {
-            if let Some(logger) = &request_logger {
-                emit_request_log(
-                    logger
-                        .error(vec![Value::String("request handler panicked".into())])
-                        .add_fields(request_outcome_fields(
-                            &metadata,
-                            "panic",
-                            started.elapsed(),
-                            Some(500),
-                        )),
-                    "panic",
-                );
-            }
-            problem(MiddlewareError::new(
-                500,
-                "internal_error",
-                "request handler failed",
-            ))
-        }
-        Ok(Ok(response)) => {
+    let mut response = match outcome {
+        OperationOutcome::Completed(response) => {
             if let Some(logger) = &request_logger {
                 emit_request_log(
                     logger
@@ -190,6 +154,52 @@ async fn dispatch(
                 );
             }
             response
+        }
+        OperationOutcome::Failed(failure) => {
+            let (outcome, status, code, detail, log_message) = match failure.kind {
+                OperationFailureKind::DeadlineExceeded => (
+                    "timeout",
+                    504,
+                    "deadline_exceeded",
+                    "request deadline exceeded",
+                    "request handler timed out",
+                ),
+                OperationFailureKind::Cancelled => (
+                    "cancelled",
+                    499,
+                    "request_cancelled",
+                    "request was cancelled",
+                    "request handler cancelled",
+                ),
+                OperationFailureKind::Error => (
+                    "error",
+                    500,
+                    "internal_error",
+                    "request handler failed",
+                    "request handler failed",
+                ),
+                OperationFailureKind::Panic => (
+                    "panic",
+                    500,
+                    "internal_error",
+                    "request handler failed",
+                    "request handler panicked",
+                ),
+            };
+            if let Some(logger) = &request_logger {
+                emit_request_log(
+                    logger
+                        .error(vec![Value::String(log_message.into())])
+                        .add_fields(request_outcome_fields(
+                            &metadata,
+                            outcome,
+                            started.elapsed(),
+                            Some(status),
+                        )),
+                    outcome,
+                );
+            }
+            problem(MiddlewareError::new(status, code, detail))
         }
     };
     let headers = state
