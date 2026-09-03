@@ -1,0 +1,70 @@
+name: live-rollout-evidence
+
+on:
+  pull_request:
+    paths:
+      - ROLLOUT.md
+      - rollout/live-adoptions.json
+      - scripts/check_live_rollout_evidence.py
+      - scripts/test_live_rollout_evidence.py
+      - .github/workflows/live-rollout-evidence.yml
+  push:
+    branches: [main, dev]
+    paths:
+      - ROLLOUT.md
+      - rollout/live-adoptions.json
+      - scripts/check_live_rollout_evidence.py
+      - scripts/test_live_rollout_evidence.py
+      - .github/workflows/live-rollout-evidence.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-rollout-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Validate receipt and adversarial mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_live_rollout_evidence.py
+          python3 -m unittest scripts/test_live_rollout_evidence.py -v
+
+      - name: Cross-check human-readable summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          receipt = json.loads(Path("rollout/live-adoptions.json").read_text())
+          summary = receipt["summary"]
+          expected = (
+              f"{summary['repositories']} repositories across "
+              f"{summary['organizations']} organizations"
+          )
+          rollout = Path("ROLLOUT.md").read_text()
+          if expected not in rollout:
+              raise SystemExit(f"ROLLOUT.md does not contain computed summary: {expected}")
+          if "does **not** assert that any service is deployed to production" not in rollout:
+              raise SystemExit("ROLLOUT.md must preserve the no-deployment-claim boundary")
+          PY
