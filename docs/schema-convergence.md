@@ -48,30 +48,37 @@ Elixir, and Erlang slices.
 
 ## Real SQL and ORM admission gate
 
-`scripts/orm_catalog_gate.py` executes a separate four-witness admission stage:
+`scripts/orm_catalog_gate.py` contains the four-witness implementation, while
+`scripts/orm_catalog_gate_entrypoint.py` is the supported executable entrypoint.
+The entrypoint separates machine-readable witness JSON on stdout from Cargo and
+compiler diagnostics on stderr, while preserving both channels when a command
+fails.
 
-1. Parse the TypeSpec and JSON Schema/OpenAPI authorities independently.
-2. Re-run normalized model, SQL, client-type, and ORM-shape projection parity.
-3. Generate an isolated Rust crate containing a real Diesel table/model from
+The admission stage:
+
+1. Parses the TypeSpec and JSON Schema/OpenAPI authorities independently.
+2. Re-runs normalized model, SQL, client-type, and ORM-shape projection parity.
+3. Generates an isolated Rust crate containing a real Diesel table/model from
    the TypeSpec lane and a real SeaORM entity from the JSON Schema/OpenAPI lane.
-4. Generate and retain the crate lockfile, then compile both ORM implementations
+4. Generates and retains the crate lockfile, then compiles both ORM implementations
    against exact top-level Diesel and SeaORM versions.
-5. Execute the compiled witness to emit authority-tagged normalized manifests.
-6. Apply SQL_T and SQL_J to separate `typespec_lane` and `json_schema_lane`
+5. Executes the compiled witness to emit authority-tagged normalized manifests.
+6. Applies SQL_T and SQL_J to separate `typespec_lane` and `json_schema_lane`
    schemas in a disposable PostgreSQL service.
-7. Read columns from `information_schema`, constraints from `pg_constraint`,
+7. Reads columns from `information_schema`, constraints from `pg_constraint`,
    and indexes from `pg_indexes`.
-8. Compare each catalog with its own authority, compare SQL_T with SQL_J by
-   normalized catalog read-back, and compare the compiled Diesel/SeaORM contract
+8. Compares each catalog with its own authority, compares SQL_T with SQL_J by
+   normalized catalog read-back, and compares the compiled Diesel/SeaORM contract
    manifests.
-9. Retain source, SQL, ORM source, Cargo lockfile, catalog, tool-version, and
+9. Retains source, SQL, ORM source, Cargo lockfile, catalog, tool-version, and
    SHA-256 evidence in `ores.orm-catalog-convergence-report/v1`.
 
 Run it with a disposable PostgreSQL database:
 
 ```bash
-python3 -m unittest scripts/test_orm_catalog_gate.py -v
-DATABASE_URL=postgresql://... python3 scripts/orm_catalog_gate.py
+python3 -m unittest scripts/test_orm_catalog_gate.py scripts/test_subprocess_capture.py -v
+DATABASE_URL=postgresql://... python3 scripts/orm_catalog_gate_entrypoint.py
+# or: DATABASE_URL=postgresql://... npm run persistence:check
 ```
 
 The dedicated `persistence-convergence` workflow runs on pull requests, pushes,
