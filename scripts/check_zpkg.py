@@ -29,6 +29,7 @@ EXPECTED_FLOWS = {
     "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
     "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
 }
+EXPECTED_ZED_TEST_SCRIPT = "python3 scripts/audit.py --receipt target/audit/receipt.json"
 EXPECTED_WORKSPACE_SCRIPTS = {
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
@@ -46,11 +47,16 @@ def validate(root: Path) -> list[str]:
         errors.append("package identity must be oresoftware/ores-middleware")
     if "language" in package:
         errors.append("package.language must remain unset for a polyglot repository")
-    if "scripts" in manifest:
+
+    # Zed 0.2.3 uses a closed ScriptsSection with exactly one supported hook:
+    # `test`. Richer repository commands remain in package.json and Justfile.
+    scripts = manifest.get("scripts", {})
+    if set(scripts) != {"test"}:
         errors.append(
-            "top-level [scripts] is not part of the Zed 0.2.3 manifest schema; "
-            "repository commands belong in package.json and CI"
+            "Zed 0.2.3 [scripts] must contain exactly the supported test hook"
         )
+    if scripts.get("test") != EXPECTED_ZED_TEST_SCRIPT:
+        errors.append(f"scripts.test must be {EXPECTED_ZED_TEST_SCRIPT!r}")
 
     targets = manifest.get("targets", {})
     if set(targets) != set(EXPECTED_TARGETS):
