@@ -13,6 +13,20 @@ pull requests after the core contract is green.
 | Elixir | Plug/Phoenix | Delegate semantics to the same fixture-defined contract |
 | Erlang | Cowboy | Preserve OTP ownership and fail-closed digest behavior |
 
+## Next.js proxy boundary
+
+Modern Next.js applications should import `nextjsProxy` from
+`@oresoftware/ores-middleware/nextjs` and place the application adapter in
+`proxy.ts`. The same subpath retains `nextjsMiddleware` as a deprecated source
+compatibility alias for applications that still use the older filename.
+
+The proxy is a thin network boundary, not an identity database or authorization
+engine. Route classification, same-origin redirects, caller-header sanitation,
+and refreshed cookie propagation belong there. Canonical browser identity is
+established by `shared-auth` only after it binds the paired Supabase and Neon
+Auth evidence. Clerk is not an accepted provider or fallback. See
+[`nextjs-proxy-auth.md`](./nextjs-proxy-auth.md).
+
 An adapter is complete only when it:
 
 1. passes the shared conformance corpus;
