@@ -5,12 +5,12 @@ import process from "node:process";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
-  applyMutations,
   comparePeerAuthorities,
   executeOperationPlan,
   validatePlanSemantics,
   validateSourceBindings,
 } from "./lib/function-body-contracts.mjs";
+import { applyJsonPointerMutations } from "./lib/json-pointer-mutations.mjs";
 
 const root = process.cwd();
 const paths = {
@@ -55,7 +55,7 @@ async function main() {
 
     const schemaCases = [];
     for (const testCase of negativeCases.schemaCases ?? []) {
-      const candidate = applyMutations(plan, testCase.mutations ?? []);
+      const candidate = applyJsonPointerMutations(plan, testCase.mutations ?? []);
       const accepted = validatePlan(candidate);
       const keywords = [...new Set((validatePlan.errors ?? []).map((error) => error.keyword))].sort();
       if (accepted) {
@@ -69,7 +69,7 @@ async function main() {
 
     const semanticCases = [];
     for (const testCase of negativeCases.semanticCases ?? []) {
-      const candidate = applyMutations(plan, testCase.mutations ?? []);
+      const candidate = applyJsonPointerMutations(plan, testCase.mutations ?? []);
       const candidateFindings = validatePlanSemantics(candidate);
       const codes = [...new Set(candidateFindings.map((item) => item.code))].sort();
       for (const code of testCase.expectedCodes ?? []) {
