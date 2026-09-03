@@ -29,6 +29,11 @@ EXPECTED_FLOWS = {
     "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
     "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
 }
+POLYGLOT_COMMAND = (
+    "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml "
+    "--bin persistence_codegen -- --output-root target/schema-convergence "
+    "--report target/schema-convergence/receipt.json"
+)
 
 
 def validate(root: Path) -> list[str]:
@@ -76,28 +81,42 @@ def validate(root: Path) -> list[str]:
         "contracts",
         "cross-translation",
         "orm-catalog",
+        "polyglot-generation",
         "projection-parity",
         "test",
         "zpkg-check",
     ):
         if required not in scripts:
             errors.append(f"missing scripts.{required}")
-    expected_orm_command = "python3 scripts/orm_catalog_gate_entrypoint.py"
-    if scripts.get("orm-catalog") != expected_orm_command:
-        errors.append(
-            "scripts.orm-catalog must execute the diagnostic-safe database-backed gate"
-        )
-    for required_path in (
+    if scripts.get("orm-catalog") != "python3 scripts/orm_matrix_gate.py":
+        errors.append("scripts.orm-catalog must execute the four-way database-backed gate")
+    for key in ("polyglot-generation", "projection-parity"):
+        if scripts.get(key) != POLYGLOT_COMMAND:
+            errors.append(
+                f"scripts.{key} must execute the Rust independent polyglot generator"
+            )
+
+    required_paths = (
+        "tools/contract-parity/src/bin/persistence_codegen.rs",
+        "scripts/validate-generated-polyglot.mjs",
+        "scripts/orm_matrix_gate.py",
+        "scripts/test_orm_matrix_gate.py",
         "scripts/orm_catalog_gate.py",
-        "scripts/orm_catalog_gate_entrypoint.py",
         "scripts/subprocess_capture.py",
         ".github/workflows/persistence-convergence.yml",
-    ):
+    )
+    for required_path in required_paths:
         if not (root / required_path).is_file():
-            errors.append(f"missing required persistence gate file: {required_path}")
+            errors.append(f"missing required convergence gate file: {required_path}")
+
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
-    if "scripts/cross_translate.py" not in smoke_test:
-        errors.append("publish.smoke_test must execute the cross-translation gate")
+    for required_fragment in (
+        "persistence_codegen",
+        "validate-generated-polyglot.mjs",
+        "scripts/cross_translate.py",
+    ):
+        if required_fragment not in smoke_test:
+            errors.append(f"publish.smoke_test must execute {required_fragment}")
 
     topology = json.loads((root / "contracts/authority-topology.json").read_text(encoding="utf-8"))
     authorities = {
@@ -138,8 +157,9 @@ def main() -> int:
         return 1
     print(
         ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
-        "golang + gleam + elixir + erlang + bidirectional shadow gate + "
-        "database-backed Diesel/SeaORM gate"
+        "golang + gleam + elixir + erlang + independent TypeSpec/JSON-Schema "
+        "SQL/type/runtime generation + bidirectional shadow gate + four-way "
+        "Diesel/SeaORM database-backed convergence"
     )
     return 0
 
