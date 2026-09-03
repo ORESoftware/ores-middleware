@@ -54,6 +54,12 @@ jobs:
           if text.count(old_condition) != 2:
               raise SystemExit("expected old and new idempotency conditions in patch script")
           text = text.replace(old_condition, r'''    if (idempotencyKey) {''', 1)
+
+          old_store = r'''      await idempotencyStore.set(idempotencyKey,'''
+          new_store = r'''      await idempotencyStore.set(`${request.method}:${url.pathname}:${idempotencyKey}`,'''
+          if text.count(old_store) != 2:
+              raise SystemExit("expected old and new idempotency store keys in patch script")
+          text = text.replace(old_store, new_store)
           path.write_text(text, encoding="utf-8")
           PY
 
