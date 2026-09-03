@@ -107,8 +107,8 @@ jobs:
           set -euo pipefail
           git config user.name "ORESoftware trace-context repair"
           git config user.email "alex@oresoftware.com"
+          git restore -- .github/workflows/ci.yml
           git add -- \
-            .github/workflows/ci.yml \
             docs/RESPONSE_TRACE_CONTEXT.md \
             scripts/check_traceparent_policy.rs \
             src/ts/src/index.ts \
@@ -127,6 +127,7 @@ jobs:
             src/elixir/test/traceparent_policy_test.exs \
             src/erlang/src/ores_middleware.erl \
             src/erlang/src/ores_middleware_cowboy.erl \
+            src/erlang/test/ores_middleware_tests.erl \
             src/erlang/test/ores_middleware_traceparent_tests.erl
           if git diff --cached --quiet; then
             echo "No repair changes were produced" >&2
