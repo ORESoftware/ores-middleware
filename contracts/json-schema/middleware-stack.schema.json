@@ -17,6 +17,45 @@
     "settings": { "$ref": "#/$defs/settings" },
     "integrations": { "$ref": "#/$defs/integrations" }
   },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "environment": { "const": "production" },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "rateLimit": {
+                "type": "object",
+                "properties": { "enabled": { "const": true } },
+                "required": ["enabled"]
+              }
+            },
+            "required": ["rateLimit"]
+          }
+        },
+        "required": ["environment", "settings"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "settings": {
+            "type": "object",
+            "properties": {
+              "rateLimit": {
+                "type": "object",
+                "properties": {
+                  "keyDerivation": { "const": "external-hmac-sha256" }
+                },
+                "required": ["keyDerivation"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "capability": {
       "type": "string",
@@ -46,6 +85,55 @@
         "schema-capture"
       ]
     },
+    "rateLimitSignal": {
+      "type": "string",
+      "enum": [
+        "ip",
+        "ip-prefix",
+        "user",
+        "subject",
+        "email",
+        "tenant",
+        "organization",
+        "session",
+        "device",
+        "api-key",
+        "route",
+        "method"
+      ]
+    },
+    "rateLimitAlgorithm": {
+      "type": "string",
+      "enum": ["token-bucket", "sliding-window-counter", "fixed-window", "concurrency"]
+    },
+    "rateLimitLayer": {
+      "type": "string",
+      "enum": ["cloudflare-edge", "kubernetes-ingress", "service-mesh", "application", "authorization"]
+    },
+    "rateLimitFailureMode": {
+      "type": "string",
+      "enum": ["fail-open", "fail-closed", "local-only"]
+    },
+    "rateLimitKeyDerivationMode": {
+      "type": "string",
+      "enum": ["ephemeral-hmac-sha256", "external-hmac-sha256"]
+    },
+    "rateLimitDecisionKind": {
+      "type": "string",
+      "enum": ["allowed", "denied", "degraded-allowed", "degraded-denied"]
+    },
+    "rateLimitDecisionSource": {
+      "type": "string",
+      "enum": [
+        "local-memory",
+        "redis",
+        "cloudflare-cache",
+        "kubernetes-ingress",
+        "service-mesh",
+        "authorization",
+        "unknown"
+      ]
+    },
     "rateLimit": {
       "type": "object",
       "additionalProperties": false,
@@ -58,8 +146,89 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["ip", "user", "tenant", "route"] }
+          "items": { "$ref": "#/$defs/rateLimitSignal" },
+          "contains": {
+            "enum": [
+              "ip",
+              "ip-prefix",
+              "user",
+              "subject",
+              "email",
+              "tenant",
+              "organization",
+              "session",
+              "device",
+              "api-key"
+            ]
+          },
+          "minContains": 1
+        },
+        "policyId": { "type": "string", "minLength": 1 },
+        "algorithm": { "$ref": "#/$defs/rateLimitAlgorithm" },
+        "layer": { "$ref": "#/$defs/rateLimitLayer" },
+        "failureMode": { "$ref": "#/$defs/rateLimitFailureMode" },
+        "windowMs": { "type": "integer", "minimum": 1 },
+        "localCacheMaxEntries": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "localCacheTtlMs": { "type": "integer", "minimum": 1 },
+        "keyNamespace": { "type": "string", "minLength": 1 },
+        "keyVersion": { "type": "string", "minLength": 1 },
+        "keyDerivation": { "$ref": "#/$defs/rateLimitKeyDerivationMode" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "layer": { "const": "cloudflare-edge" } },
+            "required": ["layer"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "keyBy": {
+                "type": "array",
+                "items": { "enum": ["ip", "ip-prefix", "route", "method"] },
+                "contains": { "enum": ["ip", "ip-prefix"] },
+                "minContains": 1
+              }
+            }
+          }
+        },
+        {
+          "not": {
+            "type": "object",
+            "properties": {
+              "layer": { "const": "authorization" },
+              "failureMode": { "const": "fail-open" }
+            },
+            "required": ["layer", "failureMode"]
+          }
         }
+      ]
+    },
+    "rateLimitPrincipal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "keyVersion"],
+      "properties": {
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "keyVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rateLimitDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "source", "policyId", "layer", "algorithm", "limit", "remaining"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/rateLimitDecisionKind" },
+        "source": { "$ref": "#/$defs/rateLimitDecisionSource" },
+        "policyId": { "type": "string", "minLength": 1 },
+        "layer": { "$ref": "#/$defs/rateLimitLayer" },
+        "algorithm": { "$ref": "#/$defs/rateLimitAlgorithm" },
+        "limit": { "type": "integer", "minimum": 1 },
+        "remaining": { "type": "integer", "minimum": 0 },
+        "retryAfterMs": { "type": "integer", "minimum": 0 },
+        "resetAfterMs": { "type": "integer", "minimum": 0 },
+        "reasonCode": { "type": "string", "minLength": 1 }
       }
     },
     "compression": {

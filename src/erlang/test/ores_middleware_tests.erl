@@ -11,12 +11,13 @@ production_rejects_test_only_middleware_test() ->
     ?assert(length(Issues) >= 2).
 
 context_is_process_scoped_test() ->
+    Previous = ores_middleware:current_context(),
     Context = #{request_id => <<"r1">>, trace_id => <<"0123456789abcdef0123456789abcdef">>, tenant_id => undefined, user_id => undefined},
-    ?assertEqual(undefined, ores_middleware:current_context()),
     ?assertEqual(<<"r1">>, ores_middleware:run_with_context(Context, fun() -> maps:get(request_id, ores_middleware:current_context()) end)),
-    ?assertEqual(undefined, ores_middleware:current_context()).
+    ?assertEqual(Previous, ores_middleware:current_context()).
 
 middleware_adds_correlation_and_security_headers_test() ->
+    Previous = ores_middleware:current_context(),
     Config0 = ores_middleware:default_config(<<"test">>),
     Settings0 = maps:get(settings, Config0),
     Tls0 = maps:get(tls, Settings0),
@@ -29,7 +30,8 @@ middleware_adds_correlation_and_security_headers_test() ->
     ?assertEqual(200, maps:get(status, Response)),
     ?assert(maps:is_key(<<"x-request-id">>, Headers)),
     ?assert(maps:is_key(<<"traceparent">>, Headers)),
-    ?assertEqual(<<"nosniff">>, maps:get(<<"x-content-type-options">>, Headers)).
+    ?assertEqual(<<"nosniff">>, maps:get(<<"x-content-type-options">>, Headers)),
+    ?assertEqual(Previous, ores_middleware:current_context()).
 
 descriptor_has_standard_surface_test() ->
     Descriptor = ores_middleware:descriptor(),
