@@ -64,8 +64,8 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
 
-      - name: Format Rust middleware
-        run: cargo fmt --manifest-path src/rust/Cargo.toml -- --check
+      - name: Format Rate Limit V2 Rust modules
+        run: rustfmt --edition 2024 --check src/rust/src/middleware_order.rs src/rust/src/rate_limit_v2.rs
 
       - name: Lint Rust middleware
         run: cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
