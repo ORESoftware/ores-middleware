@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/function-body-plan.schema.json",
+  "title": "ORES Middleware Function Body Plan",
+  "description": "Independently authored runtime authority for executable middleware pseudocode bodies. This schema is not generated from TypeSpec and must remain a peer authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "contractId", "function", "intent", "inputs", "outputs", "publicFailureFields", "forbiddenPublicFields", "steps"],
+  "properties": {
+    "schemaVersion": {"const": "1.0.0"},
+    "contractId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"},
+    "function": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$"},
+    "intent": {"type": "string", "minLength": 20, "maxLength": 1024},
+    "inputs": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
+    "outputs": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
+    "publicFailureFields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/safeIdentifier"},
+      "not": {"contains": {"enum": ["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]}}
+    },
+    "forbiddenPublicFields": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/safeIdentifier"},
+      "allOf": [
+        {"contains": {"const": "cause"}},
+        {"contains": {"const": "message"}},
+        {"contains": {"const": "stack"}},
+        {"contains": {"const": "body"}},
+        {"contains": {"const": "authorization"}},
+        {"contains": {"const": "cookie"}},
+        {"contains": {"const": "token"}},
+        {"contains": {"const": "rawIdentity"}}
+      ]
+    },
+    "steps": {"type": "array", "minItems": 11, "maxItems": 32, "items": {"$ref": "#/$defs/step"}}
+  },
+  "$defs": {
+    "safeIdentifier": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"},
+    "opcode": {"type": "string", "enum": ["capture-context", "normalize-input", "enter-context", "enter-failure-boundary", "arm-termination-guard", "invoke-operation", "classify-failure", "redact-public-failure", "report-failure-fail-open", "restore-context", "return-typed-outcome"]},
+    "phase": {"type": "string", "enum": ["setup", "guarded", "failure", "finalization", "terminal"]},
+    "when": {"type": "string", "enum": ["always", "unless-failed", "on-failure", "finally"]},
+    "effect": {"type": "string", "enum": ["read-ambient-context", "snapshot-allowlisted-context", "normalize-low-cardinality-input", "install-request-context", "catch-language-failure", "observe-cancellation-or-deadline", "invoke-user-code", "classify-failure-without-payload", "construct-public-failure", "emit-bounded-telemetry", "restore-ambient-context", "return-outcome"]},
+    "failurePolicy": {"type": "string", "enum": ["map-to-typed-failure", "ignore-reporter-failure", "always-run", "not-applicable"]},
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "opcode", "phase", "when", "dependsOn", "effects", "failurePolicy", "terminal"],
+      "properties": {
+        "id": {"$ref": "#/$defs/safeIdentifier"},
+        "opcode": {"$ref": "#/$defs/opcode"},
+        "phase": {"$ref": "#/$defs/phase"},
+        "when": {"$ref": "#/$defs/when"},
+        "dependsOn": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
+        "effects": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/effect"}},
+        "failurePolicy": {"$ref": "#/$defs/failurePolicy"},
+        "terminal": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"opcode": {"const": "report-failure-fail-open"}}, "required": ["opcode"]},
+          "then": {"properties": {"when": {"const": "on-failure"}, "failurePolicy": {"const": "ignore-reporter-failure"}, "effects": {"contains": {"const": "emit-bounded-telemetry"}}}}
+        },
+        {
+          "if": {"properties": {"opcode": {"const": "restore-context"}}, "required": ["opcode"]},
+          "then": {"properties": {"phase": {"const": "finalization"}, "when": {"const": "finally"}, "failurePolicy": {"const": "always-run"}, "effects": {"contains": {"const": "restore-ambient-context"}}}}
+        },
+        {
+          "if": {"properties": {"opcode": {"const": "invoke-operation"}}, "required": ["opcode"]},
+          "then": {"properties": {"when": {"const": "unless-failed"}, "effects": {"contains": {"const": "invoke-user-code"}}}}
+        },
+        {
+          "if": {"properties": {"terminal": {"const": true}}, "required": ["terminal"]},
+          "then": {"properties": {"phase": {"const": "terminal"}, "opcode": {"const": "return-typed-outcome"}, "effects": {"contains": {"const": "return-outcome"}}}}
+        }
+      ]
+    }
+  }
+}
