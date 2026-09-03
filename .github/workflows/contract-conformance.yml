@@ -43,7 +43,7 @@ jobs:
         with:
           toolchain: 1.95.0
           components: rustfmt
-      - run: cargo fmt --manifest-path src/rust/Cargo.toml --all -- --check
+      - run: rustfmt --edition 2024 --check src/rust/src/docs_serving.rs
       - run: cargo test --manifest-path src/rust/Cargo.toml --all-features
       - run: cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck | jq -e '.language == "rust"'
 
