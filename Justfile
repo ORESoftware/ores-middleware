@@ -1,7 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 contracts:
-    npm install
+    npm install --ignore-scripts --no-audit --no-fund
     npm run contracts:compile
     npm run contracts:check
     python3 -m unittest scripts/test_contract_parity.py scripts/test_schema_convergence.py -v
@@ -9,16 +9,13 @@ contracts:
 
 rust:
     cargo test --manifest-path src/rust/Cargo.toml --all-features
-    cargo test --manifest-path src/rust/docs-serving/Cargo.toml
     python3 scripts/build_targets.py --languages rust
     mkdir -p target/descriptors
     cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck > target/descriptors/rust.json
 
 ts:
-    npm --prefix src/ts install
-    npm --prefix src/ts run build
+    npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
     npm --prefix src/ts test
-    npm --prefix src/ts/docs-serving test
     python3 scripts/build_targets.py --languages ts
     mkdir -p target/descriptors
     node src/ts/dist/contractcheck.js > target/descriptors/ts.json

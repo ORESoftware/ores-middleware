@@ -43,33 +43,38 @@ def copy_if_present(source: Path, destination: Path) -> None:
 def build_rust() -> None:
     output = reset_output("rust")
     run([
-        "cargo", "build", "--manifest-path", "src/rust/Cargo.toml", "--all-features",
-        "--target-dir", str(output / "sdk"),
-    ])
-    run([
-        "cargo", "build", "--manifest-path", "src/rust/docs-serving/Cargo.toml",
-        "--target-dir", str(output / "docs-serving"),
+        "cargo",
+        "build",
+        "--manifest-path",
+        "src/rust/Cargo.toml",
+        "--all-features",
+        "--target-dir",
+        str(output),
     ])
 
 
 def build_ts() -> None:
     output = reset_output("ts")
+    run([
+        "npm",
+        "ci",
+        "--prefix",
+        "src/ts",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+    ])
     run(["npm", "run", "build", "--prefix", "src/ts"])
-    shutil.copytree(ROOT / "src/ts/dist", output / "sdk/dist")
-    copy_if_present(ROOT / "src/ts/package.json", output / "sdk/package.json")
-    shutil.copytree(
-        ROOT / "src/ts/docs-serving",
-        output / "docs-serving",
-        ignore=shutil.ignore_patterns("node_modules", "*.log"),
-    )
+    shutil.copytree(ROOT / "src/ts/dist", output / "dist")
+    copy_if_present(ROOT / "src/ts/package.json", output / "package.json")
+    copy_if_present(ROOT / "src/ts/package-lock.json", output / "package-lock.json")
 
 
 def build_golang() -> None:
     output = reset_output("golang")
     source = ROOT / "src/golang"
     run(["go", "test", "./..."], cwd=source)
-    run(["go", "test", "-c", "-o", str(output / "oresmiddleware.test"), "."], cwd=source)
-    run(["go", "test", "-c", "-o", str(output / "docsserving.test"), "./docsserving"], cwd=source)
+    run(["go", "build", "-o", str(output / "contractcheck"), "./cmd/contractcheck"], cwd=source)
     copy_if_present(source / "go.mod", output / "go.mod")
     copy_if_present(source / "go.sum", output / "go.sum")
 
@@ -86,14 +91,12 @@ def build_gleam() -> None:
 def build_elixir() -> None:
     output = reset_output("elixir")
     source = ROOT / "src/elixir"
-    run(
-        ["mix", "compile", "--warnings-as-errors"],
-        cwd=source,
-        env={
-            "MIX_BUILD_PATH": str(output / "_build"),
-            "MIX_DEPS_PATH": str(source / "deps"),
-        },
-    )
+    environment = {
+        "MIX_BUILD_PATH": str(output / "_build"),
+        "MIX_DEPS_PATH": str(source / "deps"),
+    }
+    run(["mix", "deps.get"], cwd=source, env=environment)
+    run(["mix", "compile", "--warnings-as-errors"], cwd=source, env=environment)
     copy_if_present(source / "mix.exs", output / "mix.exs")
     copy_if_present(source / "mix.lock", output / "mix.lock")
 

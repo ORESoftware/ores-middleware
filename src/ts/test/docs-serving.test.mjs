@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { CONTRACT_DIGEST_HEADER, decideDocs } from "../src/index.js";
+import { CONTRACT_DIGEST_HEADER, decideDocs } from "../dist/docs-serving.js";
 
 const fixturePath = fileURLToPath(
-  new URL("../../../../fixtures/docs-serving-conformance.tsv", import.meta.url),
+  new URL("../../../fixtures/docs-serving-conformance.tsv", import.meta.url),
 );
 
 function optional(value) {

@@ -9,7 +9,7 @@
   "scripts": {
     "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
     "contracts:compare": "node scripts/compare-authorities.mjs && python3 scripts/check_contract_parity.py && python3 scripts/schema_convergence.py",
-    "contracts:validate": "node scripts/validate-contracts.mjs",
+    "contracts:validate": "node scripts/validate-contracts.mjs && node scripts/validate-docs-serving.mjs",
     "contracts:check": "npm run contracts:compare && npm run contracts:validate",
     "descriptors:check": "node scripts/check-descriptors.mjs --require-all",
     "zpkg:check": "python3 scripts/check_zpkg.py",

@@ -55,8 +55,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check --quiet jsonschema==4.25.1
-          npm install --ignore-scripts --no-audit --no-fund
-          npm install --prefix src/ts --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
 
       - name: Run peer-authority, projection, package, and language audit
         shell: bash
