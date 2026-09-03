@@ -133,6 +133,10 @@
         "required": ["algorithm"]
       },
       "then": {
+        "properties": {
+          "refillTokens": {},
+          "refillIntervalMs": {}
+        },
         "required": ["refillTokens", "refillIntervalMs"],
         "not": {
           "properties": {"windowMs": {}},
@@ -150,6 +154,7 @@
         "required": ["algorithm"]
       },
       "then": {
+        "properties": {"windowMs": {}},
         "required": ["windowMs"],
         "not": {
           "anyOf": [
