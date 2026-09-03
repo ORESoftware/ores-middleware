@@ -25,16 +25,13 @@ fn resolve(
     match primary {
         BackendOutcome::Allow => RateLimitDecisionKind::Allowed,
         BackendOutcome::Deny => RateLimitDecisionKind::Denied,
-        BackendOutcome::Unavailable => match failure_mode {
-            RateLimitFailureMode::FailOpen => match layer {
-                RateLimitLayer::Authorization => RateLimitDecisionKind::DegradedDenied,
-                RateLimitLayer::CloudflareEdge
-                | RateLimitLayer::KubernetesIngress
-                | RateLimitLayer::ServiceMesh
-                | RateLimitLayer::Application => RateLimitDecisionKind::DegradedAllowed,
-            },
-            RateLimitFailureMode::FailClosed => RateLimitDecisionKind::DegradedDenied,
-            RateLimitFailureMode::LocalOnly => match local {
+        BackendOutcome::Unavailable => match (layer, failure_mode) {
+            // Authorization is a security boundary: an unavailable primary
+            // never becomes an allow through fail-open or local fallback.
+            (RateLimitLayer::Authorization, _) => RateLimitDecisionKind::DegradedDenied,
+            (_, RateLimitFailureMode::FailOpen) => RateLimitDecisionKind::DegradedAllowed,
+            (_, RateLimitFailureMode::FailClosed) => RateLimitDecisionKind::DegradedDenied,
+            (_, RateLimitFailureMode::LocalOnly) => match local {
                 LocalOutcome::Allow => RateLimitDecisionKind::DegradedAllowed,
                 LocalOutcome::Deny | LocalOutcome::Unavailable => {
                     RateLimitDecisionKind::DegradedDenied
