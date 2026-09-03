@@ -5,6 +5,7 @@ mod config;
 mod context;
 pub mod frameworks;
 mod integrations;
+mod net;
 mod pipeline;
 
 use std::collections::BTreeMap;
