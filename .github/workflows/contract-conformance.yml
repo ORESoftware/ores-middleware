@@ -88,7 +88,8 @@ jobs:
           cache: false
       - name: Verify committed Go module metadata
         run: cd src/golang && go mod tidy && git diff --exit-code -- go.mod go.sum
-      - run: cd src/golang && go test ./...
+      - name: Run Go tests with race detector and randomized order
+        run: cd src/golang && go test -race -shuffle=on -count=2 ./...
       - run: cd src/golang && go run ./cmd/contractcheck | jq -e '.language == "golang"'
 
   beam:
