@@ -1,0 +1,116 @@
+name: Apply and validate the DEN-3176 single-finalizer repair
+
+on:
+  push:
+    branches:
+      - fix/den-3176-single-response-finalizer-2026-09-03
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/den-3176-single-response-finalizer-2026-09-03
+          fetch-depth: 0
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+          cache-dependency-path: src/ts/package-lock.json
+
+      - name: Apply the exact semantic repair and regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("src/ts/src/index.ts")
+          source = source_path.read_text()
+          old = '''    const response = authenticatedOutcome.ok
+                ? authenticatedOutcome.value
+                : operationFailureResponse(authenticatedOutcome.failure);
+              return attachHeaders(config, context, response);
+                },'''
+          new = '''    const response = authenticatedOutcome.ok
+                ? authenticatedOutcome.value
+                : operationFailureResponse(authenticatedOutcome.failure);
+              return response;
+                },'''
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f"expected exactly one authenticated finalizer block, found {count}")
+          source_path.write_text(source.replace(old, new, 1))
+
+          test_path = Path("src/ts/test/http-rejection-finalization.test.mjs")
+          tests = test_path.read_text()
+          marker = 'test("the HTTP lifecycle constructs exactly one finalization wrapper"'
+          if marker in tests:
+              raise SystemExit("single-finalizer regression test already exists")
+          tests += r'''
+
+          test("the HTTP lifecycle constructs exactly one finalization wrapper", { concurrency: false }, async () => {
+            const request = portableRequest("single-finalizer", 90, { method: "POST" });
+            const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Response");
+            assert.ok(descriptor && "value" in descriptor, "Response must be a replaceable data property in Node");
+            const NativeResponse = descriptor.value;
+            let constructions = 0;
+
+            class CountingResponse extends NativeResponse {
+              constructor(body, init) {
+                super(body, init);
+                constructions += 1;
+              }
+            }
+
+            Object.defineProperty(globalThis, "Response", {
+              ...descriptor,
+              value: CountingResponse
+            });
+            try {
+              const middleware = createMiddleware(testConfig());
+              const response = await middleware(request, async () => new Response("ok"));
+              assert.equal(response.status, 200);
+              assert.equal(response.headers.get("x-request-id"), "single-finalizer");
+              assert.equal(await response.text(), "ok");
+              assert.equal(
+                constructions,
+                2,
+                "one handler response plus exactly one finalization wrapper must be constructed"
+              );
+            } finally {
+              Object.defineProperty(globalThis, "Response", descriptor);
+            }
+
+            assert.equal(currentContext(), undefined);
+            assert.equal(getLogContext(), undefined);
+          });
+          '''
+          test_path.write_text(tests)
+          PY
+
+      - name: Install and test the TypeScript runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts
+          npm --prefix src/ts test
+
+      - name: Commit the validated source change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ts/src/index.ts src/ts/test/http-rejection-finalization.test.mjs
+          git diff --cached --check
+          git commit -m "fix(ts): finalize each HTTP response exactly once"
+          git push origin HEAD:fix/den-3176-single-response-finalizer-2026-09-03
