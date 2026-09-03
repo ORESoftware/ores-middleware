@@ -1,3 +1,4 @@
+import { isAsyncContextTracked } from "@oresoftware/next-loggers/context";
 import {
   captureExecutionLogContext,
   getCorrelationId as getAmbientCorrelationId,
@@ -6,7 +7,6 @@ import {
   getRequestId as getAmbientRequestId,
   getSessionId as getAmbientSessionId,
   getTenantId as getAmbientTenantId,
-  isAsyncContextTracked,
   runWithCapturedExecutionLogContext,
   runWithExecutionLogContext,
   setExecutionLoggedInUser,
@@ -155,10 +155,12 @@ export function bindRequestContext(
 export function contextForRequest(
   request: Request
 ): OresRequestContext | undefined {
-  const direct = (request as Request & {
-    [requestContextSymbol]?: OresRequestContext;
-  })[requestContextSymbol];
-  return direct ? cloneContext(direct) : requestContexts.get(request);
+  const direct = (request as unknown as Record<PropertyKey, unknown>)[
+    requestContextSymbol
+  ] as OresRequestContext | undefined;
+  if (direct) return cloneContext(direct);
+  const stored = requestContexts.get(request);
+  return stored ? cloneContext(stored) : undefined;
 }
 
 export function runWithBoundRequestContext<T>(
