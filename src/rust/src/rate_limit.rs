@@ -24,6 +24,17 @@ pub enum RateLimitAlgorithm {
     Concurrency,
 }
 
+impl RateLimitAlgorithm {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TokenBucket => "token-bucket",
+            Self::SlidingWindowCounter => "sliding-window-counter",
+            Self::FixedWindow => "fixed-window",
+            Self::Concurrency => "concurrency",
+        }
+    }
+}
+
 impl Default for RateLimitAlgorithm {
     fn default() -> Self {
         Self::TokenBucket
@@ -38,6 +49,18 @@ pub enum RateLimitLayer {
     ServiceMesh,
     Application,
     Authorization,
+}
+
+impl RateLimitLayer {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CloudflareEdge => "cloudflare-edge",
+            Self::KubernetesIngress => "kubernetes-ingress",
+            Self::ServiceMesh => "service-mesh",
+            Self::Application => "application",
+            Self::Authorization => "authorization",
+        }
+    }
 }
 
 impl Default for RateLimitLayer {
@@ -153,6 +176,15 @@ impl RateLimitDecisionKind {
         match self {
             Self::Allowed | Self::DegradedAllowed => true,
             Self::Denied | Self::DegradedDenied => false,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allowed => "allowed",
+            Self::Denied => "denied",
+            Self::DegradedAllowed => "degraded-allowed",
+            Self::DegradedDenied => "degraded-denied",
         }
     }
 }
