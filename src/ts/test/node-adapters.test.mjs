@@ -197,6 +197,11 @@ test("Express keeps ALS and request-attached context isolated until each respons
     assert.equal(result.nextCalls, 1);
     assert.equal(result.response.statusCode, 204);
     assert.equal(result.response.getHeader("x-request-id"), `request-${slot}`);
+    assert.equal(
+      result.response.getHeader("traceparent"),
+      undefined,
+      "the inbound parent span must not be relabelled as a server span"
+    );
 
     for (const message of [`express-file:${slot}`, `express-request:${slot}`]) {
       const matching = records.filter((record) => record.message === message);

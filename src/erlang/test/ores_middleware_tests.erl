@@ -29,7 +29,7 @@ middleware_adds_correlation_and_security_headers_test() ->
     Headers = maps:get(headers, Response),
     ?assertEqual(200, maps:get(status, Response)),
     ?assert(maps:is_key(<<"x-request-id">>, Headers)),
-    ?assert(maps:is_key(<<"traceparent">>, Headers)),
+    ?assertEqual(false, maps:is_key(<<"traceparent">>, Headers)),
     ?assertEqual(<<"nosniff">>, maps:get(<<"x-content-type-options">>, Headers)),
     ?assertEqual(Previous, ores_middleware:current_context()).
 

@@ -59,8 +59,11 @@ func TestStackAddsRequestAndSecurityHeaders(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", response.Code, response.Body.String())
 	}
-	if response.Header().Get("x-request-id") == "" || response.Header().Get("traceparent") == "" {
-		t.Fatal("missing correlation headers")
+	if response.Header().Get("x-request-id") == "" {
+		t.Fatal("missing request ID response header")
+	}
+	if response.Header().Get("traceparent") != "" {
+		t.Fatal("middleware must not synthesize a response traceparent without a server span")
 	}
 	if response.Header().Get("x-content-type-options") != "nosniff" {
 		t.Fatal("missing security headers")
