@@ -1,0 +1,172 @@
+name: Canonicalize DEN-3959 generated Go once
+
+on:
+  push:
+    branches:
+      - feat/den-3959-independent-polyglot-generators
+    paths:
+      - .github/workflows/den-3959-canonical-go-output-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-3959-canonical-go-output-once
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.repository == 'ORESoftware/ores-middleware'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25.0'
+          cache: false
+      - name: Patch deterministic gofmt-equivalent alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tools/contract-parity/src/bin/persistence_codegen.rs")
+          text = path.read_text(encoding="utf-8")
+          before_constants = r'''    let constants = enum_values
+              .iter()
+              .map(|value| {
+                  format!(
+                      "\tIdempotencyStatus{} IdempotencyStatus = \"{}\"",
+                      pascal_case(value),
+                      value
+                  )
+              })
+              .collect::<Vec<_>>()
+              .join("\n");'''
+          after_constants = r'''    let constant_rows = enum_values
+              .iter()
+              .map(|value| (format!("IdempotencyStatus{}", pascal_case(value)), value))
+              .collect::<Vec<_>>();
+          let constant_width = constant_rows
+              .iter()
+              .map(|(name, _)| name.len())
+              .max()
+              .unwrap_or(0);
+          let constants = constant_rows
+              .iter()
+              .map(|(name, value)| {
+                  format!(
+                      "\t{:<width$} IdempotencyStatus = \"{}\"",
+                      name,
+                      value,
+                      width = constant_width
+                  )
+              })
+              .collect::<Vec<_>>()
+              .join("\n");'''
+          before_fields = r'''    let fields = model
+              .fields
+              .iter()
+              .map(|field| {
+                  format!(
+                      "\t{} {} `json:\"{}{}\"`",
+                      pascal_case(&field.name),
+                      go_type(field),
+                      field.name,
+                      if field.nullable { ",omitempty" } else { "" }
+                  )
+              })
+              .collect::<Vec<_>>()
+              .join("\n");'''
+          after_fields = r'''    let field_rows = model
+              .fields
+              .iter()
+              .map(|field| {
+                  (
+                      pascal_case(&field.name),
+                      go_type(field),
+                      format!(
+                          "{}{}",
+                          field.name,
+                          if field.nullable { ",omitempty" } else { "" }
+                      ),
+                  )
+              })
+              .collect::<Vec<_>>();
+          let field_name_width = field_rows
+              .iter()
+              .map(|(name, _, _)| name.len())
+              .max()
+              .unwrap_or(0);
+          let field_type_width = field_rows
+              .iter()
+              .map(|(_, field_type, _)| field_type.len())
+              .max()
+              .unwrap_or(0);
+          let fields = field_rows
+              .iter()
+              .map(|(name, field_type, json_name)| {
+                  format!(
+                      "\t{:<name_width$} {:<type_width$} `json:\"{}\"`",
+                      name,
+                      field_type,
+                      json_name,
+                      name_width = field_name_width,
+                      type_width = field_type_width
+                  )
+              })
+              .collect::<Vec<_>>()
+              .join("\n");'''
+          if text.count(before_constants) != 1:
+              raise SystemExit("expected exactly one legacy Go constant renderer")
+          if text.count(before_fields) != 1:
+              raise SystemExit("expected exactly one legacy Go field renderer")
+          text = text.replace(before_constants, after_constants)
+          text = text.replace(before_fields, after_fields)
+          path.write_text(text, encoding="utf-8")
+          PY
+          rustfmt --edition 2024 tools/contract-parity/src/bin/persistence_codegen.rs
+      - name: Prove both generated Go authorities are canonical and compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
+          cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml \
+            --bin persistence_codegen -- \
+            --output-root target/schema-convergence \
+            --report target/schema-convergence/receipt.json
+          for lane in typespec json-schema-openapi; do
+            diff_file="target/${lane}-gofmt.diff"
+            gofmt -d "target/schema-convergence/${lane}/golang/idempotency_record.go" | tee "$diff_file"
+            test ! -s "$diff_file"
+            (
+              cd "target/schema-convergence/${lane}/golang"
+              GO111MODULE=off go test
+            )
+          done
+          cmp \
+            target/schema-convergence/typespec/golang/idempotency_record.go \
+            target/schema-convergence/json-schema-openapi/golang/idempotency_record.go
+      - name: Commit only the generator and remove this one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- tools/contract-parity/src/bin/persistence_codegen.rs
+          git rm -- .github/workflows/den-3959-canonical-go-output-once.yml
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(tools/contract-parity/src/bin/persistence_codegen.rs|\.github/workflows/den-3959-canonical-go-output-once\.yml)$' || true)"
+          test -z "$unexpected"
+          git commit -m 'fix(DEN-3959): emit canonical generated Go code'
+          git push origin HEAD:refs/heads/feat/den-3959-independent-polyglot-generators
