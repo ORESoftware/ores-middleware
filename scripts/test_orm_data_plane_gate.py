@@ -89,8 +89,12 @@ class OrmDataPlaneGateTests(unittest.TestCase):
             self.assertIn(f"mod {module}", source)
         for lane in DATA_PLANE_LANES:
             self.assertIn(f'"{lane}"', source)
-        self.assertEqual(source.count("diesel::insert_into"), 6)
-        self.assertEqual(source.count(".insert(&database)"), 6)
+        # Each of the two Diesel authority modules performs two positive
+        # inserts plus primary-key, unique-key, and enum rejection inserts.
+        self.assertEqual(source.count("diesel::insert_into"), 10)
+        # SeaORM mirrors those same five insert attempts per authority.
+        self.assertEqual(source.count(".insert(&database)"), 10)
+        # Three raw database rejection cases per SeaORM authority.
         self.assertEqual(source.count("execute_unprepared"), 6)
         self.assertEqual(source.count("DeriveEntityModel"), 2)
         self.assertEqual(source.count("diesel::table!"), 2)
