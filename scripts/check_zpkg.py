@@ -24,12 +24,17 @@ EXPECTED_OUTPUTS = {
     "target/gleam",
     "target/elixir",
     "target/erlang",
+    "target/package",
 }
 EXPECTED_FLOWS = {
     "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
     "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
 }
 EXPECTED_ZED_TEST_SCRIPT = "python3 scripts/audit.py --receipt target/audit/receipt.json"
+EXPECTED_INSTALLED_SMOKE_TEST = (
+    'python3 "$ZED_PKG_TEST_TARGET/target/package/scripts/installed_package_smoke.py" '
+    '--root "$ZED_PKG_TEST_TARGET"'
+)
 EXPECTED_WORKSPACE_SCRIPTS = {
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
@@ -97,13 +102,31 @@ def validate(root: Path) -> list[str]:
         "scripts/orm_catalog_gate.py",
         "scripts/orm_catalog_gate_entrypoint.py",
         "scripts/subprocess_capture.py",
+        "scripts/installed_package_smoke.py",
         ".github/workflows/persistence-convergence.yml",
     ):
         if not (root / required_path).is_file():
-            errors.append(f"missing required persistence gate file: {required_path}")
+            errors.append(f"missing required persistence/package gate file: {required_path}")
+
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
-    if "scripts/cross_translate.py" not in smoke_test:
-        errors.append("publish.smoke_test must execute the cross-translation gate")
+    if smoke_test != EXPECTED_INSTALLED_SMOKE_TEST:
+        errors.append(
+            "publish.smoke_test must execute the installed build-output closure, "
+            f"expected {EXPECTED_INSTALLED_SMOKE_TEST!r}, got {smoke_test!r}"
+        )
+    installed_smoke_path = root / "scripts/installed_package_smoke.py"
+    if installed_smoke_path.is_file():
+        installed_smoke = installed_smoke_path.read_text(encoding="utf-8")
+        for required_text in (
+            "scripts/cross_translate.py",
+            "target/package",
+            "Rust/TypeScript/Go descriptor parity",
+            "Gleam/Elixir/Erlang runtime probes",
+        ):
+            if required_text not in installed_smoke:
+                errors.append(
+                    f"installed package smoke test must retain {required_text!r}"
+                )
 
     topology = json.loads((root / "contracts/authority-topology.json").read_text(encoding="utf-8"))
     authorities = {
@@ -144,8 +167,8 @@ def main() -> int:
         return 1
     print(
         ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
-        "golang + gleam + elixir + erlang + bidirectional shadow gate + "
-        "database-backed Diesel/SeaORM gate"
+        "golang + gleam + elixir + erlang + installed build-output smoke + "
+        "bidirectional shadow gate + database-backed Diesel/SeaORM gate"
     )
     return 0
 
