@@ -19,7 +19,10 @@ pub use bootstrap::{config_from_env, stack_from_env, BootstrapError};
 pub use config::{
     default_config, validate_config, MiddlewareConfig, RuntimeEnvironment, ValidationIssue,
 };
-pub use context::{current_context, run_with_context, ContextRegistry, RequestContext};
+pub use context::{
+    current_context, current_logged_in_user_id, current_request_id, current_tenant_id,
+    current_trace_id, current_user_id, run_with_context, ContextRegistry, RequestContext,
+};
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
@@ -136,9 +139,11 @@ mod tests {
         };
         run_with_context(context, async {
             assert_eq!(current_context().unwrap().request_id, "r1");
+            assert_eq!(current_request_id().as_deref(), Some("r1"));
         })
         .await;
         assert!(current_context().is_none());
+        assert!(current_request_id().is_none());
     }
 
     #[test]
