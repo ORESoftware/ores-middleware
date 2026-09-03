@@ -1,0 +1,70 @@
+name: rollout v2 repin autofix
+
+on:
+  push:
+    branches: [feat/cross-language-middleware-contract-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/cross-language-middleware-contract-v1
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Make shipped pin and evidence revision identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/rust-server-rollout-v2.yml')
+          text = path.read_text()
+          marker = '''          grep -Fq "$marker" "$SOURCE"
+          grep -Fq 'git = "https://github.com/ORESoftware/ores-middleware"' "$MANIFEST"
+          grep -Eq 'rev = "[0-9a-fA-F]{40}"' "$MANIFEST"
+'''
+          replacement = '''          grep -Fq "$marker" "$SOURCE"
+          python3 - <<'PY_REPIN'
+          import os, re
+          from pathlib import Path
+
+          path = Path(os.environ["MANIFEST"])
+          text = path.read_text()
+          pattern = re.compile(
+              r'(?m)^(ores-middleware\\s*=\\s*\\{[^\\n]*\\brev\\s*=\\s*")[0-9a-fA-F]{40}("[^\\n]*\\})$'
+          )
+          replacement = r'\\g<1>' + os.environ["MIDDLEWARE_REVISION"] + r'\\g<2>'
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit("could not repin the ores-middleware dependency")
+          path.write_text(updated)
+          PY_REPIN
+          grep -Fq 'git = "https://github.com/ORESoftware/ores-middleware"' "$MANIFEST"
+          grep -Fq "rev = \"${MIDDLEWARE_REVISION}\"" "$MANIFEST"
+'''
+          if marker not in text:
+              raise SystemExit('expected manifest validation marker was not found')
+          path.write_text(text.replace(marker, replacement, 1))
+          PY
+          cargo fmt --manifest-path src/rust/Cargo.toml --all
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+          python3 scripts/test-rollout-rust-server.py
+      - name: Commit verified consistency fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/rollout-v2-repin-autofix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/rust-server-rollout-v2.yml src/rust/Cargo.lock
+          git rm .github/workflows/rollout-v2-repin-autofix.yml
+          git commit -m 'fix(ci): keep rollout evidence aligned with shipped middleware pin'
+          git push origin HEAD:feat/cross-language-middleware-contract-v1
