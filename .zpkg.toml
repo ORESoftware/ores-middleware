@@ -26,6 +26,12 @@ outputs = [
 [install]
 dir = ".vendor/.zed"
 
+[dependencies]
+"ores-rate-limit/ores-rl-lib-core" = "^0.1.0"
+"ores-otel/ores-lib-core" = "^0.1.0"
+"ores-redis-lru-cache/ores-lru-redis.rs" = "^0.1.0"
+"shared-auth/shared-auth-lib" = "^0.1.1"
+
 [publish]
 include_readme = true
 tag_format = "v{version}"
