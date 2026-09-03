@@ -2,7 +2,7 @@
 
 ## Acceptance target
 
-This record verifies that the standard ORES middleware SDK is implemented in every language currently in scope, enforced by **independent, peer TypeSpec and JSON Schema/OpenAPI authorities**, covered by compile-time and runtime conformance gates, and staged at the live router boundary of at least 20 servers across at least 6 GitHub organizations.
+This record verifies that the standard ORES middleware SDK is implemented in every language currently in scope, enforced by **independent, peer TypeSpec and JSON Schema/OpenAPI authorities**, covered by compile-time and runtime conformance gates, and staged for review at the actual router boundary of at least 20 servers across at least 6 GitHub organizations.
 
 ## Contract authorities
 
@@ -46,9 +46,17 @@ The immutable middleware revision used by the server rollout is:
 84afb50b81ae4fba4da2c4cf4f8c7b934a11ddb3
 ```
 
-## Server rollout
+## Staged server rollout
 
-All downstream PRs:
+### Evidence classes
+
+This section records **staged-head evidence** at the immutable pull-request heads shown in the table. `PASS` means that the listed draft PR head contained the middleware installation and its recorded workflow completed successfully. It does **not** assert that the target repository's current default branch contains that change, that the PR was merged, or that production deployment occurred.
+
+[Issue #7](https://github.com/ORESoftware/ores-middleware/issues/7) records a separate **live/default-branch source audit**. A repository counts as live only when its current branch contents contain the middleware adapter call, immutable dependency pin, adoption documentation, and no temporary rollout workflow. Consequently, this document can truthfully report 20/20 staged PR heads while the source audit reports a smaller live-adoption count.
+
+Do not add staged and live counts together, promote a staged PR to live based on workflow status alone, or describe a draft PR as deployed. Future revisions must preserve the immutable PR head, workflow conclusion, audit date, and evidence class for every row.
+
+All staged downstream PRs:
 
 - pin the immutable middleware revision above;
 - install `ores_middleware::frameworks::axum::install_from_env` at the actual Axum router boundary;
@@ -58,7 +66,7 @@ All downstream PRs:
 - construct the Axum middleware adapter from validated canonical defaults at runtime;
 - remain draft until deployment TLS/trusted-proxy policy is reviewed.
 
-| # | Organization | Server | PR | Head | Workflow audit |
+| # | Organization | Server | PR | Head | Staged-head workflow audit |
 |---:|---|---|---|---|---|
 | 1 | 3FA-app | `3fa-admin-api-server.rs` | [#5](https://github.com/3FA-app/3fa-admin-api-server.rs/pull/5) | `961980891b60` | PASS |
 | 2 | canonical-cloud | `canonical-admin-api-server.rs` | [#4](https://github.com/canonical-cloud/canonical-admin-api-server.rs/pull/4) | `82ad525bf5ee` | PASS |
@@ -81,7 +89,7 @@ All downstream PRs:
 | 19 | daedalus-fab | `daedalus-admin-web-server.rs` | [#4](https://github.com/daedalus-fab/daedalus-admin-web-server.rs/pull/4) | `e165e5209d54` | PASS |
 | 20 | sonus-auris | `sonus-auris-admin-web-server.rs` | [#5](https://github.com/sonus-auris/sonus-auris-admin-web-server.rs/pull/5) | `3fc4c9fb5ce5` | PASS (2 workflows) |
 
-**Rollout total:** 20 servers across 11 GitHub organizations. **Workflow audit:** 20/20 PASS.
+**Staged rollout total:** 20 draft PR heads across 11 GitHub organizations. **Staged-head workflow audit:** 20/20 PASS. The live/default-branch count is maintained separately in issue #7.
 
 ## Deployment gate
 
@@ -103,7 +111,8 @@ A service must not infer trusted proxy behavior merely from forwarded headers. I
 - [x] Elixir implementation and native tests.
 - [x] Erlang implementation and native tests.
 - [x] Compile-time and runtime conformance workflow across every language.
-- [x] Middleware installed at the live router boundary of 20 servers.
-- [x] Rollout spans 11 organizations, exceeding the 6-organization requirement.
-- [x] All 20 downstream repository workflows passed.
+- [x] Middleware change staged and verified at the actual router boundary in 20 draft PR heads.
+- [x] Staged rollout spans 11 organizations, exceeding the 6-organization requirement.
+- [x] All 20 staged downstream repository workflows passed at their recorded heads.
 - [ ] Merge downstream drafts after deployment TLS/trusted-proxy policy review.
+- [ ] Confirm each merged server through issue #7's live/default-branch source audit before counting it as adopted.
