@@ -125,7 +125,42 @@ jobs:
 
       - if: ${{ matrix.language == 'gleam' }}
         name: Resolve and compile Gleam dependencies
-        run: cd src/gleam && gleam build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/gleam
+
+          max_attempts=4
+          for attempt in $(seq 1 "$max_attempts"); do
+            log_file="$(mktemp)"
+            set +e
+            gleam build 2>&1 | tee "$log_file"
+            status="${PIPESTATUS[0]}"
+            set -e
+
+            if [[ "$status" -eq 0 ]]; then
+              rm -f "$log_file"
+              exit 0
+            fi
+
+            if ! grep -Eqi \
+              'HTTP error|A HTTP request failed|error sending request for url|connection (reset|refused)|temporary failure|timed out|timeout|TLS|unexpected EOF|failed to lookup address information|DNS' \
+              "$log_file"; then
+              rm -f "$log_file"
+              exit "$status"
+            fi
+
+            if [[ "$attempt" -eq "$max_attempts" ]]; then
+              echo "::error title=Gleam dependency resolution failed::Transient network failure persisted across ${max_attempts} attempts"
+              rm -f "$log_file"
+              exit "$status"
+            fi
+
+            delay=$((attempt * 10))
+            echo "::warning title=Retrying Gleam dependency resolution::Attempt ${attempt}/${max_attempts} failed with a transient network error; retrying in ${delay}s"
+            rm -f "$log_file"
+            sleep "$delay"
+          done
 
       - if: ${{ matrix.language == 'elixir' }}
         name: Fetch Elixir dependencies
