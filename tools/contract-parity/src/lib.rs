@@ -39,7 +39,7 @@ impl Discrepancy {
 
 fn extract_block(source: &str, keyword: &str, name: &str) -> Result<String> {
     let expression = format!(
-        r"(?s)\b{}\s+{}\s*\{{(?P<body>.*?)\}}",
+        r"(?ms)\b{}\s+{}\s*\{{(?P<body>.*?)^\s*\}}",
         regex::escape(keyword),
         regex::escape(name)
     );
