@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, future::Future};
+use std::future::Future;
 
 use crate::RequestContext;
 
@@ -6,68 +6,11 @@ use crate::RequestContext;
 // ores-middleware as the single integration surface.
 pub use next_loggers::*;
 
-/// Maps the portable, serializable middleware context into ores-otel's native
-/// task context. Only allow-listed correlation metadata is copied.
+/// Maps the portable middleware snapshot into the canonical ores-otel request
+/// context. The middleware conversion is the trust boundary and filters
+/// baggage before this logger projection is created.
 pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
-    let mut fields = JsonObject::from_iter([
-        (
-            "request.id".into(),
-            Value::String(context.request_id.clone()),
-        ),
-        (
-            "trace.id".into(),
-            Value::String(context.trace_id.clone()),
-        ),
-        (
-            "request.started_at_unix_ms".into(),
-            Value::from(context.started_at_unix_ms),
-        ),
-    ]);
-    if let Some(user_id) = &context.user_id {
-        fields.insert("user.id".into(), Value::String(user_id.clone()));
-    }
-    if let Some(tenant_id) = &context.tenant_id {
-        fields.insert("tenant.id".into(), Value::String(tenant_id.clone()));
-    }
-    if let Some(locale) = &context.locale {
-        fields.insert("request.locale".into(), Value::String(locale.clone()));
-    }
-    if let Some(deadline) = context.deadline_unix_ms {
-        fields.insert(
-            "request.deadline_unix_ms".into(),
-            Value::from(deadline),
-        );
-    }
-
-    let logged_in_user = context
-        .user_id
-        .as_ref()
-        .map(|user_id| {
-            JsonObject::from_iter([("id".into(), Value::String(user_id.clone()))])
-        })
-        .unwrap_or_default();
-    let baggage = context
-        .baggage
-        .iter()
-        .filter(|(key, _)| key.starts_with("otel."))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let trace_ids = (!context.trace_id.is_empty())
-        .then(|| vec![context.trace_id.clone()])
-        .unwrap_or_default();
-
-    LogContext {
-        logged_in_user,
-        fields,
-        trace_id: (!context.trace_id.is_empty()).then(|| context.trace_id.clone()),
-        trace_ids,
-        span_id: context.span_id.clone(),
-        baggage,
-        routine_id: Some(context.request_id.clone()),
-        tags: vec!["ores-middleware".into(), "request".into()],
-        ..LogContext::default()
-    }
-    .normalized()
+    context.to_canonical().to_log_context()
 }
 
 /// A request-specific logger handle suitable for Axum request extensions.
@@ -120,9 +63,9 @@ impl RequestLogger {
     }
 }
 
-/// Runs a future with ores-otel's poll-safe task context. File/module loggers
-/// imported elsewhere can call `info_context`, `warn_context`, and friends and
-/// still receive this request's correlation fields.
+/// Compatibility wrapper over the same poll-safe carrier used by
+/// `context::run_with_context`. New middleware code should enter one of these
+/// APIs once, not nest both around the same request.
 pub fn run_with_ores_log_context<F: Future>(
     context: &RequestContext,
     future: F,
@@ -190,7 +133,10 @@ mod tests {
             let baggage = record.fields["otel.baggage"]
                 .as_object()
                 .expect("otel baggage object");
-            assert_eq!(baggage.get("otel.vendor"), Some(&Value::String("allowed".into())));
+            assert_eq!(
+                baggage.get("otel.vendor"),
+                Some(&Value::String("allowed".into()))
+            );
             assert!(!baggage.contains_key("authorization"));
         }
         assert_eq!(current_log_context(), LogContext::default());
