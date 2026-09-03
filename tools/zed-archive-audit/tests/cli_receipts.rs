@@ -83,6 +83,30 @@ fn archive_with_required_directory() -> tempfile::NamedTempFile {
     output
 }
 
+#[cfg(unix)]
+fn archive_with_non_utf8_path() -> tempfile::NamedTempFile {
+    let output = tempfile::NamedTempFile::new().expect("archive file");
+    let encoder = GzEncoder::new(Vec::new(), Compression::default());
+    let mut builder = Builder::new(encoder);
+    builder.mode(tar::HeaderMode::Deterministic);
+
+    let mut header = Header::new_gnu();
+    let invalid_path = b"package/invalid-\xff-name";
+    header.as_mut_bytes()[..invalid_path.len()].copy_from_slice(invalid_path);
+    header.set_size(1);
+    header.set_mode(0o644);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_cksum();
+    builder
+        .append(&header, Cursor::new(b"x"))
+        .expect("append non-UTF-8 entry");
+
+    finish_archive(&output, builder);
+    output
+}
+
 fn copied_archive(source: &Path) -> tempfile::NamedTempFile {
     let output = tempfile::NamedTempFile::new().expect("archive copy");
     fs::copy(source, output.path()).expect("copy archive bytes");
@@ -149,6 +173,30 @@ fn cli_stops_when_a_directory_impersonates_a_required_manifest() {
             .as_str()
             .expect("error detail")
             .contains("required regular-file entry")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_preserves_non_utf8_path_rejection_in_the_receipt() {
+    let first = archive_with_non_utf8_path();
+    let second = copied_archive(first.path());
+    let directory = tempfile::tempdir().expect("receipt directory");
+    let receipt_path = directory.path().join("receipt.json");
+
+    let output = run_audit(first.path(), second.path(), SOURCE_SHA, &receipt_path);
+    assert_eq!(output.status.code(), Some(2));
+
+    let receipt = read_receipt(receipt_path);
+    assert_eq!(receipt["schema"], "ores.zed-release-acceptance/v1");
+    assert_eq!(receipt["status"], "stopped_for_evaluation");
+    assert_eq!(receipt["error"]["code"], "invalid_path");
+    assert_eq!(receipt["error"]["detail"], "archive path is not valid UTF-8");
+    assert!(
+        !receipt["error"]["detail"]
+            .as_str()
+            .expect("error detail")
+            .contains('\u{fffd}')
     );
 }
 
