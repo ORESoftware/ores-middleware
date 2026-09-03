@@ -1,9 +1,6 @@
-use std::str::FromStr;
-
-use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
-use crate::{CAPABILITIES, CONTRACT_VERSION};
+use crate::{net::valid_cidr, CAPABILITIES, CONTRACT_VERSION};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -261,7 +258,7 @@ pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     }
 
     for (index, cidr) in config.settings.tls.trusted_proxy_cidrs.iter().enumerate() {
-        if IpNet::from_str(cidr).is_err() {
+        if !valid_cidr(cidr) {
             issues.push(ValidationIssue::new(
                 format!("/settings/tls/trustedProxyCidrs/{index}"),
                 "invalid_cidr",
