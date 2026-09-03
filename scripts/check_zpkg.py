@@ -29,6 +29,13 @@ EXPECTED_FLOWS = {
     "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
     "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
 }
+EXPECTED_WORKSPACE_SCRIPTS = {
+    "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
+    "contracts:cross-translate": "python3 scripts/cross_translate.py",
+    "persistence:check": "python3 scripts/orm_catalog_gate_entrypoint.py",
+    "zpkg:check": "python3 scripts/check_zpkg.py",
+}
 
 
 def validate(root: Path) -> list[str]:
@@ -39,6 +46,11 @@ def validate(root: Path) -> list[str]:
         errors.append("package identity must be oresoftware/ores-middleware")
     if "language" in package:
         errors.append("package.language must remain unset for a polyglot repository")
+    if "scripts" in manifest:
+        errors.append(
+            "top-level [scripts] is not part of the Zed 0.2.3 manifest schema; "
+            "repository commands belong in package.json and CI"
+        )
 
     targets = manifest.get("targets", {})
     if set(targets) != set(EXPECTED_TARGETS):
@@ -69,24 +81,12 @@ def validate(root: Path) -> list[str]:
     if outputs != EXPECTED_OUTPUTS:
         errors.append(f"build.outputs mismatch: expected {sorted(EXPECTED_OUTPUTS)}, got {sorted(outputs)}")
 
-    scripts = manifest.get("scripts", {})
-    for required in (
-        "audit",
-        "build",
-        "contracts",
-        "cross-translation",
-        "orm-catalog",
-        "projection-parity",
-        "test",
-        "zpkg-check",
-    ):
-        if required not in scripts:
-            errors.append(f"missing scripts.{required}")
-    expected_orm_command = "python3 scripts/orm_catalog_gate_entrypoint.py"
-    if scripts.get("orm-catalog") != expected_orm_command:
-        errors.append(
-            "scripts.orm-catalog must execute the diagnostic-safe database-backed gate"
-        )
+    workspace = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    workspace_scripts = workspace.get("scripts", {})
+    for name, expected in EXPECTED_WORKSPACE_SCRIPTS.items():
+        if workspace_scripts.get(name) != expected:
+            errors.append(f"package.json scripts.{name} must be {expected!r}")
+
     for required_path in (
         "scripts/orm_catalog_gate.py",
         "scripts/orm_catalog_gate_entrypoint.py",
