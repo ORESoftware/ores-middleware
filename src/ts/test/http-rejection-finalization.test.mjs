@@ -261,3 +261,41 @@ test("Express and NestJS preserve correlation on authentication short-circuits",
   await runNativeShortCircuit(expressMiddleware(middleware), "express-reject", 80);
   await runNativeShortCircuit(nestjsMiddleware(middleware), "nestjs-reject", 81);
 });
+
+
+test("the HTTP lifecycle constructs exactly one finalization wrapper", { concurrency: false }, async () => {
+  const request = portableRequest("single-finalizer", 90, { method: "POST" });
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Response");
+  assert.ok(descriptor && "value" in descriptor, "Response must be a replaceable data property in Node");
+  const NativeResponse = descriptor.value;
+  let constructions = 0;
+
+  class CountingResponse extends NativeResponse {
+    constructor(body, init) {
+      super(body, init);
+      constructions += 1;
+    }
+  }
+
+  Object.defineProperty(globalThis, "Response", {
+    ...descriptor,
+    value: CountingResponse
+  });
+  try {
+    const middleware = createMiddleware(testConfig());
+    const response = await middleware(request, async () => new Response("ok"));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-request-id"), "single-finalizer");
+    assert.equal(await response.text(), "ok");
+    assert.equal(
+      constructions,
+      2,
+      "one handler response plus exactly one finalization wrapper must be constructed"
+    );
+  } finally {
+    Object.defineProperty(globalThis, "Response", descriptor);
+  }
+
+  assert.equal(currentContext(), undefined);
+  assert.equal(getLogContext(), undefined);
+});
