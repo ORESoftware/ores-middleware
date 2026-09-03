@@ -116,16 +116,13 @@ pub fn failing_transport_does_not_replace_middleware_response_test() {
     )
   let hooks0 = ores_middleware.default_hooks()
   let hooks =
-    ores_middleware.Hooks(
-      ..hooks0,
-      authenticate: fn(_, _) {
-        Ok(ores_middleware.AuthDecision(
-          user_id: "user-transport",
-          tenant_id: "tenant-transport",
-          baggage: dict.from_list([#("otel.test", "allowed")]),
-        ))
-      },
-    )
+    ores_middleware.Hooks(..hooks0, authenticate: fn(_, _) {
+      Ok(ores_middleware.AuthDecision(
+        user_id: "user-transport",
+        tenant_id: "tenant-transport",
+        baggage: dict.from_list([#("otel.test", "allowed")]),
+      ))
+    })
   let assert Ok(middleware) = otel.create_middleware(config, hooks, logger)
   let request =
     ores_middleware.Request(
@@ -144,13 +141,14 @@ pub fn failing_transport_does_not_replace_middleware_response_test() {
       remote_ip: "127.0.0.1",
     )
 
-  let response = middleware(request, fn(scoped_request, request_logger) {
-    assert scoped_request.path == "/failing-transport"
-    let assert Error("sink unavailable") =
-      otel.info(request_logger, "inside failing transport", [])
-      |> otel.send
-    ores_middleware.Response(204, dict.new(), "")
-  })
+  let response =
+    middleware(request, fn(scoped_request, request_logger) {
+      assert scoped_request.path == "/failing-transport"
+      let assert Error("sink unavailable") =
+        otel.info(request_logger, "inside failing transport", [])
+        |> otel.send
+      ores_middleware.Response(204, dict.new(), "")
+    })
 
   assert response.status == 204
   assert ores_middleware.current_context() == Error(Nil)
@@ -172,19 +170,16 @@ pub fn middleware_callback_receives_authenticated_pinned_logger_test() {
     )
   let hooks0 = ores_middleware.default_hooks()
   let hooks =
-    ores_middleware.Hooks(
-      ..hooks0,
-      authenticate: fn(_, _) {
-        Ok(ores_middleware.AuthDecision(
-          user_id: "user-callback",
-          tenant_id: "tenant-callback",
-          baggage: dict.from_list([
-            #("otel.allowed", "yes"),
-            #("authorization", "must-not-propagate"),
-          ]),
-        ))
-      },
-    )
+    ores_middleware.Hooks(..hooks0, authenticate: fn(_, _) {
+      Ok(ores_middleware.AuthDecision(
+        user_id: "user-callback",
+        tenant_id: "tenant-callback",
+        baggage: dict.from_list([
+          #("otel.allowed", "yes"),
+          #("authorization", "must-not-propagate"),
+        ]),
+      ))
+    })
   let assert Ok(middleware) = otel.create_middleware(config, hooks, logger)
   let request =
     ores_middleware.Request(
@@ -196,18 +191,19 @@ pub fn middleware_callback_receives_authenticated_pinned_logger_test() {
       remote_ip: "127.0.0.1",
     )
 
-  let response = middleware(request, fn(_, request_logger) {
-    let record =
-      otel.info(request_logger, "callback reached", [])
-      |> log.record
-      |> log.record_to_string
-    assert string.contains(record, "\"request.id\":\"request-callback\"")
-    assert string.contains(record, "\"user.id\":\"user-callback\"")
-    assert string.contains(record, "\"tenant.id\":\"tenant-callback\"")
-    assert string.contains(record, "otel.allowed")
-    assert !string.contains(record, "authorization")
-    ores_middleware.Response(202, dict.new(), "accepted")
-  })
+  let response =
+    middleware(request, fn(_, request_logger) {
+      let record =
+        otel.info(request_logger, "callback reached", [])
+        |> log.record
+        |> log.record_to_string
+      assert string.contains(record, "\"request.id\":\"request-callback\"")
+      assert string.contains(record, "\"user.id\":\"user-callback\"")
+      assert string.contains(record, "\"tenant.id\":\"tenant-callback\"")
+      assert string.contains(record, "otel.allowed")
+      assert !string.contains(record, "authorization")
+      ores_middleware.Response(202, dict.new(), "accepted")
+    })
 
   assert response.status == 202
   assert log_context.current_context() == None
