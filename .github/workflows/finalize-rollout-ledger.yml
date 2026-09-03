@@ -1,0 +1,151 @@
+name: finalize-rollout-ledger
+
+on:
+  push:
+    branches:
+      - docs/middleware-rollout-25-servers-20260903
+    paths:
+      - .github/workflows/finalize-rollout-ledger.yml
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+  statuses: read
+
+concurrency:
+  group: finalize-rollout-ledger-20260903
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_BRANCH: docs/middleware-rollout-25-servers-20260903
+    steps:
+      - name: Check out ledger branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: docs/middleware-rollout-25-servers-20260903
+          fetch-depth: 0
+
+      - name: Create the docs-only exact merge candidate
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ores-rollout-ledger[bot]"
+          git config user.email "ores-rollout-ledger[bot]@users.noreply.github.com"
+          git rm .github/workflows/finalize-rollout-ledger.yml
+          git commit -m "chore: remove single-use rollout finalizer"
+          head_sha="$(git rev-parse HEAD)"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:"$HEAD_BRANCH"
+          remote_sha="$(git ls-remote origin "refs/heads/$HEAD_BRANCH" | cut -f1)"
+          test "$remote_sha" = "$head_sha"
+
+      - name: Locate the unique open ledger PR
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+          number="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --head "$HEAD_BRANCH" \
+            --state open \
+            --json number \
+            --jq 'if length == 1 then .[0].number else error("expected exactly one open ledger PR") end')"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the normal exact-head conformance rollup
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="${{ steps.pr.outputs.number }}"
+          expected="${{ steps.candidate.outputs.head_sha }}"
+          admitted=false
+
+          for _ in $(seq 1 120); do
+            gh pr view "$pr" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup \
+              > /tmp/pr.json
+
+            jq -e '.state == "OPEN"' /tmp/pr.json >/dev/null
+            jq -e '.isDraft == false' /tmp/pr.json >/dev/null
+            test "$(jq -r .headRefOid /tmp/pr.json)" = "$expected"
+            jq -e '(.reviewDecision // "") != "CHANGES_REQUESTED"' /tmp/pr.json >/dev/null
+
+            count="$(jq '.statusCheckRollup | length' /tmp/pr.json)"
+            if [ "$count" -eq 0 ]; then
+              sleep 15
+              continue
+            fi
+
+            if ! jq -e '
+              all(.statusCheckRollup[];
+                if has("status") then
+                  ((.status // "") != "COMPLETED")
+                  or ((.conclusion // "") | IN("SUCCESS", "NEUTRAL", "SKIPPED"))
+                else
+                  ((.state // "") | IN("PENDING", "EXPECTED", "SUCCESS"))
+                end
+              )
+            ' /tmp/pr.json >/dev/null; then
+              jq '{headRefOid,mergeable,mergeStateStatus,reviewDecision,checks:[.statusCheckRollup[] | {name:(.name // .context // "unknown"),status:(.status // null),conclusion:(.conclusion // .state // null)}]}' /tmp/pr.json
+              exit 1
+            fi
+
+            pending="$(jq '[.statusCheckRollup[] | if has("status") then ((.status // "") != "COMPLETED") else ((.state // "") != "SUCCESS") end] | any' /tmp/pr.json)"
+            if [ "$pending" = "true" ]; then
+              sleep 15
+              continue
+            fi
+
+            jq -e '
+              all(.statusCheckRollup[];
+                if has("status") then
+                  (.status == "COMPLETED" and ((.conclusion // "") | IN("SUCCESS", "NEUTRAL", "SKIPPED")))
+                else
+                  ((.state // "") == "SUCCESS")
+                end
+              )
+            ' /tmp/pr.json >/dev/null
+            jq -e '.mergeable == "MERGEABLE"' /tmp/pr.json >/dev/null
+            jq -e '.mergeStateStatus == "CLEAN"' /tmp/pr.json >/dev/null
+            admitted=true
+            break
+          done
+
+          test "$admitted" = true
+          echo "head_sha=$expected" >> "$GITHUB_OUTPUT"
+
+      - name: Re-read the head and squash-merge without bypass
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="${{ steps.pr.outputs.number }}"
+          expected="${{ steps.gate.outputs.head_sha }}"
+          current="$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)"
+          test "$current" = "$expected"
+          gh pr merge "$pr" \
+            --repo "$GITHUB_REPOSITORY" \
+            --squash \
+            --delete-branch \
+            --match-head-commit "$expected"
+
+      - name: Record blocking evidence
+        if: failure()
+        shell: bash
+        run: |
+          pr="${{ steps.pr.outputs.number }}"
+          if [ -n "$pr" ]; then
+            summary="$(jq -c '{state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,checks:[.statusCheckRollup[]? | {name:(.name // .context // "unknown"),status:(.status // null),conclusion:(.conclusion // .state // null)}]}' /tmp/pr.json 2>/dev/null || printf '{}')"
+            gh pr comment "$pr" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "The rollout-ledger finalizer left this PR unmerged. Exact-head fail-closed state: \`$summary\`."
+          fi
