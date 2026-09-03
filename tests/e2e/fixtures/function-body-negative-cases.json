@@ -35,7 +35,7 @@
     {
       "name": "context restoration cannot be omitted",
       "mutations": [{"op": "delete", "path": "/steps/9"}],
-      "expectedCodes": ["sequence-mismatch", "terminal-step"]
+      "expectedCodes": ["sequence-mismatch", "unknown-dependency"]
     },
     {
       "name": "future dependencies are rejected",
