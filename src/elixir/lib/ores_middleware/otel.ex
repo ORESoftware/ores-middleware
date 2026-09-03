@@ -18,22 +18,27 @@ defmodule OresMiddleware.OTel do
 
   def to_log_context(context) when is_map(context) do
     fields =
-      %{
-        "request.id" => context.request_id,
-        "trace.id" => context.trace_id,
-        "request.started_at_unix_ms" => context.started_at_unix_ms,
-        "request.deadline_unix_ms" => context.deadline_unix_ms
-      }
-      |> put_optional("user.id", context[:user_id])
-      |> put_optional("tenant.id", context[:tenant_id])
-      |> put_optional("request.locale", context[:locale])
-      |> put_otel_baggage(context[:baggage] || %{})
+      %{}
+      |> put_optional("request.id", Map.get(context, :request_id))
+      |> put_optional("trace.id", Map.get(context, :trace_id))
+      |> put_optional(
+        "request.started_at_unix_ms",
+        Map.get(context, :started_at_unix_ms)
+      )
+      |> put_optional(
+        "request.deadline_unix_ms",
+        Map.get(context, :deadline_unix_ms)
+      )
+      |> put_optional("user.id", Map.get(context, :user_id))
+      |> put_optional("tenant.id", Map.get(context, :tenant_id))
+      |> put_optional("request.locale", Map.get(context, :locale))
+      |> put_otel_baggage(Map.get(context, :baggage, %{}))
 
     %{
-      trace_id: context.trace_id,
-      span_id: context[:span_id],
-      trace_flags: context[:trace_flags] || 0,
-      trace_state: context[:trace_state],
+      trace_id: Map.get(context, :trace_id),
+      span_id: Map.get(context, :span_id),
+      trace_flags: Map.get(context, :trace_flags, 0),
+      trace_state: Map.get(context, :trace_state),
       fields: fields,
       tags: ["ores-middleware", "request"]
     }
@@ -55,12 +60,16 @@ defmodule OresMiddleware.OTel do
 
   def request_logger(logger, context) when is_map(logger) and is_map(context) do
     log_context = to_log_context(context)
-    name = if logger.name, do: "#{logger.name}:request", else: "request"
+    logger_name = Map.get(logger, :name)
+    name = if logger_name, do: "#{logger_name}:request", else: "request"
 
     pinned =
       logger
       |> Map.put(:name, name)
-      |> Map.put(:fields, Map.merge(logger.fields, log_context.fields))
+      |> Map.put(
+        :fields,
+        Map.merge(Map.get(logger, :fields, %{}), log_context.fields)
+      )
       |> Map.put(:ores_request_context, log_context)
 
     Map.merge(pinned, %{
