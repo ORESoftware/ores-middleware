@@ -69,6 +69,8 @@ jobs:
         shell: bash
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          CARGO_TERM_COLOR: never
+          RUSTFLAGS: -Dwarnings
         run: |
           set -euo pipefail
           python3 scripts/orm_catalog_gate.py
@@ -79,6 +81,8 @@ jobs:
         with:
           name: persistence-convergence-${{ github.run_id }}
           path: |
+            scripts/orm_catalog_gate.py
+            scripts/test_orm_catalog_gate.py
             target/orm-catalog-gate/receipt.json
             target/orm-catalog-gate/catalog/*.json
             target/orm-catalog-gate/sql/*.sql
