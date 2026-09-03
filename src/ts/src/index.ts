@@ -269,7 +269,7 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const response = authenticatedOutcome.ok
       ? authenticatedOutcome.value
       : operationFailureResponse(authenticatedOutcome.failure);
-    return attachHeaders(config, context, response);
+    return response;
       },
       {
         context: operationContextFromRequestContext(context),
