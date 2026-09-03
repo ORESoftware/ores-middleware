@@ -214,8 +214,8 @@
       },
       "then": {
         "properties": {
-          "maximumOvershoot": {"minimum": 1},
-          "localDenyCacheEntries": {"minimum": 1}
+          "maximumOvershoot": {"type": "integer", "minimum": 1},
+          "localDenyCacheEntries": {"type": "integer", "minimum": 1}
         }
       }
     },
