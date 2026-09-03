@@ -1,0 +1,10 @@
+[package]
+name = "middleware-adversarial-runner"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Deterministic stress runner for the polyglot ores-middleware test suites"
+
+[lints.rust]
+unsafe_code = "forbid"
