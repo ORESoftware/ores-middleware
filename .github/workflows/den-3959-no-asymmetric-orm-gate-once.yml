@@ -62,7 +62,8 @@ jobs:
             scripts/orm_catalog_gate.py \
             scripts/orm_matrix_gate.py \
             scripts/check_zpkg.py \
-            scripts/test_orm_catalog_gate.py
+            scripts/test_orm_catalog_gate.py \
+            scripts/test_orm_matrix_gate.py
       - name: Run offline anti-regression tests
         shell: bash
         run: |
@@ -105,13 +106,15 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- \
             scripts/orm_catalog_gate.py \
+            scripts/orm_matrix_gate.py \
             scripts/test_orm_catalog_gate.py \
+            scripts/test_orm_matrix_gate.py \
             scripts/check_zpkg.py \
             docs/architecture.md
           git rm -- \
             .github/workflows/den-3959-no-asymmetric-orm-gate-once.yml \
             scripts/_apply_orm_gate_hardening.py
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(scripts/orm_catalog_gate.py|scripts/test_orm_catalog_gate.py|scripts/check_zpkg.py|docs/architecture.md|\.github/workflows/den-3959-no-asymmetric-orm-gate-once\.yml|scripts/_apply_orm_gate_hardening.py)$' || true)"
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(scripts/orm_catalog_gate.py|scripts/orm_matrix_gate.py|scripts/test_orm_catalog_gate.py|scripts/test_orm_matrix_gate.py|scripts/check_zpkg.py|docs/architecture.md|\.github/workflows/den-3959-no-asymmetric-orm-gate-once\.yml|scripts/_apply_orm_gate_hardening.py)$' || true)"
           test -z "$unexpected"
           git commit -m 'fix(DEN-3959): require Diesel and SeaORM for both authorities'
           git push origin HEAD:refs/heads/fix/den-3959-no-asymmetric-orm-gate
