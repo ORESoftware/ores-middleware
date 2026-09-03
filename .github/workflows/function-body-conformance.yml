@@ -1,0 +1,155 @@
+name: function-body-conformance
+
+on:
+  pull_request:
+    paths:
+      - "contracts/function-bodies/**"
+      - "scripts/lib/function-body-contracts.mjs"
+      - "scripts/validate-function-bodies.mjs"
+      - "tests/e2e/**"
+      - "src/rust/src/operation.rs"
+      - "src/ts/src/operation.ts"
+      - "src/golang/operation.go"
+      - "src/gleam/src/ores_middleware/operation.gleam"
+      - "src/gleam/src/ores_middleware_context_ffi.erl"
+      - "src/elixir/lib/ores_middleware/operation.ex"
+      - "src/elixir/lib/ores_middleware/context.ex"
+      - "src/elixir/test/operation_test.exs"
+      - "src/erlang/src/ores_middleware_operation.erl"
+      - "src/erlang/src/ores_middleware_context.erl"
+      - "src/erlang/test/ores_middleware_operation_tests.erl"
+      - "package.json"
+      - ".github/workflows/function-body-conformance.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "contracts/function-bodies/**"
+      - "scripts/lib/function-body-contracts.mjs"
+      - "scripts/validate-function-bodies.mjs"
+      - "tests/e2e/**"
+      - "src/rust/src/operation.rs"
+      - "src/ts/src/operation.ts"
+      - "src/golang/operation.go"
+      - "src/gleam/src/ores_middleware/operation.gleam"
+      - "src/gleam/src/ores_middleware_context_ffi.erl"
+      - "src/elixir/lib/ores_middleware/operation.ex"
+      - "src/elixir/lib/ores_middleware/context.ex"
+      - "src/elixir/test/operation_test.exs"
+      - "src/erlang/src/ores_middleware_operation.erl"
+      - "src/erlang/src/ores_middleware_context.erl"
+      - "src/erlang/test/ores_middleware_operation_tests.erl"
+      - "package.json"
+      - ".github/workflows/function-body-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: function-body-conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-and-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Install locked contract toolchain
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Parse-check verifier and E2E sources
+        run: |
+          set -euo pipefail
+          node --check scripts/lib/function-body-contracts.mjs
+          node --check scripts/validate-function-bodies.mjs
+          node --check tests/e2e/function-body-contract.e2e.mjs
+      - name: Compile TypeSpec and execute JSON Schema plus E2E gates
+        run: npm run function-bodies:check
+      - name: Retain function-body receipt even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: function-body-contract-${{ github.run_id }}
+          path: target/function-body-contract/receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  language-static-analysis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+      - name: Install Go 1.25.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25.0"
+          cache: false
+      - name: Install BEAM toolchains
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+          gleam-version: "1.18.1"
+          rebar3-version: "3.24.0"
+      - name: Compile strict TypeScript declarations
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+          npm run build --prefix src/ts
+      - name: Format, lint, and test Rust
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path src/rust/Cargo.toml -- --check
+          cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+      - name: Vet and race-test Go
+        working-directory: src/golang
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test -race -shuffle=on -count=2 ./...
+      - name: Format and test Gleam
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          gleam format --check src test
+          gleam test
+      - name: Format, compile with warnings as errors, and test Elixir
+        working-directory: src/elixir
+        run: |
+          set -euo pipefail
+          mix deps.get
+          mix format --check-formatted
+          mix compile --warnings-as-errors
+          mix test
+      - name: Compile warnings-as-errors and EUnit-test Erlang
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          rebar3 as test compile
+          rebar3 eunit
