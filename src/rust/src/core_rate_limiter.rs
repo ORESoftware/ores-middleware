@@ -90,7 +90,7 @@ impl CoreInMemoryRateLimiter {
 
         let mut store = self.state.lock().await;
         store.entries.retain(|_, entry| {
-            now_ms >= entry.last_seen_ms && now_ms - entry.last_seen_ms < ttl_ms
+            now_ms < entry.last_seen_ms || now_ms - entry.last_seen_ms < ttl_ms
         });
 
         let previous = store
@@ -417,6 +417,15 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, "rate_limit_core_state_algorithm_mismatch");
+    }
+
+    #[tokio::test]
+    async fn backwards_clock_is_not_hidden_by_ttl_purge() {
+        let limiter = CoreInMemoryRateLimiter::default();
+        let request = request(0x34, "clock-policy", RateLimitAlgorithm::FixedWindow);
+        limiter.evaluate_at(&request, 1_000).await.unwrap();
+        let error = limiter.evaluate_at(&request, 999).await.unwrap_err();
+        assert_eq!(error.code, "rate_limit_core_clock_moved_backwards");
     }
 
     #[tokio::test]
