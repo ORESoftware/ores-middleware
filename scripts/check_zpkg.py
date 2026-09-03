@@ -24,6 +24,7 @@ EXPECTED_OUTPUTS = {
     "target/gleam",
     "target/elixir",
     "target/erlang",
+    "target/package",
 }
 EXPECTED_FLOWS = {
     "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
@@ -34,6 +35,23 @@ POLYGLOT_COMMAND = (
     "--bin persistence_codegen -- --output-root target/schema-convergence "
     "--report target/schema-convergence/receipt.json"
 )
+EXPECTED_ZED_TEST_SCRIPT = (
+    "python3 scripts/audit.py --receipt target/audit/receipt.json && "
+    "npm run contracts:polyglot-generate && npm run contracts:generated-check"
+)
+EXPECTED_INSTALLED_SMOKE_TEST = (
+    'python3 "$ZED_PKG_TEST_TARGET/target/package/scripts/installed_package_smoke.py" '
+    '--root "$ZED_PKG_TEST_TARGET"'
+)
+EXPECTED_WORKSPACE_SCRIPTS = {
+    "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
+    "contracts:cross-translate": "python3 scripts/cross_translate.py",
+    "contracts:polyglot-generate": POLYGLOT_COMMAND,
+    "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
+    "persistence:check": "python3 scripts/orm_matrix_gate.py",
+    "zpkg:check": "python3 scripts/check_zpkg.py",
+}
 
 
 def validate(root: Path) -> list[str]:
@@ -44,6 +62,16 @@ def validate(root: Path) -> list[str]:
         errors.append("package identity must be oresoftware/ores-middleware")
     if "language" in package:
         errors.append("package.language must remain unset for a polyglot repository")
+
+    # Zed 0.2.3 uses a closed ScriptsSection with exactly one supported hook:
+    # `test`. Richer repository commands remain in package.json and Justfile.
+    scripts = manifest.get("scripts", {})
+    if set(scripts) != {"test"}:
+        errors.append(
+            "Zed 0.2.3 [scripts] must contain exactly the supported test hook"
+        )
+    if scripts.get("test") != EXPECTED_ZED_TEST_SCRIPT:
+        errors.append(f"scripts.test must be {EXPECTED_ZED_TEST_SCRIPT!r}")
 
     targets = manifest.get("targets", {})
     if set(targets) != set(EXPECTED_TARGETS):
@@ -74,26 +102,21 @@ def validate(root: Path) -> list[str]:
     if outputs != EXPECTED_OUTPUTS:
         errors.append(f"build.outputs mismatch: expected {sorted(EXPECTED_OUTPUTS)}, got {sorted(outputs)}")
 
-    scripts = manifest.get("scripts", {})
-    for required in (
-        "audit",
-        "build",
-        "contracts",
-        "cross-translation",
-        "orm-catalog",
-        "polyglot-generation",
-        "projection-parity",
-        "test",
-        "zpkg-check",
+    workspace = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    workspace_scripts = workspace.get("scripts", {})
+    for name, expected in EXPECTED_WORKSPACE_SCRIPTS.items():
+        if workspace_scripts.get(name) != expected:
+            errors.append(f"package.json scripts.{name} must be {expected!r}")
+
+    compare_command = workspace_scripts.get("contracts:compare", "")
+    for required_fragment in (
+        "contracts:polyglot-generate",
+        "contracts:generated-check",
+        "contracts:cross-translate",
     ):
-        if required not in scripts:
-            errors.append(f"missing scripts.{required}")
-    if scripts.get("orm-catalog") != "python3 scripts/orm_matrix_gate.py":
-        errors.append("scripts.orm-catalog must execute the four-way database-backed gate")
-    for key in ("polyglot-generation", "projection-parity"):
-        if scripts.get(key) != POLYGLOT_COMMAND:
+        if required_fragment not in compare_command:
             errors.append(
-                f"scripts.{key} must execute the Rust independent polyglot generator"
+                f"package.json scripts.contracts:compare must execute {required_fragment}"
             )
 
     required_paths = (
@@ -103,20 +126,35 @@ def validate(root: Path) -> list[str]:
         "scripts/test_orm_matrix_gate.py",
         "scripts/orm_catalog_gate.py",
         "scripts/subprocess_capture.py",
+        "scripts/build_targets.py",
+        "scripts/cross_translate.py",
+        "scripts/installed_package_smoke.py",
         ".github/workflows/persistence-convergence.yml",
+        ".github/workflows/zed-release-acceptance.yml",
     )
     for required_path in required_paths:
         if not (root / required_path).is_file():
-            errors.append(f"missing required convergence gate file: {required_path}")
+            errors.append(f"missing required convergence/package gate file: {required_path}")
 
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
-    for required_fragment in (
-        "persistence_codegen",
-        "validate-generated-polyglot.mjs",
-        "scripts/cross_translate.py",
-    ):
-        if required_fragment not in smoke_test:
-            errors.append(f"publish.smoke_test must execute {required_fragment}")
+    if smoke_test != EXPECTED_INSTALLED_SMOKE_TEST:
+        errors.append(
+            "publish.smoke_test must execute the installed build-output closure, "
+            f"expected {EXPECTED_INSTALLED_SMOKE_TEST!r}, got {smoke_test!r}"
+        )
+    installed_smoke_path = root / "scripts/installed_package_smoke.py"
+    if installed_smoke_path.is_file():
+        installed_smoke = installed_smoke_path.read_text(encoding="utf-8")
+        for required_text in (
+            "cross_translate.py",
+            'target_root / "package"',
+            "Rust/TypeScript/Go descriptor parity",
+            "Gleam/Elixir/Erlang runtime probes",
+        ):
+            if required_text not in installed_smoke:
+                errors.append(
+                    f"installed package smoke test must retain {required_text!r}"
+                )
 
     topology = json.loads((root / "contracts/authority-topology.json").read_text(encoding="utf-8"))
     authorities = {
@@ -157,9 +195,9 @@ def main() -> int:
         return 1
     print(
         ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
-        "golang + gleam + elixir + erlang + independent TypeSpec/JSON-Schema "
-        "SQL/type/runtime generation + bidirectional shadow gate + four-way "
-        "Diesel/SeaORM database-backed convergence"
+        "golang + gleam + elixir + erlang + installed build-output smoke + "
+        "independent TypeSpec/JSON-Schema generation + bidirectional witnesses + "
+        "four-way Diesel/SeaORM database-backed convergence"
     )
     return 0
 
