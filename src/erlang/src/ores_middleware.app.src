@@ -1,0 +1,11 @@
+{application, ores_middleware, [
+    {description, "Cross-framework ORES middleware contract for Erlang/OTP"},
+    {vsn, "0.1.0"},
+    {registered, [ores_middleware_rate_limiter, ores_middleware_idempotency]},
+    {mod, {ores_middleware_app, []}},
+    {applications, [kernel, stdlib, crypto, inets, ssl]},
+    {env, []},
+    {modules, []},
+    {licenses, ["MIT"]},
+    {links, [{"GitHub", "https://github.com/ORESoftware/ores-middleware"}]}
+]}.

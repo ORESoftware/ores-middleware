@@ -1,0 +1,15 @@
+{
+  "language": "erlang",
+  "runtime": "erlang-otp",
+  "packageName": "ores_middleware",
+  "frameworkAdapters": ["cowboy", "ranch", "elli", "otp"],
+  "operationSymbols": {
+    "descriptor": "ores_middleware:descriptor/0",
+    "defaultConfig": "ores_middleware:default_config/1",
+    "validateConfig": "ores_middleware:validate_config/1",
+    "createMiddleware": "ores_middleware:create_middleware/2",
+    "runWithContext": "ores_middleware:run_with_context/2",
+    "currentContext": "ores_middleware:current_context/0",
+    "capabilities": "ores_middleware:capabilities/0"
+  }
+}
