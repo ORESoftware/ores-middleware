@@ -3,7 +3,7 @@
     {vsn, "0.1.0"},
     {registered, [ores_middleware_rate_limiter, ores_middleware_idempotency]},
     {mod, {ores_middleware_app, []}},
-    {applications, [kernel, stdlib, crypto, inets, ssl]},
+    {applications, [kernel, stdlib, crypto, inets, ssl, oresoftware_next_loggers_erlang]},
     {env, []},
     {modules, []},
     {licenses, ["MIT"]},
