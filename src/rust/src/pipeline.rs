@@ -278,12 +278,19 @@ impl MiddlewareStack {
 
         match self.rate_limiter.evaluate(&evaluation).await {
             Ok(decision) => decision,
-            Err(error) => match policy.failure_mode {
-                RateLimitFailureMode::FailOpen => decision_for_failure(policy, true, error.code),
-                RateLimitFailureMode::FailClosed => {
+            Err(error) => match (policy.layer, policy.failure_mode) {
+                // Authorization is a security boundary. A primary outage must
+                // not be weakened by either fail-open or a split local view.
+                (crate::rate_limit::RateLimitLayer::Authorization, _) => {
                     decision_for_failure(policy, false, error.code)
                 }
-                RateLimitFailureMode::LocalOnly => {
+                (_, RateLimitFailureMode::FailOpen) => {
+                    decision_for_failure(policy, true, error.code)
+                }
+                (_, RateLimitFailureMode::FailClosed) => {
+                    decision_for_failure(policy, false, error.code)
+                }
+                (_, RateLimitFailureMode::LocalOnly) => {
                     match self.local_rate_limiter.evaluate(&evaluation).await {
                         Ok(mut decision) => {
                             if decision.is_allowed() {
@@ -701,5 +708,32 @@ mod tests {
         assert_eq!(error.status, 429);
         assert_eq!(error.code, "rate_limited");
         assert!(error.headers.contains_key("retry-after"));
+    }
+
+    #[tokio::test]
+    async fn authorization_layer_primary_failure_is_fail_closed() {
+        let mut config = default_config("test-service");
+        config.settings.tls.mode = "in-process".into();
+        config.settings.tls.trusted_proxy_cidrs.clear();
+        config.settings.rate_limit.layer = RateLimitLayer::Authorization;
+        config.settings.rate_limit.failure_mode = RateLimitFailureMode::LocalOnly;
+        let stack = MiddlewareStack::new(config)
+            .unwrap()
+            .with_rate_limiter(Arc::new(FailingLimiter));
+
+        let error = match stack
+            .begin(request("203.0.113.9", None, true))
+            .await
+        {
+            Ok(_) => panic!("authorization-layer outage must fail closed"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, 503);
+        assert_eq!(error.code, "rate_limit_unavailable");
+        assert_eq!(
+            error.headers.get("x-ores-rate-limit-decision").map(String::as_str),
+            Some("degraded-denied")
+        );
     }
 }
