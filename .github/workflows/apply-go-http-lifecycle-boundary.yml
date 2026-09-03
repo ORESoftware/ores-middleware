@@ -1,0 +1,56 @@
+name: apply-go-http-lifecycle-boundary
+
+on:
+  push:
+    branches:
+      - agent/go-http-lifecycle-boundary-20260903
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-go-http-lifecycle-boundary-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/go-http-lifecycle-boundary-20260903
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25.0"
+          cache: false
+
+      - name: Apply exact source transformations
+        run: python3 .agent-patches/apply_go_lifecycle.py
+
+      - name: Format, vet, test, and race-test Go package
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w src/golang/middleware.go src/golang/integrations.go src/golang/otel.go src/golang/middleware_test.go
+          cd src/golang
+          go mod download
+          go vet ./...
+          go test ./...
+          go test -race ./...
+
+      - name: Commit verified source-only result
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .agent-patches/apply_go_lifecycle.py
+          rmdir .agent-patches 2>/dev/null || true
+          rm -f .github/workflows/apply-go-http-lifecycle-boundary.yml
+          git diff --check
+          git config user.name "ores-gh-bot"
+          git config user.email "ores-gh-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(go): contain the full HTTP middleware lifecycle"
+          git push origin HEAD:agent/go-http-lifecycle-boundary-20260903
