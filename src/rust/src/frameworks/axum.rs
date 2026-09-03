@@ -8,7 +8,7 @@ use std::{
 
 use axum::{
     body::Body,
-    extract::{ConnectInfo, Request, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Request, State},
     http::{HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -16,7 +16,8 @@ use axum::{
 };
 use futures_util::FutureExt;
 use serde_json::json;
-use tower_http::{compression::CompressionLayer, limit::RequestBodyLimitLayer};
+#[cfg(feature = "compression")]
+use tower_http::compression::CompressionLayer;
 
 use crate::{
     context::run_with_context,
@@ -33,16 +34,20 @@ pub fn install_from_env(
 }
 
 pub fn install(router: Router, stack: Arc<MiddlewareStack>) -> Router {
-    let compression = stack.config().settings.compression.enabled;
     let max_body_bytes = stack.config().settings.max_body_bytes;
+    #[cfg(feature = "compression")]
+    let compression_enabled = stack.config().settings.compression.enabled;
+
     let router = router
         .layer(middleware::from_fn_with_state(stack, dispatch))
-        .layer(RequestBodyLimitLayer::new(max_body_bytes));
-    if compression {
-        router.layer(CompressionLayer::new())
-    } else {
-        router
+        .layer(DefaultBodyLimit::max(max_body_bytes));
+
+    #[cfg(feature = "compression")]
+    if compression_enabled {
+        return router.layer(CompressionLayer::new());
     }
+
+    router
 }
 
 async fn dispatch(
