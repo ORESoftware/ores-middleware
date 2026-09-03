@@ -48,16 +48,17 @@ type StoredResponse struct {
 }
 
 type Dependencies struct {
-	AuthVerifier     AuthVerifier
-	TestIdentity     TestIdentityResolver
-	IPAuthorizer     IPAuthorizer
-	SyncObserver     SyncObserver
-	Telemetry        TelemetrySink
-	SchemaCapture    SchemaCapture
-	RateLimiter      RateLimiter
-	IdempotencyStore IdempotencyStore
-	Now              func() time.Time
-	RandomFloat64    func() float64
+	AuthVerifier             AuthVerifier
+	TestIdentity             TestIdentityResolver
+	IPAuthorizer             IPAuthorizer
+	SyncObserver             SyncObserver
+	Telemetry                TelemetrySink
+	SchemaCapture            SchemaCapture
+	OperationFailureReporter OperationFailureReporter
+	RateLimiter              RateLimiter
+	IdempotencyStore         IdempotencyStore
+	Now                      func() time.Time
+	RandomFloat64            func() float64
 }
 
 type bucket struct {

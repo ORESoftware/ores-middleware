@@ -96,6 +96,15 @@ func ToOresLogContext(value RequestContext) nextloggers.LogContext {
 	}
 }
 
+// WithOresLogContext installs the canonical allow-listed ores-otel frame
+// before policy hooks run and again after authentication enriches the actor.
+func WithOresLogContext(parent context.Context, value RequestContext) context.Context {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return nextloggers.WithLogContext(parent, ToOresLogContext(value))
+}
+
 func cloneOresFields(source map[string]any) map[string]any {
 	target := make(map[string]any, len(source))
 	for key, value := range source {

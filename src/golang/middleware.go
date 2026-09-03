@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,6 +53,43 @@ func (s *Stack) Config() Config { return s.config }
 func (s *Stack) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		started := s.deps.Now()
+		requestID := validToken(request.Header.Get(s.config.Settings.RequestIDHeader))
+		if requestID == "" {
+			requestID = randomHex(16)
+		}
+		traceID := parseTraceID(request.Header.Get(s.config.Settings.TraceHeader))
+		if traceID == "" {
+			traceID = randomHex(16)
+		}
+		value := RequestContext{RequestID: requestID, TraceID: traceID, Locale: request.Header.Get("Accept-Language"), StartedAtUnixMS: started.UnixMilli(), DeadlineUnixMS: started.Add(time.Duration(s.config.Settings.TimeoutMS) * time.Millisecond).UnixMilli(), Baggage: map[string]string{}}
+		ctx, cancel := context.WithTimeout(request.Context(), time.Duration(s.config.Settings.TimeoutMS)*time.Millisecond)
+		defer cancel()
+		ctx = WithRequestContext(ctx, value)
+		ctx = WithOresLogContext(ctx, value)
+		request = request.WithContext(ctx)
+
+		responseCommitted := false
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				failure := newOperationFailure(
+					OperationFailurePanic,
+					OperationDescriptor{Transport: OperationTransportHTTP, Scope: OperationScopeRequest, Name: "middleware.http"},
+					value,
+					safeErrorType(recovered, "panic"),
+				)
+				reportOperationFailure(ctx, s.deps.OperationFailureReporter, failure)
+				if responseCommitted {
+					return
+				}
+				capture := problemResponse(http.StatusInternalServerError, "internal_error", "request processing failed")
+				status, headers, body := capture.snapshot()
+				applySecurityHeaders(s.config, headers)
+				headers.Set(s.config.Settings.RequestIDHeader, value.RequestID)
+				responseCommitted = true
+				copyResponse(writer, status, headers, body)
+			}
+		}()
+
 		if request.ContentLength > s.config.Settings.MaxBodyBytes {
 			writeProblem(writer, 413, "payload_too_large", "request body exceeds configured limit")
 			return
@@ -72,20 +110,6 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 			writeProblem(writer, 426, "https_required", "HTTPS is required")
 			return
 		}
-
-		requestID := validToken(request.Header.Get(s.config.Settings.RequestIDHeader))
-		if requestID == "" {
-			requestID = randomHex(16)
-		}
-		traceID := parseTraceID(request.Header.Get(s.config.Settings.TraceHeader))
-		if traceID == "" {
-			traceID = randomHex(16)
-		}
-		value := RequestContext{RequestID: requestID, TraceID: traceID, Locale: request.Header.Get("Accept-Language"), StartedAtUnixMS: started.UnixMilli(), DeadlineUnixMS: started.Add(time.Duration(s.config.Settings.TimeoutMS) * time.Millisecond).UnixMilli(), Baggage: map[string]string{}}
-		ctx, cancel := context.WithTimeout(request.Context(), time.Duration(s.config.Settings.TimeoutMS)*time.Millisecond)
-		defer cancel()
-		ctx = WithRequestContext(ctx, value)
-		request = request.WithContext(ctx)
 
 		if s.deps.IPAuthorizer != nil {
 			allowed, err := s.deps.IPAuthorizer.Allow(ctx, request, value)
@@ -117,6 +141,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 			}
 		}
 		ctx = WithRequestContext(ctx, value)
+		ctx = WithOresLogContext(ctx, value)
 		request = request.WithContext(ctx)
 		if s.config.Integrations.SharedAuth.Mode != IntegrationDisabled && value.UserID == "" {
 			writeProblem(writer, 401, "authentication_required", "shared-auth did not establish a user")
@@ -186,10 +211,36 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		select {
 		case panicValue = <-done:
 		case <-ctx.Done():
-			capture = problemResponse(504, "deadline_exceeded", "request deadline exceeded")
+			handlerCapture.seal()
+			kind := OperationFailureCancelled
+			status := 499
+			code := "request_cancelled"
+			detail := "request was cancelled"
+			errorType := "Canceled"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				kind = OperationFailureDeadlineExceeded
+				status = http.StatusGatewayTimeout
+				code = "deadline_exceeded"
+				detail = "request deadline exceeded"
+				errorType = "DeadlineExceeded"
+			}
+			failure := newOperationFailure(
+				kind,
+				OperationDescriptor{Transport: OperationTransportHTTP, Scope: OperationScopeRequest, Name: "middleware.handler"},
+				value,
+				errorType,
+			)
+			reportOperationFailure(ctx, s.deps.OperationFailureReporter, failure)
+			capture = problemResponse(status, code, detail)
 		}
 		if panicValue != nil {
-			slog.ErrorContext(ctx, "request handler panic", "request_id", value.RequestID, "trace_id", value.TraceID)
+			failure := newOperationFailure(
+				OperationFailurePanic,
+				OperationDescriptor{Transport: OperationTransportHTTP, Scope: OperationScopeRequest, Name: "middleware.handler"},
+				value,
+				safeErrorType(panicValue, "panic"),
+			)
+			reportOperationFailure(ctx, s.deps.OperationFailureReporter, failure)
 			capture = problemResponse(500, "internal_error", "request handler failed")
 		}
 		status, headers, body := capture.snapshot()
@@ -237,6 +288,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 			s.deps.Telemetry.Finished(ctx, value, request, status, duration)
 		}
 		slog.InfoContext(ctx, "request finished", "request_id", value.RequestID, "trace_id", value.TraceID, "status", status, "duration_ms", duration.Milliseconds())
+		responseCommitted = true
 		copyResponse(writer, status, headers, body)
 	})
 }
@@ -257,9 +309,11 @@ func DecodeJSON[T any](reader io.Reader, target *T) error {
 func SecureTLSConfig() *tls.Config { return &tls.Config{MinVersion: tls.VersionTLS13} }
 
 type bufferedResponse struct {
+	mu     sync.Mutex
 	header http.Header
 	status int
 	body   bytes.Buffer
+	sealed bool
 }
 
 func newBufferedResponse() *bufferedResponse {
@@ -267,13 +321,32 @@ func newBufferedResponse() *bufferedResponse {
 }
 func (r *bufferedResponse) Header() http.Header { return r.header }
 func (r *bufferedResponse) WriteHeader(status int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sealed {
+		return
+	}
 	if r.status == http.StatusOK {
 		r.status = status
 	}
 }
-func (r *bufferedResponse) Write(body []byte) (int, error) { return r.body.Write(body) }
+func (r *bufferedResponse) Write(body []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sealed {
+		return 0, http.ErrHandlerTimeout
+	}
+	return r.body.Write(body)
+}
 func (r *bufferedResponse) snapshot() (int, http.Header, []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.status, r.header.Clone(), append([]byte(nil), r.body.Bytes()...)
+}
+func (r *bufferedResponse) seal() {
+	r.mu.Lock()
+	r.sealed = true
+	r.mu.Unlock()
 }
 func problemResponse(status int, code, detail string) *bufferedResponse {
 	result := newBufferedResponse()
