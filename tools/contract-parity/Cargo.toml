@@ -3,6 +3,7 @@ name = "ores-contract-parity"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
+default-run = "ores-contract-parity"
 description = "Fail-closed TypeSpec and JSON Schema peer-authority parity checker"
 license = "MIT"
 publish = false

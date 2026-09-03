@@ -1,0 +1,9 @@
+name = "ores_generated_runtime_witness"
+version = "0.1.0"
+target = "erlang"
+description = "Generated ORES runtime conformance witness"
+licences = ["MIT"]
+
+[dependencies]
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_stdlib = ">= 0.60.0 and < 2.0.0"

@@ -15,6 +15,7 @@ concurrency:
 jobs:
   contracts:
     runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,25 +33,162 @@ jobs:
       - run: npm run contracts:check
       - run: node scripts/check-source-layout.mjs
       - run: cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
-      - run: cargo test --manifest-path tools/contract-parity/Cargo.toml
+      - run: cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
       - run: cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --
       - run: python3 -m unittest scripts/test_schema_convergence.py -v
+      - run: python3 -m unittest scripts/test_orm_matrix_gate.py -v
       - run: python3 -m unittest scripts/test_cross_translation.py -v
       - run: python3 scripts/cross_translate.py
       - run: python3 scripts/check_zpkg.py
       - run: npx tsp compile contracts/docs-serving.tsp --no-emit
       - run: node scripts/validate-docs-serving.mjs
       - run: python3 scripts/test-rollout-rust-server.py
-      - name: Upload cross-translation receipts and witnesses
+      - name: Upload translation and independent polyglot generation evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cross-translation-${{ github.run_id }}
+          name: contract-generation-${{ github.run_id }}
           path: |
             target/audit/cross-translation.json
             target/discrepancies/cross-translation.json
             target/cross-translation/**/*.json
             target/cross-translation/**/*.tsp
+            target/schema-convergence/**/*
+          if-no-files-found: error
+          retention-days: 90
+
+  generated-polyglot:
+    name: generated-polyglot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.25.0'
+          cache: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: '27'
+          elixir-version: '1.18'
+          gleam-version: '1.18.1'
+          rebar3-version: 'latest'
+      - name: Install TypeScript compiler and protobuf compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends protobuf-compiler
+      - name: Generate both independent authority lanes
+        run: npm run contracts:polyglot-generate
+      - name: Validate receipts, identical common artifacts, and JavaScript behavior
+        run: npm run contracts:generated-check
+      - name: Compile generated TypeScript declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > target/schema-convergence/tsconfig.generated.json <<'JSON'
+          {
+            "compilerOptions": {
+              "strict": true,
+              "noEmit": true,
+              "skipLibCheck": false,
+              "target": "ES2022",
+              "module": "NodeNext",
+              "moduleResolution": "NodeNext"
+            },
+            "files": [
+              "typespec/typescript/idempotency_record.d.ts",
+              "json-schema-openapi/typescript/idempotency_record.d.ts"
+            ]
+          }
+          JSON
+          src/ts/node_modules/.bin/tsc -p target/schema-convergence/tsconfig.generated.json
+      - name: Compile generated Rust and Go code from both lanes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/generated-compile/rust target/generated-compile/go
+          for lane in typespec json-schema-openapi; do
+            mkdir -p "target/generated-compile/rust/${lane}"
+            rustc \
+              --edition 2024 \
+              --crate-type lib \
+              "target/schema-convergence/${lane}/rust/idempotency_record.rs" \
+              --out-dir "target/generated-compile/rust/${lane}"
+            test -z "$(gofmt -d "target/schema-convergence/${lane}/golang/idempotency_record.go")"
+            (
+              cd "target/schema-convergence/${lane}/golang"
+              GO111MODULE=off go test
+            )
+          done
+      - name: Compile TypeSpec protobuf output
+        shell: bash
+        run: |
+          set -euo pipefail
+          generated_proto=target/schema-convergence/typespec/protobuf/idempotency_record.proto
+          descriptor=target/generated-compile/protobuf/idempotency_record.pb
+          grep -Fq 'import "google/protobuf/timestamp.proto";' "$generated_proto"
+          mkdir -p "$(dirname "$descriptor")"
+          protoc \
+            --proto_path=target/schema-convergence/typespec/protobuf \
+            --proto_path=tests/generated-runtime/protobuf \
+            --include_imports \
+            --descriptor_set_out="$descriptor" \
+            "$generated_proto"
+          test -s "$descriptor"
+          protoc --decode_raw < "$descriptor" > target/generated-compile/protobuf/idempotency_record.descriptor.txt
+          test -s target/generated-compile/protobuf/idempotency_record.descriptor.txt
+      - name: Compile generated Gleam, Elixir, and Erlang code from both lanes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp target/schema-convergence/typespec/gleam/idempotency_record.gleam \
+            src/gleam/src/generated_typespec_idempotency_record.gleam
+          cp target/schema-convergence/json-schema-openapi/gleam/idempotency_record.gleam \
+            src/gleam/src/generated_json_schema_idempotency_record.gleam
+          (
+            cd src/gleam
+            gleam format --check src
+            gleam test
+          )
+          for lane in typespec json-schema-openapi; do
+            mkdir -p "target/generated-compile/elixir/${lane}"
+            elixirc \
+              -o "target/generated-compile/elixir/${lane}" \
+              "target/schema-convergence/${lane}/elixir/idempotency_record.ex"
+
+            # Erlang requires the source filename to match its declared module.
+            # The generator emits a stable cross-lane artifact name for storage,
+            # so compile the same bytes from a module-matching temporary path.
+            erlang_compile_dir="target/generated-compile/erlang/${lane}"
+            mkdir -p "$erlang_compile_dir"
+            cp \
+              "target/schema-convergence/${lane}/erlang/idempotency_record.erl" \
+              "$erlang_compile_dir/ores_middleware_generated_idempotency_record.erl"
+            erlc \
+              -o "$erlang_compile_dir" \
+              "$erlang_compile_dir/ores_middleware_generated_idempotency_record.erl"
+            test -s "$erlang_compile_dir/ores_middleware_generated_idempotency_record.beam"
+          done
+      - name: Upload independently compiled polyglot evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: generated-polyglot-${{ github.run_id }}
+          path: |
+            target/schema-convergence/**/*
+            target/generated-compile/**/*
           if-no-files-found: error
           retention-days: 90
 
@@ -66,7 +204,7 @@ jobs:
           components: rustfmt
       - run: rustfmt --edition 2024 --check src/rust/src/docs_serving.rs
       - run: cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
-      - run: cargo test --manifest-path tools/contract-parity/Cargo.toml
+      - run: cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
       - run: cargo test --manifest-path src/rust/Cargo.toml --all-features
       - run: cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck | jq -e '.language == "rust"'
 

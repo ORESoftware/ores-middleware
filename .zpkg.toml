@@ -90,4 +90,7 @@ name = "ores-middleware-erlang"
 adapter = "none"
 
 [scripts]
-test = "python3 scripts/audit.py --receipt target/audit/receipt.json"
+# Zed 0.2.3 exposes one closed test hook. Richer commands live in package.json.
+# This hook runs the repository audit plus independent generation/validation;
+# the database-backed four-way ORM/catalog gate remains in service-enabled CI.
+test = "python3 scripts/audit.py --receipt target/audit/receipt.json && npm run contracts:polyglot-generate && npm run contracts:generated-check"
