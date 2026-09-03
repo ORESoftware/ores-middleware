@@ -125,7 +125,7 @@ def materialize_node_runtime_dependencies(project: Path, output: Path) -> None:
             continue
         if not isinstance(metadata, dict):
             raise ValueError(f"npm lock package metadata is not an object: {relative}")
-        if metadaget("dev") is True:
+        if metadata.get("dev") is True:
             continue
 
         source = project / relative
@@ -141,6 +141,7 @@ def materialize_node_runtime_dependencies(project: Path, output: Path) -> None:
                 destination,
                 symlinks=False,
                 dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("node_modules", ".git"),
             )
         elif source.is_file():
             destination.parent.mkdir(parents=True, exist_ok=True)
