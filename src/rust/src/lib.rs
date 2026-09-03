@@ -10,6 +10,7 @@ mod integrations;
 mod net;
 pub mod otel;
 mod pipeline;
+pub mod rate_limit;
 
 use std::collections::BTreeMap;
 
@@ -17,7 +18,8 @@ use serde::{Deserialize, Serialize};
 
 pub use bootstrap::{config_from_env, stack_from_env, BootstrapError};
 pub use config::{
-    default_config, validate_config, MiddlewareConfig, RuntimeEnvironment, ValidationIssue,
+    default_config, validate_config, MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment,
+    ValidationIssue,
 };
 pub use context::{current_context, run_with_context, ContextRegistry, RequestContext};
 pub use integrations::{
@@ -26,6 +28,12 @@ pub use integrations::{
 };
 pub use otel::{run_with_ores_log_context, to_ores_log_context, RequestLogger};
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
+pub use rate_limit::{
+    derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver,
+    RateLimitAlgorithm, RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource,
+    RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer,
+    RateLimitPrincipal, RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver,
+};
 
 pub const CONTRACT_VERSION: &str = "1.0.0";
 pub const CAPABILITIES: &[&str] = &[
