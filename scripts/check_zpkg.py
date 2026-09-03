@@ -75,12 +75,17 @@ def validate(root: Path) -> list[str]:
         "build",
         "contracts",
         "cross-translation",
+        "orm-catalog",
         "projection-parity",
         "test",
         "zpkg-check",
     ):
         if required not in scripts:
             errors.append(f"missing scripts.{required}")
+    if scripts.get("orm-catalog") != "python3 scripts/orm_catalog_gate.py":
+        errors.append("scripts.orm-catalog must execute the checked-in database-backed gate")
+    if not (root / ".github/workflows/persistence-convergence.yml").is_file():
+        errors.append("missing hosted persistence-convergence workflow")
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
     if "scripts/cross_translate.py" not in smoke_test:
         errors.append("publish.smoke_test must execute the cross-translation gate")
@@ -96,8 +101,17 @@ def validate(root: Path) -> list[str]:
     if topology.get("flows") != EXPECTED_FLOWS:
         errors.append("authority topology flow mismatch")
     gates = set(topology.get("convergenceGates", []))
-    if not {"cross-translation-witnesses", "round-trip-witnesses"}.issubset(gates):
-        errors.append("authority topology must require cross-translation and round-trip witnesses")
+    required_gates = {
+        "cross-translation-witnesses",
+        "round-trip-witnesses",
+        "sql-catalog-readback-when-applicable",
+        "diesel-seaorm-catalog-parity-when-applicable",
+    }
+    if not required_gates.issubset(gates):
+        errors.append(
+            "authority topology must require translation, round-trip, SQL catalog, "
+            "and Diesel/SeaORM gates"
+        )
     if topology.get("onUnexplainedMismatch") != "STOPPED_FOR_EVALUATION":
         errors.append("unexplained mismatches must stop for evaluation")
     return errors
@@ -115,7 +129,8 @@ def main() -> int:
         return 1
     print(
         ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
-        "golang + gleam + elixir + erlang + bidirectional shadow gate"
+        "golang + gleam + elixir + erlang + bidirectional shadow gate + "
+        "database-backed Diesel/SeaORM gate"
     )
     return 0
 
