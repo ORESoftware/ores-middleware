@@ -1,3 +1,3 @@
 [workspace]
-members = ["src/rust"]
+members = ["src/rust", "tools/contract-parity"]
 resolver = "2"
