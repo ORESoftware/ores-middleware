@@ -1,0 +1,119 @@
+name: zed-release-acceptance
+
+on:
+  pull_request:
+    paths:
+      - '.zpkg.toml'
+      - 'contracts/**'
+      - 'src/**'
+      - 'scripts/run-zed-release-acceptance.sh'
+      - 'tools/zed-archive-audit/**'
+      - '.github/workflows/zed-release-acceptance.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - '.zpkg.toml'
+      - 'contracts/**'
+      - 'src/**'
+      - 'scripts/run-zed-release-acceptance.sh'
+      - 'tools/zed-archive-audit/**'
+      - '.github/workflows/zed-release-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-release-acceptance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pack-install-matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.25.0'
+          cache: false
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124
+        with:
+          otp-version: '27'
+          elixir-version: '1.18'
+          gleam-version: '1.18.1'
+          rebar3-version: 'latest'
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Install checksum-verified Zed 0.2.3
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.2.3/zed-x86_64-unknown-linux-gnu.tar.gz'
+          readonly expected='b8f81a8e4943cbaeb47153386819a911dcf02666a8709c5bd013e4f35b1ba1b9'
+          mkdir -p "$RUNNER_TEMP/zed-dist"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/zed.tar.gz" "$url"
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/zed.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/zed.tar.gz" -C "$RUNNER_TEMP/zed-dist"
+          zed_bin="$(find "$RUNNER_TEMP/zed-dist" -type f -name zed -perm -u+x -print -quit)"
+          test -n "$zed_bin"
+          printf 'ZED_BIN=%s\n' "$zed_bin" >>"$GITHUB_ENV"
+          "$zed_bin" --version
+
+      - name: Install checked-in package dependencies without lifecycle scripts
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+
+      - name: Run native target tests before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src/rust/Cargo.toml --all-features
+          npm test --prefix src/ts
+          (cd src/golang && go test -race -shuffle=on -count=2 ./...)
+          (cd src/gleam && gleam format --check src test && gleam test)
+          (cd src/elixir && mix deps.get && mix test)
+          (cd src/erlang && rebar3 eunit)
+
+      - name: Test the typed archive auditor
+        run: |
+          cargo fmt --manifest-path tools/zed-archive-audit/Cargo.toml --all -- --check
+          cargo clippy --manifest-path tools/zed-archive-audit/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path tools/zed-archive-audit/Cargo.toml --locked
+
+      - name: Execute clean isolated pack/install acceptance
+        shell: bash
+        env:
+          ZED_ACCEPTANCE_RECEIPT_DIR: ${{ runner.temp }}/zed-acceptance
+          ZED_ACCEPTANCE_SOURCE_COMMIT: ${{ github.sha }}
+        run: bash scripts/run-zed-release-acceptance.sh
+
+      - name: Upload immutable receipt evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zed-release-acceptance-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/zed-acceptance/receipt.json
+            ${{ runner.temp }}/zed-acceptance/validate.json
+            ${{ runner.temp }}/zed-acceptance/zed-version.txt
+            ${{ runner.temp }}/zed-acceptance/r2g-installed-file-digests.txt
+          if-no-files-found: error
+          retention-days: 90
