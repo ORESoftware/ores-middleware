@@ -1,0 +1,49 @@
+name: repair-response-finalization-helper
+
+on:
+  push:
+    branches:
+      - agent/ts-http-lifecycle-boundary-20260903
+    paths:
+      - .github/workflows/one-shot-repair-finalizer-workflow.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Repair helper and remove this control
+        shell: bash
+        env:
+          BRANCH: agent/ts-http-lifecycle-boundary-20260903
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/one-shot-finalize-http-responses.yml')
+          source = path.read_text(encoding='utf-8')
+          old = "          '''.replace(/^          /gm, \"\")"
+          new = "          '''.replace(\"          \", \"\")"
+          if source.count(old) != 1:
+              raise SystemExit(f'expected exactly one invalid helper expression, found {source.count(old)}')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/one-shot-repair-finalizer-workflow.yml
+          git diff --check
+          git add -- \
+            .github/workflows/one-shot-finalize-http-responses.yml \
+            .github/workflows/one-shot-repair-finalizer-workflow.yml
+          git config user.name "ORESoftware"
+          git config user.email "alex@oresoftware.com"
+          git commit -m 'ci: correct response finalization helper syntax'
+          git push origin "HEAD:${BRANCH}"
