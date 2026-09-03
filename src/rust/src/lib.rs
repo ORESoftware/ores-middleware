@@ -8,6 +8,7 @@ pub mod docs_serving;
 pub mod frameworks;
 mod integrations;
 mod net;
+pub mod operation;
 pub mod otel;
 mod pipeline;
 pub mod rate_limit;
@@ -28,6 +29,11 @@ pub use context::{
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
+};
+pub use operation::{
+    run_operation_boundary, run_operation_boundary_with_cancellation,
+    run_operation_boundary_with_timeout, OperationDescriptor, OperationFailure,
+    OperationFailureKind, OperationOutcome, OperationScope, OperationTransport,
 };
 pub use otel::{run_with_ores_log_context, to_ores_log_context, RequestLogger};
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
