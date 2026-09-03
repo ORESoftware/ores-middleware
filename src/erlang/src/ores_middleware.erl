@@ -11,6 +11,11 @@
     finish/6,
     run_with_context/2,
     current_context/0,
+    current_request_id/0,
+    current_trace_id/0,
+    current_user_id/0,
+    current_logged_in_user_id/0,
+    current_tenant_id/0,
     descriptor/0,
     decode_json/1,
     tls_options/2
@@ -109,10 +114,12 @@ run(Config, Hooks, Request, Next) when is_function(Next, 1) ->
         {error, Response} -> Response;
         {cached, Response} -> Response;
         {ok, Context, IdempotencyKey} ->
-            Started = erlang:monotonic_time(millisecond),
-            (maps:get(telemetry_started, Hooks))(Context, Request),
-            Response0 = run_handler(Next, Request, Context, maps:get(timeout_ms, maps:get(settings, Config))),
-            finish(Config, Hooks, Context, Request, Response0, #{started => Started, idempotency_key => IdempotencyKey})
+            ores_middleware_context:run(Context, fun() ->
+                Started = erlang:monotonic_time(millisecond),
+                (maps:get(telemetry_started, Hooks))(Context, Request),
+                Response0 = run_handler(Next, Request, Context, maps:get(timeout_ms, maps:get(settings, Config))),
+                finish(Config, Hooks, Context, Request, Response0, #{started => Started, idempotency_key => IdempotencyKey})
+            end)
     end.
 
 prepare(Config, Hooks, Request) ->
@@ -213,12 +220,12 @@ prepare_idempotency(Config, Hooks, Request, Context) ->
     Method = maps:get(method, Request),
     HeaderValue = maps:get(maps:get(header_name, Policy), Headers, undefined),
     case maps:get(enabled, Policy) andalso lists:member(Method, maps:get(required_methods, Policy)) andalso HeaderValue =/= undefined of
-        false -> ores_middleware_context:put(Context), {ok, Context, undefined};
+        false -> {ok, Context, undefined};
         true ->
             Key = iolist_to_binary([Method, <<":">>, maps:get(path, Request), <<":">>, HeaderValue]),
             case (maps:get(idempotency_get, Hooks))(Key) of
                 {ok, Response} -> {cached, Response};
-                _ -> ores_middleware_context:put(Context), {ok, Context, Key}
+                _ -> {ok, Context, Key}
             end
     end.
 
@@ -309,6 +316,11 @@ value(Value) -> iolist_to_binary(io_lib:format("~tp", [Value])).
 
 run_with_context(Context, Fun) -> ores_middleware_context:run(Context, Fun).
 current_context() -> ores_middleware_context:current().
+current_request_id() -> ores_middleware_context_access:current_request_id().
+current_trace_id() -> ores_middleware_context_access:current_trace_id().
+current_user_id() -> ores_middleware_context_access:current_user_id().
+current_logged_in_user_id() -> ores_middleware_context_access:current_logged_in_user_id().
+current_tenant_id() -> ores_middleware_context_access:current_tenant_id().
 decode_json(Binary) when is_binary(Binary) -> json:decode(Binary).
 tls_options(CertFile, KeyFile) -> [{versions, ['tlsv1.3']}, {certfile, CertFile}, {keyfile, KeyFile}, {honor_cipher_order, true}, {secure_renegotiate, true}].
 
