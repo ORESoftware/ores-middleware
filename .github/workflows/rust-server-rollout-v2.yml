@@ -1,0 +1,258 @@
+name: adaptive verified Rust server rollout
+
+on:
+  workflow_call:
+    inputs:
+      source:
+        description: Preferred Rust source file containing the live server boundary
+        required: true
+        type: string
+      manifest:
+        description: Preferred Cargo manifest for the server crate
+        required: true
+        type: string
+      middleware_revision:
+        description: Immutable ores-middleware commit to pin
+        required: true
+        type: string
+      call_name:
+        description: Server call whose Router argument must be wrapped
+        required: false
+        default: axum::serve
+        type: string
+      router_argument:
+        description: Zero-based Router argument index
+        required: false
+        default: 1
+        type: number
+      router_var:
+        description: Router variable to shadow before a precomputed service conversion
+        required: false
+        default: ''
+        type: string
+      error_mode:
+        description: question for Result-returning functions or expect for infallible entrypoints
+        required: false
+        default: question
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  install-compile-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PREFERRED_SOURCE: ${{ inputs.source }}
+      PREFERRED_MANIFEST: ${{ inputs.manifest }}
+      MIDDLEWARE_REVISION: ${{ inputs.middleware_revision }}
+      CALL_NAME: ${{ inputs.call_name }}
+      ROUTER_ARGUMENT: ${{ inputs.router_argument }}
+      ROUTER_VAR: ${{ inputs.router_var }}
+      ERROR_MODE: ${{ inputs.error_mode }}
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check out immutable middleware helper
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/ores-middleware
+          ref: ${{ inputs.middleware_revision }}
+          path: .ores-middleware-tool
+
+      - name: Resolve source, manifest, and Axum generation
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="$PREFERRED_SOURCE"
+          if [[ ! -f "$source" ]] || ! grep -Fq "${CALL_NAME}(" "$source"; then
+            mapfile -t matches < <(grep -RIl --include='*.rs' -F "${CALL_NAME}(" src crates 2>/dev/null || true)
+            if [[ ${#matches[@]} -eq 0 ]]; then
+              echo "no live ${CALL_NAME}(...) boundary found" >&2
+              exit 2
+            fi
+            source="${matches[0]}"
+          fi
+
+          manifest="$PREFERRED_MANIFEST"
+          if [[ ! -f "$manifest" ]]; then
+            directory="$(dirname "$source")"
+            while [[ "$directory" != . && "$directory" != / ]]; do
+              if [[ -f "$directory/Cargo.toml" ]]; then
+                manifest="$directory/Cargo.toml"
+                break
+              fi
+              directory="$(dirname "$directory")"
+            done
+          fi
+          if [[ ! -f "$manifest" ]]; then
+            echo "Cargo manifest not found for $source" >&2
+            exit 2
+          fi
+
+          if grep -Fq 'ores_middleware::frameworks::axum07::install_from_env' "$source"; then
+            adapter=axum07
+          elif grep -Fq 'ores_middleware::frameworks::axum::install_from_env' "$source"; then
+            adapter=axum
+          else
+            manifest_path="$(realpath "$manifest")"
+            axum_requirement="$({ cargo metadata --format-version 1 --no-deps --manifest-path "$manifest"; } \
+              | jq -r --arg manifest "$manifest_path" \
+                '.packages[] | select(.manifest_path == $manifest) | .dependencies[] | select(.name == "axum") | .req' \
+              | head -n1)"
+            case "$axum_requirement" in
+              0.7*|^0.7*|~0.7*|'>=0.7'*|'=0.7'*) adapter=axum07 ;;
+              0.8*|^0.8*|~0.8*|'>=0.8'*|'=0.8'*) adapter=axum ;;
+              *)
+                echo "could not safely resolve Axum 0.7/0.8 from requirement: ${axum_requirement:-<missing>}" >&2
+                exit 2
+                ;;
+            esac
+          fi
+
+          {
+            echo "SOURCE=$source"
+            echo "MANIFEST=$manifest"
+            echo "ADAPTER=$adapter"
+          } >> "$GITHUB_ENV"
+          {
+            echo "source=$source"
+            echo "manifest=$manifest"
+            echo "adapter=$adapter"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Source: `%s`\n\nManifest: `%s`\n\nAdapter: `%s`\n' \
+            "$source" "$manifest" "$adapter" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install or validate middleware boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="ores_middleware::frameworks::${ADAPTER}::install_from_env"
+          if grep -Fq "$marker" "$SOURCE"; then
+            echo "existing middleware boundary is idempotently retained"
+          else
+            case "$ADAPTER" in
+              axum) script=.ores-middleware-tool/scripts/rollout-rust-server.py ;;
+              axum07) script=.ores-middleware-tool/scripts/rollout-rust-server-axum07.py ;;
+              *) exit 2 ;;
+            esac
+            args=(
+              --source "$SOURCE"
+              --manifest "$MANIFEST"
+              --revision "$MIDDLEWARE_REVISION"
+              --call "$CALL_NAME"
+              --router-argument "$ROUTER_ARGUMENT"
+              --error-mode "$ERROR_MODE"
+            )
+            if [[ -n "$ROUTER_VAR" ]]; then
+              args+=(--router-var "$ROUTER_VAR")
+            fi
+            python3 "$script" "${args[@]}"
+          fi
+          grep -Fq "$marker" "$SOURCE"
+          grep -Fq 'git = "https://github.com/ORESoftware/ores-middleware"' "$MANIFEST"
+          grep -Eq 'rev = "[0-9a-fA-F]{40}"' "$MANIFEST"
+          touch .gitignore
+          grep -qxF '/target/' .gitignore || printf '\n/target/\n' >> .gitignore
+
+      - name: Format and compile the server crate
+        id: compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path "$MANIFEST" --all
+          mkdir -p "$RUNNER_TEMP/ores-middleware-verification"
+          all_targets=true
+          if ! CARGO_TARGET_DIR="$RUNNER_TEMP/cargo-target" \
+            cargo check --manifest-path "$MANIFEST" --all-targets \
+            >"$RUNNER_TEMP/ores-middleware-verification/all-targets.log" 2>&1; then
+            all_targets=false
+            cat "$RUNNER_TEMP/ores-middleware-verification/all-targets.log"
+            CARGO_TARGET_DIR="$RUNNER_TEMP/cargo-target" \
+              cargo check --manifest-path "$MANIFEST" \
+              >"$RUNNER_TEMP/ores-middleware-verification/server-targets.log" 2>&1
+            cat "$RUNNER_TEMP/ores-middleware-verification/server-targets.log"
+          fi
+          echo "ALL_TARGETS=$all_targets" >> "$GITHUB_ENV"
+          echo "all_targets=$all_targets" >> "$GITHUB_OUTPUT"
+
+      - name: Record verification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          evidence = {
+              "schemaVersion": 1,
+              "source": os.environ["SOURCE"],
+              "manifest": os.environ["MANIFEST"],
+              "adapter": os.environ["ADAPTER"],
+              "middlewareRevision": os.environ["MIDDLEWARE_REVISION"],
+              "cargoCheckDefaultTargets": True,
+              "cargoCheckAllTargets": os.environ["ALL_TARGETS"] == "true",
+              "buildOutputOutsideRepository": True,
+              "temporaryWorkflowRemovedOnCommit": True,
+          }
+          Path("docs/ores-middleware-verification.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n"
+          )
+          docs = Path("docs/ores-middleware.md")
+          if not docs.exists():
+              docs.write_text("# Shared request middleware\n\n")
+          text = docs.read_text()
+          heading = "\n## Compile verification\n"
+          if heading in text:
+              text = text.split(heading, 1)[0].rstrip() + "\n"
+          mode = (
+              "all Cargo targets"
+              if evidence["cargoCheckAllTargets"]
+              else "the server crate's default library/binary targets; unrelated test/example targets remain outside this adoption gate"
+          )
+          text += (
+              heading
+              + f"The rollout gate formatted the crate and compiled {mode}. "
+              + "Build output was redirected outside the repository. "
+              + "Machine-readable evidence is in `docs/ores-middleware-verification.json`.\n"
+          )
+          docs.write_text(text)
+          PY
+
+      - name: Commit only verified adoption files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ores-middleware-tool
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$SOURCE" "$MANIFEST" .gitignore \
+            docs/ores-middleware.md docs/ores-middleware-verification.json
+          while IFS= read -r -d '' lockfile; do
+            git add "$lockfile"
+          done < <(find . -name Cargo.lock -type f \
+            -not -path './.git/*' -not -path './target/*' -print0)
+          while IFS= read -r -d '' workflow; do
+            git rm "$workflow"
+          done < <(find .github/workflows -maxdepth 1 -type f \
+            -name 'ores-middleware-rollout*.yml' -print0)
+          git diff --cached --check
+          if git diff --cached --name-only | grep -Eq '(^|/)target/|^\.ores-middleware-tool/'; then
+            echo 'generated build output entered the staged diff' >&2
+            exit 1
+          fi
+          git diff --cached --name-only
+          git commit -m 'feat: verify shared ores middleware at Axum boundary'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
