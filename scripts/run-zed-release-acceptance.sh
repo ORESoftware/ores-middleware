@@ -13,6 +13,7 @@ readonly FIRST_ARCHIVE_NAMES="${RECEIPT_DIR}/package-first-names.txt"
 readonly SECOND_ARCHIVE_NAMES="${RECEIPT_DIR}/package-second-names.txt"
 readonly FIRST_ARCHIVE_DIGESTS="${RECEIPT_DIR}/package-first-digests.txt"
 readonly SECOND_ARCHIVE_DIGESTS="${RECEIPT_DIR}/package-second-digests.txt"
+readonly FIRST_INSTALLED_FILE_DIGESTS="${RECEIPT_DIR}/r2g-installed-file-digests.txt"
 readonly REPOSITORY_ARCHIVE_NAME="oresoftware-ores-middleware-0.1.0.tar.gz"
 readonly FIRST_REPOSITORY_ARCHIVE="${FIRST_PACK_DIR}/${REPOSITORY_ARCHIVE_NAME}"
 readonly SECOND_REPOSITORY_ARCHIVE="${SECOND_PACK_DIR}/${REPOSITORY_ARCHIVE_NAME}"
@@ -37,7 +38,8 @@ rm -f \
   "$FIRST_ARCHIVE_NAMES" \
   "$SECOND_ARCHIVE_NAMES" \
   "$FIRST_ARCHIVE_DIGESTS" \
-  "$SECOND_ARCHIVE_DIGESTS"
+  "$SECOND_ARCHIVE_DIGESTS" \
+  "$FIRST_INSTALLED_FILE_DIGESTS"
 
 cat >"$EXPECTED_ARCHIVES" <<'EOF'
 oresoftware-ores-middleware-0.1.0.tar.gz
@@ -123,13 +125,18 @@ cargo run --quiet --locked \
 # registry, install into a mock consumer below --r2g-root, and execute the
 # package smoke test. Leave the failed workspace available for inspection.
 zed_clean_env "$ZED_BIN" r2g --r2g-root "$R2G_ROOT"
+test -d "$R2G_ROOT"
 
 (
   cd "$R2G_ROOT"
   find . -type f -print0 \
     | LC_ALL=C sort -z \
     | xargs -0 -r sha256sum
-) >"${RECEIPT_DIR}/r2g-installed-file-digests.txt"
+) >"$FIRST_INSTALLED_FILE_DIGESTS"
+
+# A successful command without an installed consumer tree is not an accepted
+# round trip. Retain at least one content digest as durable installation proof.
+test -s "$FIRST_INSTALLED_FILE_DIGESTS"
 
 jq -e '
   .status == "passed" and
