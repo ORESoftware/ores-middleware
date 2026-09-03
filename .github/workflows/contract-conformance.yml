@@ -21,6 +21,7 @@ jobs:
       - run: npm run contracts:compile
       - run: npm run contracts:check
       - run: node scripts/check-source-layout.mjs
+      - run: python3 scripts/test-rollout-rust-server.py
 
   rust:
     runs-on: ubuntu-latest
