@@ -19,7 +19,7 @@
       "maxItems": 32,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/safeIdentifier"},
-      "not": {"contains": {"enum": ["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]}}
+      "not": {"type": "array", "contains": {"enum": ["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]}}
     },
     "forbiddenPublicFields": {
       "type": "array",
@@ -28,14 +28,14 @@
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/safeIdentifier"},
       "allOf": [
-        {"contains": {"const": "cause"}},
-        {"contains": {"const": "message"}},
-        {"contains": {"const": "stack"}},
-        {"contains": {"const": "body"}},
-        {"contains": {"const": "authorization"}},
-        {"contains": {"const": "cookie"}},
-        {"contains": {"const": "token"}},
-        {"contains": {"const": "rawIdentity"}}
+        {"type": "array", "contains": {"const": "cause"}},
+        {"type": "array", "contains": {"const": "message"}},
+        {"type": "array", "contains": {"const": "stack"}},
+        {"type": "array", "contains": {"const": "body"}},
+        {"type": "array", "contains": {"const": "authorization"}},
+        {"type": "array", "contains": {"const": "cookie"}},
+        {"type": "array", "contains": {"const": "token"}},
+        {"type": "array", "contains": {"const": "rawIdentity"}}
       ]
     },
     "steps": {"type": "array", "minItems": 11, "maxItems": 32, "items": {"$ref": "#/$defs/step"}}
@@ -64,19 +64,19 @@
       "allOf": [
         {
           "if": {"properties": {"opcode": {"const": "report-failure-fail-open"}}, "required": ["opcode"]},
-          "then": {"properties": {"when": {"const": "on-failure"}, "failurePolicy": {"const": "ignore-reporter-failure"}, "effects": {"contains": {"const": "emit-bounded-telemetry"}}}}
+          "then": {"properties": {"when": {"const": "on-failure"}, "failurePolicy": {"const": "ignore-reporter-failure"}, "effects": {"type": "array", "contains": {"const": "emit-bounded-telemetry"}}}}
         },
         {
           "if": {"properties": {"opcode": {"const": "restore-context"}}, "required": ["opcode"]},
-          "then": {"properties": {"phase": {"const": "finalization"}, "when": {"const": "finally"}, "failurePolicy": {"const": "always-run"}, "effects": {"contains": {"const": "restore-ambient-context"}}}}
+          "then": {"properties": {"phase": {"const": "finalization"}, "when": {"const": "finally"}, "failurePolicy": {"const": "always-run"}, "effects": {"type": "array", "contains": {"const": "restore-ambient-context"}}}}
         },
         {
           "if": {"properties": {"opcode": {"const": "invoke-operation"}}, "required": ["opcode"]},
-          "then": {"properties": {"when": {"const": "unless-failed"}, "effects": {"contains": {"const": "invoke-user-code"}}}}
+          "then": {"properties": {"when": {"const": "unless-failed"}, "effects": {"type": "array", "contains": {"const": "invoke-user-code"}}}}
         },
         {
           "if": {"properties": {"terminal": {"const": true}}, "required": ["terminal"]},
-          "then": {"properties": {"phase": {"const": "terminal"}, "opcode": {"const": "return-typed-outcome"}, "effects": {"contains": {"const": "return-outcome"}}}}
+          "then": {"properties": {"phase": {"const": "terminal"}, "opcode": {"const": "return-typed-outcome"}, "effects": {"type": "array", "contains": {"const": "return-outcome"}}}}
         }
       ]
     }
