@@ -1,0 +1,111 @@
+name: Isolate DEN-3959 ORM JSON stdout once
+
+on:
+  push:
+    branches:
+      - feat/den-3959-independent-polyglot-generators
+    paths:
+      - .github/workflows/den-3959-clean-orm-stdout-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-3959-clean-orm-stdout-once
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.repository == 'ORESoftware/ores-middleware'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - name: Install PostgreSQL client and libpq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libpq-dev postgresql-client
+      - name: Move ORM machine output onto the split-stream runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/orm_matrix_gate.py')
+          text = path.read_text(encoding='utf-8')
+          legacy = '    run_command,\n'
+          if text.count(legacy) != 1:
+              raise SystemExit(f'expected one legacy run_command import, found {text.count(legacy)}')
+          text = text.replace(legacy, '', 1)
+          anchor = 'from scripts.schema_convergence import Model\n'
+          replacement = anchor + 'from scripts.subprocess_capture import run_command\n'
+          if text.count(anchor) != 1:
+              raise SystemExit(f'expected one schema-convergence import, found {text.count(anchor)}')
+          text = text.replace(anchor, replacement, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          python3 -m py_compile scripts/orm_matrix_gate.py scripts/subprocess_capture.py
+      - name: Prove four compiled ORM lanes and PostgreSQL catalog convergence
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          CARGO_TERM_COLOR: never
+          RUSTFLAGS: -Dwarnings
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+          cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
+          python3 -m unittest \
+            scripts/test_orm_catalog_gate.py \
+            scripts/test_orm_matrix_gate.py \
+            scripts/test_subprocess_capture.py \
+            -v
+          python3 scripts/orm_matrix_gate.py
+          jq -e '
+            .schema == "ores.orm-catalog-convergence-report/v2" and
+            .status == "passed" and
+            .zeroUnexplainedFindings == true and
+            (.discrepancies | length) == 0 and
+            (.ormManifests | keys | length) == 4
+          ' target/orm-matrix-gate/receipt.json
+      - name: Commit only the gate and remove this one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- scripts/orm_matrix_gate.py
+          git rm -- .github/workflows/den-3959-clean-orm-stdout-once.yml
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(scripts/orm_matrix_gate.py|\.github/workflows/den-3959-clean-orm-stdout-once\.yml)$' || true)"
+          test -z "$unexpected"
+          git commit -m 'fix(DEN-3959): isolate ORM witness JSON output'
+          git push origin HEAD:refs/heads/feat/den-3959-independent-polyglot-generators
