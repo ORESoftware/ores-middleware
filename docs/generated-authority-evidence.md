@@ -22,6 +22,21 @@ lane:
 - SQL, common language types/runtime validators, Diesel, and SeaORM are emitted
   independently from both lanes and compared after normalization.
 
+## Canonical generated source
+
+A generator must emit each language's canonical checked-in representation
+directly. The acceptance job may run `rustfmt --check`, `gofmt -d`, Gleam
+format checking, TypeScript compilation, or another deterministic validator, but
+it may not repair one lane after generation and then compare the repaired copy.
+A non-empty formatter diff is a generator discrepancy.
+
+Canonical whitespace is part of the generated artifact digest once a language
+formatter defines it. Both lanes must independently produce the same canonical
+bytes for common artifacts. A formatter version and all relevant options belong
+in the execution receipt; changing either invalidates earlier byte-equality
+evidence. Source-specific artifacts may differ by design, but each must still be
+canonical in its own format and remain traceable to its source authority.
+
 ## Required receipt facts
 
 `ores.persistence-polyglot-convergence/v2` must bind, at minimum:
@@ -43,7 +58,7 @@ required check executed successfully. An unexplained difference is
 `STOPPED_FOR_EVALUATION`; infrastructure or compiler failure is `failed`; an
 incomplete declared scope is `partial`. A previously green receipt cannot be
 reused after either source, generator, dependency lock, compiler, database
-version, or comparison option changes.
+version, formatter, or comparison option changes.
 
 ## Promotion boundary
 
