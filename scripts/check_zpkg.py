@@ -30,7 +30,15 @@ EXPECTED_FLOWS = {
     "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
     "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
 }
-EXPECTED_ZED_TEST_SCRIPT = "python3 scripts/audit.py --receipt target/audit/receipt.json"
+POLYGLOT_COMMAND = (
+    "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml "
+    "--bin persistence_codegen -- --output-root target/schema-convergence "
+    "--report target/schema-convergence/receipt.json"
+)
+EXPECTED_ZED_TEST_SCRIPT = (
+    "python3 scripts/audit.py --receipt target/audit/receipt.json && "
+    "npm run contracts:polyglot-generate && npm run contracts:generated-check"
+)
 EXPECTED_INSTALLED_SMOKE_TEST = (
     'python3 "$ZED_PKG_TEST_TARGET/target/package/scripts/installed_package_smoke.py" '
     '--root "$ZED_PKG_TEST_TARGET"'
@@ -39,7 +47,9 @@ EXPECTED_WORKSPACE_SCRIPTS = {
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit",
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
-    "persistence:check": "python3 scripts/orm_catalog_gate_entrypoint.py",
+    "contracts:polyglot-generate": POLYGLOT_COMMAND,
+    "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
+    "persistence:check": "python3 scripts/orm_matrix_gate.py",
     "zpkg:check": "python3 scripts/check_zpkg.py",
 }
 
@@ -98,15 +108,33 @@ def validate(root: Path) -> list[str]:
         if workspace_scripts.get(name) != expected:
             errors.append(f"package.json scripts.{name} must be {expected!r}")
 
-    for required_path in (
+    compare_command = workspace_scripts.get("contracts:compare", "")
+    for required_fragment in (
+        "contracts:polyglot-generate",
+        "contracts:generated-check",
+        "contracts:cross-translate",
+    ):
+        if required_fragment not in compare_command:
+            errors.append(
+                f"package.json scripts.contracts:compare must execute {required_fragment}"
+            )
+
+    required_paths = (
+        "tools/contract-parity/src/bin/persistence_codegen.rs",
+        "scripts/validate-generated-polyglot.mjs",
+        "scripts/orm_matrix_gate.py",
+        "scripts/test_orm_matrix_gate.py",
         "scripts/orm_catalog_gate.py",
-        "scripts/orm_catalog_gate_entrypoint.py",
         "scripts/subprocess_capture.py",
+        "scripts/build_targets.py",
+        "scripts/cross_translate.py",
         "scripts/installed_package_smoke.py",
         ".github/workflows/persistence-convergence.yml",
-    ):
+        ".github/workflows/zed-release-acceptance.yml",
+    )
+    for required_path in required_paths:
         if not (root / required_path).is_file():
-            errors.append(f"missing required persistence/package gate file: {required_path}")
+            errors.append(f"missing required convergence/package gate file: {required_path}")
 
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
     if smoke_test != EXPECTED_INSTALLED_SMOKE_TEST:
@@ -168,7 +196,8 @@ def main() -> int:
     print(
         ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
         "golang + gleam + elixir + erlang + installed build-output smoke + "
-        "bidirectional shadow gate + database-backed Diesel/SeaORM gate"
+        "independent TypeSpec/JSON-Schema generation + bidirectional witnesses + "
+        "four-way Diesel/SeaORM database-backed convergence"
     )
     return 0
 

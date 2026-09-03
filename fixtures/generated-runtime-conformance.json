@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema": "ores.generated-runtime-conformance/v1",
+  "model": "IdempotencyRecord",
+  "authority": "independent-fixture-corpus",
+  "description": "Independent semantic fixtures for executing generated TypeSpec and JSON Schema/OpenAPI artifacts in every native runtime. This file is not generated from either contract authority.",
+  "wireFields": [
+    "createdAt",
+    "expiresAt",
+    "id",
+    "idempotencyKey",
+    "requestHash",
+    "responseBody",
+    "responseStatus",
+    "status",
+    "tenantId"
+  ],
+  "requiredFields": [
+    "createdAt",
+    "expiresAt",
+    "id",
+    "idempotencyKey",
+    "requestHash",
+    "status",
+    "tenantId"
+  ],
+  "optionalFields": [
+    "responseBody",
+    "responseStatus"
+  ],
+  "statuses": [
+    "pending",
+    "succeeded",
+    "failed"
+  ],
+  "int32": {
+    "minimum": -2147483648,
+    "maximum": 2147483647
+  },
+  "cases": [
+    {
+      "id": "valid-minimal",
+      "expect": "accept",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "id-minimal",
+        "idempotencyKey": "key-minimal",
+        "requestHash": "hash-minimal",
+        "status": "pending",
+        "tenantId": "tenant-a"
+      }
+    },
+    {
+      "id": "valid-complete",
+      "expect": "accept",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "id-complete",
+        "idempotencyKey": "key-complete",
+        "requestHash": "hash-complete",
+        "responseBody": "accepted",
+        "responseStatus": 201,
+        "status": "succeeded",
+        "tenantId": "tenant-b"
+      }
+    },
+    {
+      "id": "valid-int32-minimum",
+      "expect": "accept",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "id-min",
+        "idempotencyKey": "key-min",
+        "requestHash": "hash-min",
+        "responseStatus": -2147483648,
+        "status": "failed",
+        "tenantId": "tenant-c"
+      }
+    },
+    {
+      "id": "valid-int32-maximum",
+      "expect": "accept",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "id-max",
+        "idempotencyKey": "key-max",
+        "requestHash": "hash-max",
+        "responseStatus": 2147483647,
+        "status": "failed",
+        "tenantId": "tenant-d"
+      }
+    },
+    {
+      "id": "reject-unknown-status",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "bad-status",
+        "idempotencyKey": "bad-status-key",
+        "requestHash": "bad-status-hash",
+        "status": "unknown",
+        "tenantId": "tenant-e"
+      }
+    },
+    {
+      "id": "reject-int32-overflow-high",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "bad-high",
+        "idempotencyKey": "bad-high-key",
+        "requestHash": "bad-high-hash",
+        "responseStatus": 2147483648,
+        "status": "failed",
+        "tenantId": "tenant-f"
+      }
+    },
+    {
+      "id": "reject-int32-overflow-low",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "bad-low",
+        "idempotencyKey": "bad-low-key",
+        "requestHash": "bad-low-hash",
+        "responseStatus": -2147483649,
+        "status": "failed",
+        "tenantId": "tenant-g"
+      }
+    },
+    {
+      "id": "reject-invalid-created-at",
+      "expect": "reject",
+      "value": {
+        "createdAt": "not-a-date",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "bad-created-at",
+        "idempotencyKey": "bad-created-at-key",
+        "requestHash": "bad-created-at-hash",
+        "status": "pending",
+        "tenantId": "tenant-h"
+      }
+    },
+    {
+      "id": "reject-invalid-expires-at",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "not-a-date",
+        "id": "bad-expires-at",
+        "idempotencyKey": "bad-expires-at-key",
+        "requestHash": "bad-expires-at-hash",
+        "status": "pending",
+        "tenantId": "tenant-i"
+      }
+    },
+    {
+      "id": "reject-unknown-property",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "bad-extra",
+        "idempotencyKey": "bad-extra-key",
+        "requestHash": "bad-extra-hash",
+        "status": "pending",
+        "tenantId": "tenant-j",
+        "unexpected": true
+      }
+    },
+    {
+      "id": "reject-missing-required-id",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "idempotencyKey": "missing-id-key",
+        "requestHash": "missing-id-hash",
+        "status": "pending",
+        "tenantId": "tenant-k"
+      }
+    },
+    {
+      "id": "reject-null-required-id",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": null,
+        "idempotencyKey": "null-id-key",
+        "requestHash": "null-id-hash",
+        "status": "pending",
+        "tenantId": "tenant-l"
+      }
+    },
+    {
+      "id": "reject-wrong-tenant-type",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "wrong-tenant",
+        "idempotencyKey": "wrong-tenant-key",
+        "requestHash": "wrong-tenant-hash",
+        "status": "pending",
+        "tenantId": 42
+      }
+    },
+    {
+      "id": "reject-null-optional-response-body",
+      "expect": "reject",
+      "value": {
+        "createdAt": "2026-09-03T12:00:00Z",
+        "expiresAt": "2026-09-04T12:00:00Z",
+        "id": "null-optional",
+        "idempotencyKey": "null-optional-key",
+        "requestHash": "null-optional-hash",
+        "responseBody": null,
+        "status": "pending",
+        "tenantId": "tenant-m"
+      }
+    },
+    {
+      "id": "reject-array-root",
+      "expect": "reject",
+      "value": []
+    },
+    {
+      "id": "reject-null-root",
+      "expect": "reject",
+      "value": null
+    }
+  ]
+}
