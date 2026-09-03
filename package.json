@@ -15,7 +15,7 @@
     "contracts:compare": "node scripts/compare-authorities.mjs && cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml -- && npm run contracts:polyglot-generate && npm run contracts:generated-check && npm run contracts:cross-translate",
     "contracts:validate": "node scripts/validate-contracts.mjs && node scripts/validate-docs-serving.mjs && node scripts/validate-rate-limit-v2.mjs",
     "contracts:check": "npm run contracts:compare && npm run contracts:validate && npm run function-bodies:check",
-    "function-bodies:compile": "tsp compile contracts/function-bodies/typespec/main.tsp --no-emit",
+    "function-bodies:compile": "tsp compile contracts/function-bodies/typespec --no-emit",
     "function-bodies:runtime": "node scripts/validate-function-bodies.mjs",
     "function-bodies:e2e": "node --test tests/e2e/function-body-contract.e2e.mjs",
     "function-bodies:check": "npm run function-bodies:compile && npm run function-bodies:runtime && npm run function-bodies:e2e",
