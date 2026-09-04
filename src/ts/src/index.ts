@@ -1,12 +1,23 @@
 import { currentContext, runWithContext } from "./context.js";
 import {
+  checkRequestContract,
+  type RequestContractValidator
+} from "./request-contract.js";
+import {
   operationContextFromRequestContext,
   runOperationBoundary,
   type OperationFailure,
   type OperationFailureReporter
 } from "./operation.js";
 
-export { currentContext, runWithContext };
+export { currentContext, runWithContext, checkRequestContract };
+export type {
+  RequestContractFailure,
+  RequestContractIssue,
+  RequestContractMatch,
+  RequestContractValidationInput,
+  RequestContractValidator
+} from "./request-contract.js";
 
 export const contractVersion = "1.0.0" as const;
 export const capabilities = Object.freeze([
@@ -73,6 +84,11 @@ export interface MiddlewareDependencies {
   };
   /** Optional audited sink; defaults to the bounded ores-otel reporter. */
   operationFailureReporter?: OperationFailureReporter;
+  /**
+   * Strict parsed-request contract boundary. Its resolver receives method +
+   * pathname only; query/header/body values are validation-only inputs.
+   */
+  requestContractValidator?: RequestContractValidator;
   syncObserver?: (context: RequestContext, request: Request, response: Response, durationMs: number) => Promise<void>;
   captureSchema?: (request: Request, response: Response) => Promise<void>;
   now?: () => number;
@@ -197,6 +213,19 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer");
 
     if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, context))) return problem(403, "ip_policy_denied", "request source is not permitted");
+
+    const contractFailure = await checkRequestContract(
+      dependencies.requestContractValidator,
+      request,
+      url
+    );
+    if (contractFailure) {
+      const detail = contractFailure.code === "unknown_operation"
+        ? "no request contract matched the HTTP method and pathname"
+        : "request path, query, headers, or JSON payload failed contract validation";
+      return problem(contractFailure.status, contractFailure.code, detail);
+    }
+
     if (config.settings.rateLimit.enabled) {
       const rateKey = [context.tenantId ?? "_", context.userId ?? "_", request.headers.get("x-real-ip") ?? "_", url.pathname].join(":");
       if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) return problem(429, "rate_limited", "rate limit exceeded");

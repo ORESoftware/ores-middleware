@@ -33,6 +33,10 @@
       "types": "./dist/operation.d.ts",
       "import": "./dist/operation.js"
     },
+    "./request-contract": {
+      "types": "./dist/request-contract.d.ts",
+      "import": "./dist/request-contract.js"
+    },
     "./otel": {
       "types": "./dist/otel.d.ts",
       "import": "./dist/otel.js"
