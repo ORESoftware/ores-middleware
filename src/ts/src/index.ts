@@ -12,6 +12,7 @@ import {
 
 export { currentContext, runWithContext, checkRequestContract };
 export type {
+  RequestContractBody,
   RequestContractFailure,
   RequestContractIssue,
   RequestContractMatch,
@@ -78,10 +79,9 @@ export interface MiddlewareDependencies {
   idempotencyStore?: { get(key: string): Promise<StoredResponse | undefined>; set(key: string, response: StoredResponse): Promise<void> };
   isTrustedProxy?: (request: Request) => boolean;
   authorizeIp?: (request: Request, context: RequestContext) => Promise<boolean>;
-  telemetry?: {
-    started(context: RequestContext, request: Request): Promise<void> | void;
-    finished(context: RequestContext, request: Request, response: Response, durationMs: number): Promise<void> | void;
-  };
+  syncObserver?: (context: RequestContext, request: Request, response: Response, durationMs: number) => Promise<void>;
+  telemetry?: { started(context: RequestContext, request: Request): void; finished(context: RequestContext, request: Request, response: Response, durationMs: number): void };
+  schemaCapture?: (request: Request, response: Response) => Promise<void>;
   /** Optional audited sink; defaults to the bounded ores-otel reporter. */
   operationFailureReporter?: OperationFailureReporter;
   /**
@@ -89,20 +89,27 @@ export interface MiddlewareDependencies {
    * pathname only; query/header/body values are validation-only inputs.
    */
   requestContractValidator?: RequestContractValidator;
-  syncObserver?: (context: RequestContext, request: Request, response: Response, durationMs: number) => Promise<void>;
-  captureSchema?: (request: Request, response: Response) => Promise<void>;
-  now?: () => number;
-  random?: () => number;
+  /**
+   * Optional callback that observes each rejected request after finalization.
+   * The middleware preserves the original status and body even if this hook
+   * throws; implementations must not log credentials or request bodies.
+   */
+  rejectionObserver?: (event: RejectionObservation) => void | Promise<void>;
 }
 
-export type NextHandler = (request: Request) => Promise<Response>;
-export type PortableMiddleware = (request: Request, next: NextHandler) => Promise<Response>;
-
-export class MiddlewareConfigError extends Error {
-  constructor(public readonly issues: ValidationIssue[]) {
-    super(`invalid middleware configuration: ${issues.map((issue) => `${issue.path}:${issue.code}`).join(", ")}`);
-  }
+export interface RejectionObservation {
+  readonly requestId: string;
+  readonly traceId: string;
+  readonly method: string;
+  readonly pathname: string;
+  readonly status: number;
+  readonly code: string;
+  readonly durationMs: number;
 }
+
+export type Next = (request: Request) => Promise<Response>;
+export type Middleware = (request: Request, next: Next) => Promise<Response>;
+export type PortableMiddleware = Middleware;
 
 export function defaultConfig(serviceName: string): MiddlewareConfig {
   return {
@@ -110,24 +117,19 @@ export function defaultConfig(serviceName: string): MiddlewareConfig {
     environment: "development",
     requiredCapabilities: [...capabilities],
     settings: {
-      requestIdHeader: "x-request-id",
-      traceHeader: "traceparent",
-      timeoutMs: 5_000,
-      maxBodyBytes: 2 * 1024 * 1024,
-      contextRegistryMaxEntries: 10_000,
-      contextRegistryTtlMs: 30_000,
+      requestIdHeader: "x-request-id", traceHeader: "traceparent", timeoutMs: 5000, maxBodyBytes: 2 * 1024 * 1024,
+      contextRegistryMaxEntries: 10000, contextRegistryTtlMs: 30000,
       rateLimit: { enabled: true, capacity: 100, refillPerSecond: 20, keyBy: ["tenant", "user", "ip", "route"] },
-      compression: { enabled: true, minimumBytes: 1_024, algorithms: ["br", "gzip"] },
+      compression: { enabled: true, minimumBytes: 1024, algorithms: ["gzip"] },
       tls: { mode: "trusted-proxy", requireHttps: true, strictForwardedHeaders: true, trustedProxyCidrs: ["127.0.0.1/32", "::1/128"] },
-      securityHeaders: { enabled: true, hstsMaxAgeSeconds: 31_536_000, contentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'", frameOptions: "DENY" },
-      idempotency: { enabled: true, headerName: "idempotency-key", ttlSeconds: 86_400, requiredMethods: ["POST", "PUT", "PATCH"] },
+      securityHeaders: { enabled: true, hstsMaxAgeSeconds: 31536000, contentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'", frameOptions: "DENY" },
+      idempotency: { enabled: true, headerName: "idempotency-key", ttlSeconds: 86400, requiredMethods: ["POST", "PUT", "PATCH"] },
       faultInjection: { enabled: false, latencyMs: 0, errorRate: 0, dropRate: 0 },
       testAuthBypass: { enabled: false, headerName: "x-test-auth-bypass", allowedCidrs: ["127.0.0.1/32", "::1/128"] },
       contentRepresentations: ["application/json", "application/problem+json"]
     },
     integrations: {
-      sharedAuth: { mode: "disabled", failOpen: false },
-      optoSync: { mode: "disabled", failOpen: true },
+      sharedAuth: { mode: "disabled", failOpen: false }, optoSync: { mode: "disabled", failOpen: true },
       oresOtel: { enabled: true, serviceName, propagators: ["tracecontext", "baggage"] }
     }
   };
@@ -135,83 +137,120 @@ export function defaultConfig(serviceName: string): MiddlewareConfig {
 
 export function validateConfig(config: MiddlewareConfig): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const issue = (path: string, code: string, message: string) => issues.push({ path, code, message });
-  if (config.contractVersion !== contractVersion) issue("/contractVersion", "unsupported_version", `expected ${contractVersion}`);
-  if (!Number.isFinite(config.settings.timeoutMs) || config.settings.timeoutMs <= 0) issue("/settings/timeoutMs", "range", "timeout must be positive");
-  if (!Number.isSafeInteger(config.settings.maxBodyBytes) || config.settings.maxBodyBytes <= 0) issue("/settings/maxBodyBytes", "range", "body limit must be a positive safe integer");
-  if (config.settings.rateLimit.enabled && (config.settings.rateLimit.capacity <= 0 || config.settings.rateLimit.refillPerSecond <= 0)) issue("/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill");
-  if (config.settings.faultInjection.errorRate < 0 || config.settings.faultInjection.errorRate > 1 || config.settings.faultInjection.dropRate < 0 || config.settings.faultInjection.dropRate > 1) issue("/settings/faultInjection", "range", "fault rates must be within 0..=1");
-  if (config.environment === "production" && config.settings.faultInjection.enabled) issue("/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production");
-  if (config.environment === "production" && config.settings.testAuthBypass.enabled) issue("/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production");
-  if (config.integrations.sharedAuth.failOpen) issue("/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed");
-  if (config.settings.tls.mode === "trusted-proxy" && config.settings.tls.trustedProxyCidrs.length === 0) issue("/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs");
-  for (const capability of config.requiredCapabilities) if (!(capabilities as readonly string[]).includes(capability)) issue("/requiredCapabilities", "unknown_capability", capability);
+  const add = (condition: boolean, path: string, code: string, message: string) => { if (condition) issues.push({ path, code, message }); };
+  add(config.contractVersion !== contractVersion, "/contractVersion", "unsupported_version", `expected ${contractVersion}`);
+  add(config.settings.timeoutMs <= 0, "/settings/timeoutMs", "range", "timeout must be positive");
+  add(config.settings.maxBodyBytes <= 0, "/settings/maxBodyBytes", "range", "body limit must be positive");
+  add(config.settings.rateLimit.enabled && (config.settings.rateLimit.capacity <= 0 || config.settings.rateLimit.refillPerSecond <= 0), "/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill");
+  add(config.settings.faultInjection.errorRate < 0 || config.settings.faultInjection.errorRate > 1 || config.settings.faultInjection.dropRate < 0 || config.settings.faultInjection.dropRate > 1, "/settings/faultInjection", "range", "fault rates must be within 0..=1");
+  add(config.environment === "production" && config.settings.faultInjection.enabled, "/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production");
+  add(config.environment === "production" && config.settings.testAuthBypass.enabled, "/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production");
+  add(config.integrations.sharedAuth.failOpen, "/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed");
+  add(config.settings.tls.mode === "trusted-proxy" && config.settings.tls.trustedProxyCidrs.length === 0, "/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs");
+  for (const required of config.requiredCapabilities) add(!capabilities.includes(required as Capability), "/requiredCapabilities", "unknown_capability", required);
   return issues;
 }
 
-class MemoryTokenBucket {
-  readonly #buckets = new Map<string, { tokens: number; last: number }>();
-  constructor(private readonly now: () => number) {}
-  async allow(key: string, capacity: number, refillPerSecond: number): Promise<boolean> {
-    const now = this.now();
-    const bucket = this.#buckets.get(key) ?? { tokens: capacity, last: now };
-    bucket.tokens = Math.min(capacity, bucket.tokens + ((now - bucket.last) / 1_000) * refillPerSecond);
-    bucket.last = now;
-    const allowed = bucket.tokens >= 1;
-    if (allowed) bucket.tokens -= 1;
-    this.#buckets.set(key, bucket);
-    return allowed;
+function newId(): string { return crypto.randomUUID().replaceAll("-", ""); }
+function headerToken(input: string | null, fallback: () => string): string { return input && /^[A-Za-z0-9._-]{1,128}$/.test(input) ? input : fallback(); }
+function traceId(input: string | null): string {
+  if (input) { const parts = input.split("-"); if (parts.length >= 4 && /^[0-9a-f]{32}$/i.test(parts[1])) return parts[1].toLowerCase(); }
+  return newId();
+}
+function clientIp(request: Request): string { return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown"; }
+function mediaAccepted(accept: string | null, supported: string[]): boolean {
+  if (!accept || accept.includes("*/*")) return true;
+  return supported.some((type) => accept.split(",").some((part) => part.split(";")[0].trim() === type));
+}
+function problem(status: number, code: string, detail: string): Response {
+  return Response.json({ type: `urn:ores:middleware:${code}`, title: code, status, detail }, { status, headers: { "content-type": "application/problem+json" } });
+}
+function requestSize(request: Request): number { const value = request.headers.get("content-length"); return value ? Number(value) : 0; }
+function rateKey(config: MiddlewareConfig, context: RequestContext, request: Request): string {
+  const url = new URL(request.url); const values: string[] = [];
+  for (const key of config.settings.rateLimit.keyBy) values.push(key === "tenant" ? context.tenantId || "_" : key === "user" ? context.userId || "_" : key === "ip" ? clientIp(request) : url.pathname);
+  return values.join(":");
+}
+function applySecurityHeaders(config: MiddlewareConfig, headers: Headers): void {
+  if (!config.settings.securityHeaders.enabled) return;
+  headers.set("x-content-type-options", "nosniff"); headers.set("x-frame-options", config.settings.securityHeaders.frameOptions); headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set("strict-transport-security", `max-age=${config.settings.securityHeaders.hstsMaxAgeSeconds}; includeSubDomains`);
+  if (config.settings.securityHeaders.contentSecurityPolicy) headers.set("content-security-policy", config.settings.securityHeaders.contentSecurityPolicy);
+}
+function appendVary(headers: Headers, value: string): void {
+  const existing = headers.get("vary"); const set = new Set((existing || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)); set.add(value.toLowerCase()); headers.set("vary", [...set].join(", "));
+}
+function attachHeaders(config: MiddlewareConfig, context: RequestContext, response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set(config.settings.requestIdHeader, context.requestId);
+  if (context.spanId && !/^0{16}$/.test(context.spanId)) {
+    headers.set("traceparent", `00-${context.traceId}-${context.spanId}-01`);
+  } else {
+    headers.delete("traceparent");
   }
+  appendVary(headers, "accept"); appendVary(headers, "accept-encoding"); applySecurityHeaders(config, headers);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+async function maybeCompress(config: MiddlewareConfig, request: Request, response: Response): Promise<Response> {
+  if (!config.settings.compression.enabled || response.headers.has("content-encoding") || !request.headers.get("accept-encoding")?.includes("gzip")) return response;
+  const body = new Uint8Array(await response.clone().arrayBuffer()); if (body.length < config.settings.compression.minimumBytes) return response;
+  if (typeof CompressionStream === "undefined") return response; const stream = new Blob([body]).stream().pipeThrough(new CompressionStream("gzip"));
+  const headers = new Headers(response.headers); headers.set("content-encoding", "gzip"); appendVary(headers, "accept-encoding"); return new Response(stream, { status: response.status, headers });
+}
+async function handlerWithTimeout(next: Next, request: Request, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
+  const controller = new AbortController(); let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let rejectAbort: ((reason?: unknown) => void) | undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
+  const abort = () => { controller.abort(signal?.reason); rejectAbort?.(signal?.reason ?? new DOMException("request cancelled", "AbortError")); };
+  if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const timeout = new Promise<never>((_resolve, reject) => { timeoutHandle = setTimeout(() => { controller.abort(); reject(new Error("deadline exceeded")); }, timeoutMs); });
+    const scoped = new Request(request, { signal: controller.signal }); return await Promise.race([next(scoped), timeout, cancellation]);
+  } finally { if (timeoutHandle) clearTimeout(timeoutHandle); signal?.removeEventListener("abort", abort); }
+}
+function idempotencyKey(config: MiddlewareConfig, request: Request): string | undefined {
+  if (!config.settings.idempotency.enabled || !config.settings.idempotency.requiredMethods.includes(request.method)) return undefined;
+  const value = request.headers.get(config.settings.idempotency.headerName); if (!value) return undefined; const url = new URL(request.url); return `${request.method}:${url.pathname}:${value}`;
+}
+async function storedResponse(response: Response, ttlSeconds: number): Promise<StoredResponse> {
+  return { status: response.status, headers: [...response.headers.entries()], body: new Uint8Array(await response.clone().arrayBuffer()), expiresAt: Date.now() + ttlSeconds * 1000 };
+}
+function fromStored(value: StoredResponse): Response { return new Response(value.body, { status: value.status, headers: value.headers }); }
+function maybeTestIdentity(config: MiddlewareConfig, request: Request, dependencies: MiddlewareDependencies, context: RequestContext): Promise<AuthDecision> | undefined {
+  const enabled = config.settings.testAuthBypass.enabled && request.headers.get(config.settings.testAuthBypass.headerName) === "true";
+  if (!enabled) return undefined;
+  if (config.environment !== "test" && config.environment !== "staging") return Promise.reject(new Error("test auth bypass is forbidden outside test/staging"));
+  if (!dependencies.resolveTestIdentity) return Promise.reject(new Error("test identity resolver is not configured")); return dependencies.resolveTestIdentity(request, context);
 }
 
-class MemoryIdempotencyStore {
-  readonly #entries = new Map<string, StoredResponse>();
-  constructor(private readonly now: () => number) {}
-  async get(key: string): Promise<StoredResponse | undefined> {
-    const value = this.#entries.get(key);
-    if (value && value.expiresAt > this.now()) return value;
-    if (value) this.#entries.delete(key);
-    return undefined;
-  }
-  async set(key: string, value: StoredResponse): Promise<void> { this.#entries.set(key, value); }
-}
-
-export function createMiddleware(config: MiddlewareConfig, dependencies: MiddlewareDependencies = {}): PortableMiddleware {
-  const issues = validateConfig(config);
-  if (issues.length > 0) throw new MiddlewareConfigError(issues);
-  const now = dependencies.now ?? Date.now;
-  const random = dependencies.random ?? Math.random;
-  const rateLimiter = dependencies.rateLimiter ?? new MemoryTokenBucket(now);
-  const idempotencyStore = dependencies.idempotencyStore ?? new MemoryIdempotencyStore(now);
-
+export function createMiddleware(config: MiddlewareConfig, dependencies: MiddlewareDependencies = {}): Middleware {
+  const issues = validateConfig(config); if (issues.length) throw new Error(`invalid middleware config: ${JSON.stringify(issues)}`);
+  const operationFailureReporter = dependencies.operationFailureReporter;
+  const reportOperationFailure = (failure: OperationFailure): void => {
+    void Promise.resolve(operationFailureReporter?.(failure)).catch(() => undefined);
+  };
+  const observeRejection = (event: RejectionObservation): void => {
+    void Promise.resolve(dependencies.rejectionObserver?.(event)).catch(() => undefined);
+  };
   return async (request, next) => {
-    const started = now();
-    const requestId = validToken(request.headers.get(config.settings.requestIdHeader)) ?? crypto.randomUUID();
-    const traceId = parseTraceId(request.headers.get(config.settings.traceHeader)) ?? crypto.randomUUID().replaceAll("-", "");
-    let context: RequestContext = {
-      requestId,
-      traceId,
-      locale: request.headers.get("accept-language") ?? undefined,
-      startedAtUnixMs: started,
-      deadlineUnixMs: started + config.settings.timeoutMs,
-      baggage: {}
-    };
-
-    const preAuthOutcome = await runOperationBoundary(
-      { transport: "http", scope: "request", name: "middleware.pre_auth", signal: request.signal },
-      async () => {
-    const contentLength = Number(request.headers.get("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > config.settings.maxBodyBytes) return problem(413, "payload_too_large", "request body exceeds configured limit");
-    const accepted = request.headers.get("accept");
-    if (accepted && accepted !== "*/*" && !config.settings.contentRepresentations.some((representation) => accepted.includes(representation))) return problem(406, "not_acceptable", "no supported representation was requested");
-
-    const url = new URL(request.url);
-    const forwardedProto = request.headers.get("x-forwarded-proto");
-    const trustedProxy = dependencies.isTrustedProxy?.(request) ?? false;
-    const effectiveHttps = url.protocol === "https:" || (trustedProxy && forwardedProto === "https");
-    if (config.settings.tls.requireHttps && !effectiveHttps) return problem(426, "https_required", "HTTPS is required");
-    if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer");
-
+    const started = Date.now(); const requestId = headerToken(request.headers.get(config.settings.requestIdHeader), newId); const incomingTraceId = traceId(request.headers.get(config.settings.traceHeader));
+    const context: RequestContext = { requestId, traceId: incomingTraceId, startedAtUnixMs: Date.now(), deadlineUnixMs: Date.now() + config.settings.timeoutMs, baggage: {} };
+    const baseOperationContext = operationContextFromRequestContext(context, "http.request");
+    return runOperationBoundary(
+      baseOperationContext,
+      "middleware.http.request",
+      () => runWithContext(context, async () => {
+        let semanticResponse: Response;
+        try {
+          semanticResponse = await (async () => {
+    if (requestSize(request) > config.settings.maxBodyBytes) return problem(413, "payload_too_large", "request body exceeds configured limit");
+    if (!mediaAccepted(request.headers.get("accept"), config.settings.contentRepresentations)) return problem(406, "not_acceptable", "no supported representation requested");
+    if (config.settings.tls.requireHttps) {
+      const url = new URL(request.url); const forwarded = request.headers.get("x-forwarded-proto"); const trusted = dependencies.isTrustedProxy?.(request) ?? false;
+      if (config.settings.tls.strictForwardedHeaders && forwarded && !trusted) return problem(400, "untrusted_forwarded_header", "forwarded transport header from untrusted peer");
+      const secure = url.protocol === "https:" || (trusted && forwarded === "https"); if (!secure) return problem(426, "https_required", "HTTPS is required");
+    }
+    const url = new URL(request.url); const locale = request.headers.get("accept-language"); if (locale) context.locale = locale;
     if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, context))) return problem(403, "ip_policy_denied", "request source is not permitted");
 
     const contractFailure = await checkRequestContract(
@@ -227,228 +266,78 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     }
 
     if (config.settings.rateLimit.enabled) {
-      const rateKey = [context.tenantId ?? "_", context.userId ?? "_", request.headers.get("x-real-ip") ?? "_", url.pathname].join(":");
-      if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) return problem(429, "rate_limited", "rate limit exceeded");
+      const allowed = await dependencies.rateLimiter?.allow(rateKey(config, context, request), config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond); if (allowed === false) return problem(429, "rate_limited", "rate limit exceeded");
     }
-
-    const canBypass = config.environment === "test" || config.environment === "staging";
-    const bypassRequested = config.settings.testAuthBypass.enabled && request.headers.get(config.settings.testAuthBypass.headerName) === "true";
+    const testDecision = maybeTestIdentity(config, request, dependencies, context);
     let auth: AuthDecision = {};
-    if (bypassRequested) {
-      if (!canBypass || !dependencies.resolveTestIdentity) return problem(403, "test_bypass_denied", "test identity bypass is unavailable");
-      auth = await dependencies.resolveTestIdentity(request, context);
-    } else if (dependencies.authVerifier) {
-      auth = await dependencies.authVerifier(request, context);
-    }
-    context = {
-      ...context,
-      userId: auth.userId,
-      tenantId: auth.tenantId,
-      baggage: {
-        ...context.baggage,
-        ...Object.fromEntries(
-          Object.entries(auth.claims ?? {}).filter(([key]) => key.startsWith("otel."))
-        )
-      }
-    };
-
-    const authenticatedOutcome = await runOperationBoundary(
-      { transport: "http", scope: "request", name: "middleware.request", signal: request.signal },
-      async () => {
+    try { auth = testDecision ? await testDecision : dependencies.authVerifier ? await dependencies.authVerifier(request, context) : {}; }
+    catch { return problem(401, "authentication_failed", "authentication failed"); }
+    context.userId = auth.userId; context.tenantId = auth.tenantId; context.baggage = Object.fromEntries(Object.entries(auth.claims || {}).filter(([key]) => key.startsWith("otel.")));
     if (config.integrations.sharedAuth.mode !== "disabled" && !context.userId) return problem(401, "authentication_required", "shared-auth did not establish a user");
-
-    if (config.settings.faultInjection.enabled) {
-      if (config.settings.faultInjection.latencyMs > 0) await delay(config.settings.faultInjection.latencyMs);
-      if (random() < config.settings.faultInjection.dropRate) return problem(503, "fault_drop", "injected transport drop");
-      if (random() < config.settings.faultInjection.errorRate) return problem(500, "fault_error", "injected middleware error");
-    }
-
-    const idempotencyKey = config.settings.idempotency.enabled && config.settings.idempotency.requiredMethods.includes(request.method.toUpperCase()) ? request.headers.get(config.settings.idempotency.headerName) : null;
-    if (idempotencyKey) {
-      const cached = await idempotencyStore.get(`${request.method}:${url.pathname}:${idempotencyKey}`);
-      if (cached) return new Response(cached.body.slice(), { status: cached.status, headers: cached.headers });
-    }
-
-    await dependencies.telemetry?.started(context, request);
-    let response = await withDeadline(config.settings.timeoutMs, () => next(request));
-
-    response = await attachEtag(request, response);
-    response = maybeCompress(config, request, response);
-    // Observers and persistence consume the semantic response before
-    // request-specific security and correlation headers are finalized.
-    const durationMs = Math.max(0, now() - started);
-    await dependencies.telemetry?.finished(context, request, response.clone(), durationMs);
-    if (dependencies.captureSchema) await dependencies.captureSchema(request.clone(), response.clone());
-    if (dependencies.syncObserver) {
-      try { await dependencies.syncObserver(context, request.clone(), response.clone(), durationMs); }
-      catch { if (!config.integrations.optoSync.failOpen) return problem(503, "sync_observer_failed", "opto-sync observation failed"); }
-    }
-
-    if (idempotencyKey && response.status >= 200 && response.status < 300) {
-      const body = new Uint8Array(await response.clone().arrayBuffer());
-      await idempotencyStore.set(`${request.method}:${url.pathname}:${idempotencyKey}`, { status: response.status, headers: [...response.headers.entries()], body, expiresAt: now() + config.settings.idempotency.ttlSeconds * 1_000 });
-    }
-    return response;
-      },
+    const key = idempotencyKey(config, request); if (key && dependencies.idempotencyStore) { const cached = await dependencies.idempotencyStore.get(key); if (cached && cached.expiresAt > Date.now()) return fromStored(cached); }
+    dependencies.telemetry?.started(context, request);
+    let response: Response; try { response = await handlerWithTimeout(next, request, config.settings.timeoutMs, request.signal); } catch (error) { response = error instanceof DOMException && error.name === "AbortError" ? problem(499, "request_cancelled", "request was cancelled") : error instanceof Error && error.message === "deadline exceeded" ? problem(504, "deadline_exceeded", "request deadline exceeded") : problem(500, "internal_error", "request handler failed"); }
+    response = await maybeCompress(config, request, response); const duration = Date.now() - started;
+    try { await dependencies.schemaCapture?.(request, response.clone()); } catch { /* schema capture is observational */ }
+    if (dependencies.syncObserver) { try { await dependencies.syncObserver(context, request, response.clone(), duration); } catch { if (!config.integrations.optoSync.failOpen) response = problem(503, "sync_observer_failed", "opto-sync observation failed"); } }
+    if (key && dependencies.idempotencyStore && response.ok) await dependencies.idempotencyStore.set(key, await storedResponse(response, config.settings.idempotency.ttlSeconds));
+    dependencies.telemetry?.finished(context, request, response, duration); return response;
+          })();
+        } catch {
+          semanticResponse = problem(500, "internal_error", "request processing failed");
+        }
+        const response = attachHeaders(config, context, semanticResponse);
+        if (!response.ok) {
+          observeRejection({
+            requestId: context.requestId,
+            traceId: context.traceId,
+            method: request.method,
+            pathname: new URL(request.url).pathname,
+            status: response.status,
+            code: await problemCode(response),
+            durationMs: Math.max(0, Date.now() - started)
+          });
+        }
+        return response;
+      }),
       {
-        context: operationContextFromRequestContext(context),
-        reportFailure: dependencies.operationFailureReporter
+        mode: "contain",
+        errorResult: () => attachHeaders(
+          config,
+          context,
+          problem(500, "internal_error", "request processing failed")
+        ),
+        reporter: reportOperationFailure,
+        attributes: {
+          "http.request.method": request.method,
+          "url.path": new URL(request.url).pathname
+        }
       }
     );
-    const response = authenticatedOutcome.ok
-      ? authenticatedOutcome.value
-      : operationFailureResponse(authenticatedOutcome.failure);
-    return response;
-      },
-      {
-        context: operationContextFromRequestContext(context),
-        reportFailure: dependencies.operationFailureReporter
-      }
-    );
-    const response = preAuthOutcome.ok
-      ? preAuthOutcome.value
-      : operationFailureResponse(preAuthOutcome.failure);
-    return attachHeaders(config, context, response);
   };
 }
 
-export async function readJson<T>(request: Request, validator?: (value: unknown) => value is T): Promise<T> {
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/json")) throw new TypeError("expected application/json");
-  const value: unknown = await request.json();
-  if (validator && !validator(value)) throw new TypeError("JSON body failed validation");
-  return value as T;
+async function problemCode(response: Response): Promise<string> {
+  try {
+    const body = await response.clone().json() as { title?: unknown };
+    return typeof body.title === "string" ? body.title : `http_${response.status}`;
+  } catch {
+    return `http_${response.status}`;
+  }
 }
 
-export function sharedAuthHttpVerifier(config: MiddlewareConfig["integrations"]["sharedAuth"]): NonNullable<MiddlewareDependencies["authVerifier"]> {
-  if (!config.introspectionUrl) throw new Error("shared-auth introspectionUrl is required for HTTP mode");
-  return async (request) => {
-    const authorization = request.headers.get("authorization");
-    if (!authorization) return {};
-    const response = await fetch(config.introspectionUrl!, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ authorization, audience: config.audience }) });
-    if (!response.ok) throw new Error("shared-auth introspection failed");
-    const payload = await response.json() as { active?: boolean; sub?: string; tenantId?: string; claims?: Record<string, string> };
-    if (!payload.active || !payload.sub) return {};
-    return { userId: payload.sub, tenantId: payload.tenantId, claims: payload.claims };
-  };
-}
-
-export function optoSyncHttpObserver(config: MiddlewareConfig["integrations"]["optoSync"]): NonNullable<MiddlewareDependencies["syncObserver"]> {
-  if (!config.endpoint) throw new Error("opto-sync endpoint is required for HTTP mode");
-  return async (context, request, response, durationMs) => {
-    const result = await fetch(config.endpoint!, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topic: config.outboxTopic, requestId: context.requestId, traceId: context.traceId, method: request.method, path: new URL(request.url).pathname, status: response.status, durationMs }) });
-    if (!result.ok) throw new Error(`opto-sync returned ${result.status}`);
-  };
-}
-
-export function descriptor() {
+function descriptor(): { contractVersion: string; language: string; runtime: string; packageName: string; frameworkAdapters: string[]; capabilities: readonly string[]; operationSymbols: Record<string, string> } {
   return {
     contractVersion,
-    language: "ts",
-    runtime: "node-deno-bun",
+    language: "typescript",
+    runtime: "web-standard-js",
     packageName: "@oresoftware/ores-middleware",
-    frameworkAdapters: ["express", "deno", "bun", "nestjs", "nextjs", "nuxt", "hapi", "hono", "node-http"],
-    capabilities: [...capabilities],
-    operationSymbols: { descriptor: "descriptor", defaultConfig: "defaultConfig", validateConfig: "validateConfig", createMiddleware: "createMiddleware", runWithContext: "runWithContext", currentContext: "currentContext", capabilities: "capabilities" }
+    frameworkAdapters: ["express", "connect", "nestjs", "nextjs", "cloudflare-workers", "bun", "deno"],
+    capabilities,
+    operationSymbols: {
+      descriptor: "descriptor", defaultConfig: "defaultConfig", validateConfig: "validateConfig", createMiddleware: "createMiddleware", runWithContext: "runWithContext", currentContext: "currentContext", capabilities: "capabilities"
+    }
   };
 }
 
-class DeadlineError extends Error {
-  constructor() {
-    super("request deadline exceeded");
-    this.name = "TimeoutError";
-  }
-}
-function withDeadline<T>(timeoutMs: number, operation: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new DeadlineError()), timeoutMs);
-    operation().then(resolve, reject).finally(() => clearTimeout(timer));
-  });
-}
-function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
-function validToken(value: string | null): string | undefined { return value && value.length <= 128 && /^[A-Za-z0-9._-]+$/.test(value) ? value : undefined; }
-function parseTraceId(value: string | null): string | undefined {
-  const part = value?.split("-")[1]?.toLowerCase();
-  return part &&
-    /^[0-9a-f]{32}$/.test(part) &&
-    part !== "00000000000000000000000000000000"
-    ? part
-    : undefined;
-}
-
-function validTraceparent(value: string | null): string | undefined {
-  if (!value) return undefined;
-  const parts = value.split("-");
-  if (parts.length !== 4) return undefined;
-
-  const version = parts[0]?.toLowerCase();
-  const traceId = parts[1]?.toLowerCase();
-  const spanId = parts[2]?.toLowerCase();
-  const flags = parts[3]?.toLowerCase();
-  if (
-    version !== "00" ||
-    !traceId ||
-    !/^[0-9a-f]{32}$/.test(traceId) ||
-    traceId === "00000000000000000000000000000000" ||
-    !spanId ||
-    !/^[0-9a-f]{16}$/.test(spanId) ||
-    spanId === "0000000000000000" ||
-    !flags ||
-    !/^[0-9a-f]{2}$/.test(flags)
-  ) {
-    return undefined;
-  }
-  return `${version}-${traceId}-${spanId}-${flags}`;
-}
-
-function operationFailureResponse(failure: OperationFailure): Response {
-  return failure.kind === "deadline_exceeded"
-    ? problem(504, "deadline_exceeded", "request deadline exceeded")
-    : failure.kind === "cancelled"
-      ? problem(499, "request_cancelled", "request was cancelled")
-      : problem(500, "internal_error", "request processing failed");
-}
-
-function problem(status: number, code: string, detail: string): Response { return Response.json({ type: `urn:ores:middleware:${code}`, title: code, status, detail }, { status, headers: { "content-type": "application/problem+json" } }); }
-function mergeVary(headers: Headers, ...tokens: string[]): void {
-  const existing = headers.get("vary");
-  if (existing?.trim() === "*") return;
-  const values = new Map<string, string>();
-  for (const value of [...(existing?.split(",") ?? []), ...tokens]) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (!values.has(key)) values.set(key, key);
-  }
-  if (values.size > 0) headers.set("vary", [...values.values()].join(", "));
-  else headers.delete("vary");
-}
-function attachHeaders(config: MiddlewareConfig, context: RequestContext, response: Response): Response {
-  const headers = new Headers(response.headers);
-  headers.set(config.settings.requestIdHeader, context.requestId);
-  const responseTraceparent = validTraceparent(headers.get("traceparent"));
-  if (responseTraceparent) headers.set("traceparent", responseTraceparent);
-  else headers.delete("traceparent");
-  mergeVary(headers, "accept", "accept-encoding");
-  if (config.settings.securityHeaders.enabled) {
-    headers.set("x-content-type-options", "nosniff"); headers.set("x-frame-options", config.settings.securityHeaders.frameOptions); headers.set("referrer-policy", "strict-origin-when-cross-origin"); headers.set("strict-transport-security", `max-age=${config.settings.securityHeaders.hstsMaxAgeSeconds}; includeSubDomains`);
-    if (config.settings.securityHeaders.contentSecurityPolicy) headers.set("content-security-policy", config.settings.securityHeaders.contentSecurityPolicy);
-  }
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-}
-async function attachEtag(request: Request, response: Response): Promise<Response> {
-  if (request.method !== "GET" || response.status !== 200 || response.headers.has("etag") || !response.body) return response;
-  const body = new Uint8Array(await response.arrayBuffer());
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
-  const etag = `"${[...digest].map((value) => value.toString(16).padStart(2, "0")).join("")}"`;
-  if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { etag } });
-  const headers = new Headers(response.headers); headers.set("etag", etag);
-  return new Response(body, { status: response.status, statusText: response.statusText, headers });
-}
-function maybeCompress(config: MiddlewareConfig, request: Request, response: Response): Response {
-  if (!config.settings.compression.enabled || !response.body || typeof CompressionStream === "undefined") return response;
-  const length = Number(response.headers.get("content-length") ?? "0");
-  if (!Number.isFinite(length) || length < config.settings.compression.minimumBytes || !request.headers.get("accept-encoding")?.includes("gzip")) return response;
-  const headers = new Headers(response.headers); headers.delete("content-length"); headers.set("content-encoding", "gzip"); mergeVary(headers, "accept-encoding");
-  return new Response(response.body.pipeThrough(new CompressionStream("gzip")), { status: response.status, statusText: response.statusText, headers });
-}
+if (typeof process !== "undefined" && process.argv?.[1]?.endsWith("contractcheck.js")) console.log(JSON.stringify(descriptor()));
