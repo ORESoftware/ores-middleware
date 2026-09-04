@@ -1,0 +1,223 @@
+name: function-body-conformance
+
+on:
+  pull_request:
+    paths:
+      - "contracts/function-bodies/**"
+      - "scripts/lib/function-body-contracts.mjs"
+      - "scripts/lib/json-pointer-mutations.mjs"
+      - "scripts/validate-function-bodies.mjs"
+      - "tests/e2e/**"
+      - "src/rust/src/operation.rs"
+      - "src/ts/src/operation.ts"
+      - "src/golang/operation.go"
+      - "src/gleam/src/ores_middleware/operation.gleam"
+      - "src/gleam/src/ores_middleware_context_ffi.erl"
+      - "src/elixir/lib/ores_middleware/operation.ex"
+      - "src/elixir/lib/ores_middleware/context.ex"
+      - "src/elixir/test/operation_test.exs"
+      - "src/erlang/src/ores_middleware_operation.erl"
+      - "src/erlang/src/ores_middleware_context.erl"
+      - "src/erlang/test/ores_middleware_operation_tests.erl"
+      - "package.json"
+      - ".github/workflows/function-body-conformance.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "contracts/function-bodies/**"
+      - "scripts/lib/function-body-contracts.mjs"
+      - "scripts/lib/json-pointer-mutations.mjs"
+      - "scripts/validate-function-bodies.mjs"
+      - "tests/e2e/**"
+      - "src/rust/src/operation.rs"
+      - "src/ts/src/operation.ts"
+      - "src/golang/operation.go"
+      - "src/gleam/src/ores_middleware/operation.gleam"
+      - "src/gleam/src/ores_middleware_context_ffi.erl"
+      - "src/elixir/lib/ores_middleware/operation.ex"
+      - "src/elixir/lib/ores_middleware/context.ex"
+      - "src/elixir/test/operation_test.exs"
+      - "src/erlang/src/ores_middleware_operation.erl"
+      - "src/erlang/src/ores_middleware_context.erl"
+      - "src/erlang/test/ores_middleware_operation_tests.erl"
+      - "package.json"
+      - ".github/workflows/function-body-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: function-body-conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-and-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Install locked contract toolchain
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Parse-check verifier and E2E sources
+        run: |
+          set -euo pipefail
+          node --check scripts/lib/function-body-contracts.mjs
+          node --check scripts/lib/json-pointer-mutations.mjs
+          node --check scripts/validate-function-bodies.mjs
+          node --check tests/e2e/function-body-contract.e2e.mjs
+      - name: Compile TypeSpec and execute JSON Schema plus E2E gates
+        run: npm run function-bodies:check
+      - name: Retain function-body receipt even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: function-body-contract-${{ github.run_id }}
+          path: target/function-body-contract/receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  typescript-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Compile strict declarations
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+          npm run build --prefix src/ts
+
+  rust-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install Rust 1.95.0 and Clippy
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: clippy
+      - name: Lint every target with warnings denied
+        run: cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Test every feature
+        run: cargo test --manifest-path src/rust/Cargo.toml --all-features
+
+  go-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install Go 1.25.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25.0"
+          cache: false
+      - name: Vet and race-test with randomized ordering
+        working-directory: src/golang
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test -race -shuffle=on -count=2 ./...
+
+  gleam-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install OTP 27 and Gleam 1.18.1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27"
+          gleam-version: "1.18.1"
+      - name: Check formatting and tests
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          gleam format --check src test
+          gleam test
+
+  elixir-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install OTP 27 and Elixir 1.18
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27"
+          elixir-version: "1.18"
+      - name: Check new operation sources, compile strictly, and test
+        working-directory: src/elixir
+        env:
+          MIX_ENV: test
+        run: |
+          set -euo pipefail
+          mix deps.get
+          mix format --check-formatted lib/ores_middleware/operation.ex test/operation_test.exs
+          mix compile --warnings-as-errors
+          mix test
+
+  erlang-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Install OTP 27 and rebar3 3.24.0
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27"
+          rebar3-version: "3.24.0"
+      - name: Compile the new body with warnings denied and EUnit-test the package
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/erlang-static"
+          erlc -Wall -Werror -o "$RUNNER_TEMP/erlang-static" src/ores_middleware_operation.erl
+          rebar3 as test compile
+          rebar3 eunit

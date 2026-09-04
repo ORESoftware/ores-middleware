@@ -1,0 +1,51 @@
+{
+  "schemaCases": [
+    {
+      "name": "unknown opcode is rejected by JSON Schema",
+      "mutations": [{"op": "set", "path": "/steps/0/opcode", "value": "run-shell"}],
+      "expectedKeywords": ["enum"]
+    },
+    {
+      "name": "additional fields are rejected by JSON Schema",
+      "mutations": [{"op": "set", "path": "/steps/0/rawCause", "value": "secret"}],
+      "expectedKeywords": ["additionalProperties"]
+    },
+    {
+      "name": "terminal contract is required by JSON Schema",
+      "mutations": [{"op": "delete", "path": "/steps/10/terminal"}],
+      "expectedKeywords": ["required"]
+    },
+    {
+      "name": "public error messages are rejected by JSON Schema",
+      "mutations": [{"op": "set", "path": "/publicFailureFields/0", "value": "message"}],
+      "expectedKeywords": ["not"]
+    }
+  ],
+  "semanticCases": [
+    {
+      "name": "operation cannot run before the failure boundary",
+      "mutations": [{"op": "swap", "path": "/steps", "value": [3, 5]}],
+      "expectedCodes": ["sequence-mismatch", "dependency-order"]
+    },
+    {
+      "name": "reporter failure must remain fail-open",
+      "mutations": [{"op": "set", "path": "/steps/8/failurePolicy", "value": "map-to-typed-failure"}],
+      "expectedCodes": ["step-failurePolicy-mismatch"]
+    },
+    {
+      "name": "context restoration cannot be omitted",
+      "mutations": [{"op": "delete", "path": "/steps/9"}],
+      "expectedCodes": ["sequence-mismatch", "unknown-dependency"]
+    },
+    {
+      "name": "future dependencies are rejected",
+      "mutations": [{"op": "set", "path": "/steps/0/dependsOn", "value": ["return-typed-outcome"]}],
+      "expectedCodes": ["dependency-order"]
+    },
+    {
+      "name": "private failure messages cannot become public fields",
+      "mutations": [{"op": "set", "path": "/publicFailureFields/0", "value": "message"}],
+      "expectedCodes": ["public-failure-fields", "public-field-forbidden"]
+    }
+  ]
+}

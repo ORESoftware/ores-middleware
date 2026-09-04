@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "contractId": "ores.middleware.operation-body/v1",
+  "function": "runOperationBoundary",
+  "intent": "Execute one protocol operation inside an isolated request context, map language failures and termination into bounded typed outcomes, report safely, and restore ambient state before returning.",
+  "inputs": ["context", "descriptor", "operation", "failureReporter"],
+  "outputs": ["completed", "failed"],
+  "publicFailureFields": ["kind", "code", "transport", "scope", "operation", "requestId", "traceId", "errorType"],
+  "forbiddenPublicFields": ["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"],
+  "steps": [
+    {"id": "capture-context", "opcode": "capture-context", "phase": "setup", "when": "always", "dependsOn": [], "effects": ["read-ambient-context", "snapshot-allowlisted-context"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "normalize-input", "opcode": "normalize-input", "phase": "setup", "when": "always", "dependsOn": ["capture-context"], "effects": ["normalize-low-cardinality-input"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "enter-context", "opcode": "enter-context", "phase": "setup", "when": "always", "dependsOn": ["normalize-input"], "effects": ["install-request-context"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "enter-failure-boundary", "opcode": "enter-failure-boundary", "phase": "guarded", "when": "always", "dependsOn": ["enter-context"], "effects": ["catch-language-failure"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "arm-termination-guard", "opcode": "arm-termination-guard", "phase": "guarded", "when": "always", "dependsOn": ["enter-failure-boundary"], "effects": ["observe-cancellation-or-deadline"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "invoke-operation", "opcode": "invoke-operation", "phase": "guarded", "when": "unless-failed", "dependsOn": ["arm-termination-guard"], "effects": ["invoke-user-code"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "classify-failure", "opcode": "classify-failure", "phase": "failure", "when": "on-failure", "dependsOn": ["arm-termination-guard"], "effects": ["classify-failure-without-payload"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "redact-public-failure", "opcode": "redact-public-failure", "phase": "failure", "when": "on-failure", "dependsOn": ["classify-failure"], "effects": ["construct-public-failure"], "failurePolicy": "map-to-typed-failure", "terminal": false},
+    {"id": "report-failure-fail-open", "opcode": "report-failure-fail-open", "phase": "failure", "when": "on-failure", "dependsOn": ["redact-public-failure"], "effects": ["emit-bounded-telemetry"], "failurePolicy": "ignore-reporter-failure", "terminal": false},
+    {"id": "restore-context", "opcode": "restore-context", "phase": "finalization", "when": "finally", "dependsOn": ["enter-context"], "effects": ["restore-ambient-context"], "failurePolicy": "always-run", "terminal": false},
+    {"id": "return-typed-outcome", "opcode": "return-typed-outcome", "phase": "terminal", "when": "always", "dependsOn": ["restore-context"], "effects": ["return-outcome"], "failurePolicy": "not-applicable", "terminal": true}
+  ]
+}

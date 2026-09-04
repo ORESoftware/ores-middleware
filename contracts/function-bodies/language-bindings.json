@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "1.0.0",
+  "contractId": "ores.middleware.operation-body/v1",
+  "plan": "contracts/function-bodies/operation-boundary.plan.json",
+  "bindings": [
+    {
+      "language": "rust",
+      "symbol": "run_operation_boundary",
+      "sources": ["src/rust/src/operation.rs"],
+      "stepEvidence": [
+        {"stepId": "capture-context", "source": "src/rust/src/operation.rs", "requiredFragments": ["let log_context_source = context.clone();"], "ordered": false},
+        {"stepId": "normalize-input", "source": "src/rust/src/operation.rs", "requiredFragments": ["normalize_descriptor(descriptor)"], "ordered": false},
+        {"stepId": "enter-context", "source": "src/rust/src/operation.rs", "requiredFragments": ["run_with_context("], "ordered": false},
+        {"stepId": "enter-failure-boundary", "source": "src/rust/src/operation.rs", "requiredFragments": ["AssertUnwindSafe(operation).catch_unwind().await"], "ordered": false},
+        {"stepId": "arm-termination-guard", "source": "src/rust/src/operation.rs", "requiredFragments": ["tokio::time::timeout(", "tokio::select!"], "ordered": false},
+        {"stepId": "invoke-operation", "source": "src/rust/src/operation.rs", "requiredFragments": ["Ok(Ok(value)) => OperationOutcome::Completed(value)"], "ordered": false},
+        {"stepId": "classify-failure", "source": "src/rust/src/operation.rs", "requiredFragments": ["OperationFailureKind::DeadlineExceeded", "OperationFailureKind::Cancelled", "OperationFailureKind::Panic"], "ordered": false},
+        {"stepId": "redact-public-failure", "source": "src/rust/src/operation.rs", "requiredFragments": ["pub struct OperationFailure {", "pub error_type: String"], "ordered": true},
+        {"stepId": "report-failure-fail-open", "source": "src/rust/src/operation.rs", "requiredFragments": ["tracing::error!("], "ordered": false},
+        {"stepId": "restore-context", "source": "src/rust/src/operation.rs", "requiredFragments": ["run_with_ores_log_context(&log_context_source, guarded)"], "ordered": false},
+        {"stepId": "return-typed-outcome", "source": "src/rust/src/operation.rs", "requiredFragments": ["OperationOutcome::Failed(OperationFailure {"], "ordered": false}
+      ],
+      "forbiddenFragments": ["public_failure.message", "public_failure.stack"]
+    },
+    {
+      "language": "typescript",
+      "symbol": "runOperationBoundary",
+      "sources": ["src/ts/src/operation.ts"],
+      "stepEvidence": [
+        {"stepId": "capture-context", "source": "src/ts/src/operation.ts", "requiredFragments": ["const snapshot = options.context ?? captureOperationContext();"], "ordered": false},
+        {"stepId": "normalize-input", "source": "src/ts/src/operation.ts", "requiredFragments": ["const operationName = safeOperationName(descriptor.name);"], "ordered": false},
+        {"stepId": "enter-context", "source": "src/ts/src/operation.ts", "requiredFragments": ["return runWithCapturedOperationContext(snapshot, async () => {"], "ordered": false},
+        {"stepId": "enter-failure-boundary", "source": "src/ts/src/operation.ts", "requiredFragments": ["try {", "} catch (cause) {"], "ordered": true},
+        {"stepId": "arm-termination-guard", "source": "src/ts/src/operation.ts", "requiredFragments": ["if (descriptor.signal?.aborted) {"], "ordered": false},
+        {"stepId": "invoke-operation", "source": "src/ts/src/operation.ts", "requiredFragments": ["return { ok: true, value: await operation() };"], "ordered": false},
+        {"stepId": "classify-failure", "source": "src/ts/src/operation.ts", "requiredFragments": ["const kind = failureKind(cause, descriptor.signal);"], "ordered": false},
+        {"stepId": "redact-public-failure", "source": "src/ts/src/operation.ts", "requiredFragments": ["const failure: OperationFailure = {", "errorType: safeErrorType(cause)"], "ordered": true},
+        {"stepId": "report-failure-fail-open", "source": "src/ts/src/operation.ts", "requiredFragments": ["await reportSafely(reporter, { failure, cause });"], "ordered": false},
+        {"stepId": "restore-context", "source": "src/ts/src/operation.ts", "requiredFragments": ["runWithCapturedContext(snapshot.requestContext, operation)"], "ordered": false},
+        {"stepId": "return-typed-outcome", "source": "src/ts/src/operation.ts", "requiredFragments": ["return { ok: false, failure };"], "ordered": false}
+      ],
+      "forbiddenFragments": ["message: cause", "stack: cause", "cause: cause"]
+    },
+    {
+      "language": "golang",
+      "symbol": "RunOperationBoundary",
+      "sources": ["src/golang/operation.go"],
+      "stepEvidence": [
+        {"stepId": "capture-context", "source": "src/golang/operation.go", "requiredFragments": ["requestContext RequestContext,"], "ordered": false},
+        {"stepId": "normalize-input", "source": "src/golang/operation.go", "requiredFragments": ["Operation: safeOperationName(descriptor.Name)"], "ordered": false},
+        {"stepId": "enter-context", "source": "src/golang/operation.go", "requiredFragments": ["ctx := WithRequestContext(parent, requestContext)"], "ordered": false},
+        {"stepId": "enter-failure-boundary", "source": "src/golang/operation.go", "requiredFragments": ["if recovered := recover(); recovered != nil {"], "ordered": false},
+        {"stepId": "arm-termination-guard", "source": "src/golang/operation.go", "requiredFragments": ["contextFailure(ctx, descriptor, requestContext)"], "ordered": false},
+        {"stepId": "invoke-operation", "source": "src/golang/operation.go", "requiredFragments": ["value, err := operation(ctx)"], "ordered": false},
+        {"stepId": "classify-failure", "source": "src/golang/operation.go", "requiredFragments": ["errors.Is(err, context.DeadlineExceeded)", "errors.Is(err, context.Canceled)"], "ordered": false},
+        {"stepId": "redact-public-failure", "source": "src/golang/operation.go", "requiredFragments": ["type OperationFailure struct {", "ErrorType string"], "ordered": true},
+        {"stepId": "report-failure-fail-open", "source": "src/golang/operation.go", "requiredFragments": ["defer func() { _ = recover() }()", "reporter(ctx, failure)"], "ordered": true},
+        {"stepId": "restore-context", "source": "src/golang/operation.go", "requiredFragments": ["ctx := WithRequestContext(parent, requestContext)"], "ordered": false},
+        {"stepId": "return-typed-outcome", "source": "src/golang/operation.go", "requiredFragments": ["return OperationOutcome[T]{Failure: &failure}"], "ordered": false}
+      ],
+      "forbiddenFragments": ["Message string", "Stack string", "Cause any"]
+    },
+    {
+      "language": "gleam",
+      "symbol": "ores_middleware/operation.run",
+      "sources": ["src/gleam/src/ores_middleware/operation.gleam", "src/gleam/src/ores_middleware_context_ffi.erl"],
+      "stepEvidence": [
+        {"stepId": "capture-context", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["PreviousContext = erlang:get(?CONTEXT_KEY)"], "ordered": false},
+        {"stepId": "normalize-input", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["safe_name(Name)"], "ordered": false},
+        {"stepId": "enter-context", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["with_context(Context, fun() ->"], "ordered": false},
+        {"stepId": "enter-failure-boundary", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["try", "catch"], "ordered": true},
+        {"stepId": "arm-termination-guard", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["run_with_deadline(Fun, TimeoutMs, Context) ->", "after TimeoutMs ->"], "ordered": true},
+        {"stepId": "invoke-operation", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["{ok, Fun()}"], "ordered": false},
+        {"stepId": "classify-failure", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["Class:_Reason:_Stacktrace ->"], "ordered": false},
+        {"stepId": "redact-public-failure", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["{error, <<\"operation_failed\">>}"], "ordered": false},
+        {"stepId": "report-failure-fail-open", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["safe_log_failure(Transport, Scope, Name, Class)", "_:_ -> ok"], "ordered": true},
+        {"stepId": "restore-context", "source": "src/gleam/src/ores_middleware_context_ffi.erl", "requiredFragments": ["after", "restore_context(PreviousContext)"], "ordered": true},
+        {"stepId": "return-typed-outcome", "source": "src/gleam/src/ores_middleware/operation.gleam", "requiredFragments": [") -> Result(result, String) {", "run_ffi("], "ordered": true}
+      ],
+      "forbiddenFragments": ["reason => _Reason", "stacktrace => _Stacktrace"]
+    },
+    {
+      "language": "elixir",
+      "symbol": "OresMiddleware.Operation.run/4",
+      "sources": ["src/elixir/lib/ores_middleware/operation.ex", "src/elixir/lib/ores_middleware/context.ex"],
+      "stepEvidence": [
+        {"stepId": "capture-context", "source": "src/elixir/lib/ores_middleware/context.ex", "requiredFragments": ["previous_context = current()", "previous_metadata = Logger.metadata()"], "ordered": true},
+        {"stepId": "normalize-input", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["descriptor = normalize_descriptor(descriptor)"], "ordered": false},
+        {"stepId": "enter-context", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["Context.run(context, fn ->"], "ordered": false},
+        {"stepId": "enter-failure-boundary", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["try do", "rescue", "catch"], "ordered": true},
+        {"stepId": "arm-termination-guard", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["case preflight_failure(descriptor) do"], "ordered": false},
+        {"stepId": "invoke-operation", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["{:ok, operation.()}"], "ordered": false},
+        {"stepId": "classify-failure", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["safe_error_type(error)", "safe_token(class, \"panic\", 64)"], "ordered": false},
+        {"stepId": "redact-public-failure", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["failure = %{", "error_type: safe_token(error_type, \"error\", 64)"], "ordered": true},
+        {"stepId": "report-failure-fail-open", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["report_safely(reporter, failure)", "_error -> :ok", "_class, _reason -> :ok"], "ordered": false},
+        {"stepId": "restore-context", "source": "src/elixir/lib/ores_middleware/context.ex", "requiredFragments": ["after", "Logger.reset_metadata(previous_metadata)"], "ordered": true},
+        {"stepId": "return-typed-outcome", "source": "src/elixir/lib/ores_middleware/operation.ex", "requiredFragments": ["{:error, failure}"], "ordered": false}
+      ],
+      "forbiddenFragments": ["Exception.message(", "__STACKTRACE__", "inspect(error)"]
+    },
+    {
+      "language": "erlang",
+      "symbol": "ores_middleware_operation:run/4",
+      "sources": ["src/erlang/src/ores_middleware_operation.erl", "src/erlang/src/ores_middleware_context.erl"],
+      "stepEvidence": [
+        {"stepId": "capture-context", "source": "src/erlang/src/ores_middleware_context.erl", "requiredFragments": ["PreviousContext = current()", "PreviousMetadata = logger:get_process_metadata()"], "ordered": true},
+        {"stepId": "normalize-input", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["Descriptor = normalize_descriptor(Descriptor0)"], "ordered": false},
+        {"stepId": "enter-context", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["ores_middleware_context:run(Context, fun() ->"], "ordered": false},
+        {"stepId": "enter-failure-boundary", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["try", "catch"], "ordered": true},
+        {"stepId": "arm-termination-guard", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["case preflight_failure(Descriptor) of"], "ordered": false},
+        {"stepId": "invoke-operation", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["{ok, Fun()}"], "ordered": false},
+        {"stepId": "classify-failure", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["Class:_Reason:_Stacktrace ->", "safe_class(Class)"], "ordered": true},
+        {"stepId": "redact-public-failure", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["Failure = #{", "error_type => ErrorType"], "ordered": true},
+        {"stepId": "report-failure-fail-open", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["report_safely(Reporter, Failure)", "_:_ -> ok"], "ordered": false},
+        {"stepId": "restore-context", "source": "src/erlang/src/ores_middleware_context.erl", "requiredFragments": ["after", "restore_context(PreviousContext)"], "ordered": true},
+        {"stepId": "return-typed-outcome", "source": "src/erlang/src/ores_middleware_operation.erl", "requiredFragments": ["{error, Failure}"], "ordered": false}
+      ],
+      "forbiddenFragments": ["reason => _Reason", "stacktrace => _Stacktrace"]
+    }
+  ]
+}
