@@ -25,6 +25,7 @@
     "persistence:check": "npm run persistence:catalog && npm run persistence:data-plane",
     "descriptors:check": "node scripts/check-descriptors.mjs --require-all",
     "zpkg:check": "python3 scripts/check_zpkg.py",
+    "zpkg:check:rust": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin zpkg_contract_check -- --root .",
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "verify": "npm run contracts:compile && npm run contracts:check && npm run zpkg:check && node scripts/check-source-layout.mjs"
   },
