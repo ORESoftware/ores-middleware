@@ -72,6 +72,16 @@ Validation failures intentionally use a generic public problem response. Detaile
 schema paths remain available to the adapter for bounded internal telemetry and
 must not include request bodies, credentials, cookies, or authorization values.
 
+## Static-analysis requirements
+
+Generated adapters and application wiring should compile with strict null and
+implicit-`any` checks enabled. A validator adapter must implement the exported
+`RequestContractValidator` and `RequestContractMatch` interfaces directly; it
+must not widen `resolve` with an untyped request, query map, header map, or body.
+Repository linting should reject casts that bypass those interfaces and should
+keep operation lookup in a dedicated method-plus-path matcher. Schema validators
+may coerce parsed scalar values, but they must not alter the selected operation.
+
 ## Build and pre-deploy policy
 
 Services should compile generated language clients, run `ridl check` and `ridl
