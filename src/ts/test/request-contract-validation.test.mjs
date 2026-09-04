@@ -26,7 +26,7 @@ function jsonRequest(url, body, headers = {}) {
   });
 }
 
-test("resolver identity is method + pathname only and validator receives immutable surfaces", async () => {
+test("resolver identity is method + pathname only and validator receives immutable safe surfaces", async () => {
   const resolved = [];
   const validated = [];
   const validator = {
@@ -35,13 +35,17 @@ test("resolver identity is method + pathname only and validator receives immutab
       return {
         pathTemplate: "/v1/items/{id}",
         pathParams: { id: "42" },
+        headerNames: ["x-client-version", "if-match"],
         async validate(input) {
           assert.equal(Object.isFrozen(input), true);
           assert.equal(Object.isFrozen(input.pathParams), true);
           assert.equal(Object.isFrozen(input.query), true);
           assert.equal(Object.isFrozen(input.headers), true);
+          assert.equal(Object.isFrozen(input.body), true);
           assert.equal(Object.isFrozen(input.query[0]), true);
           assert.equal(Object.isFrozen(input.headers[0]), true);
+          assert.equal("request" in input, false);
+          assert.equal(input.body.present, true);
           validated.push({
             method: input.method,
             pathname: input.pathname,
@@ -49,7 +53,7 @@ test("resolver identity is method + pathname only and validator receives immutab
             pathParams: input.pathParams,
             query: input.query,
             headers: input.headers,
-            body: await input.request.json()
+            body: await input.body.json()
           });
           return [];
         }
@@ -59,8 +63,21 @@ test("resolver identity is method + pathname only and validator receives immutab
 
   const middleware = createMiddleware(config(), { requestContractValidator: validator });
   const inputs = [
-    jsonRequest("https://example.test/v1/items/42?view=full", { name: "alpha" }, { "x-client-version": "1" }),
-    jsonRequest("https://example.test/v1/items/42?view=compact", { name: "beta" }, { "x-client-version": "2" })
+    jsonRequest(
+      "https://example.test/v1/items/42?view=full",
+      { name: "alpha" },
+      {
+        "x-client-version": "1",
+        authorization: "Bearer never-visible",
+        cookie: "session=never-visible",
+        "x-forwarded-for": "203.0.113.7"
+      }
+    ),
+    jsonRequest(
+      "https://example.test/v1/items/42?view=compact",
+      { name: "beta" },
+      { "x-client-version": "2", "if-match": '"version-2"' }
+    )
   ];
 
   for (const request of inputs) {
@@ -77,7 +94,14 @@ test("resolver identity is method + pathname only and validator receives immutab
   ]);
   assert.equal(validated[0].query[0][1], "full");
   assert.equal(validated[1].query[0][1], "compact");
-  assert.equal(validated[0].headers.some(([name, value]) => name === "x-client-version" && value === "1"), true);
+  assert.deepEqual(validated[0].headers, [["x-client-version", "1"]]);
+  assert.deepEqual(validated[1].headers, [
+    ["x-client-version", "2"],
+    ["if-match", '"version-2"']
+  ]);
+  assert.equal(validated[0].headers.some(([name]) => name === "authorization"), false);
+  assert.equal(validated[0].headers.some(([name]) => name === "cookie"), false);
+  assert.equal(validated[0].headers.some(([name]) => name === "content-type"), false);
   assert.deepEqual(validated.map((entry) => entry.body.name), ["alpha", "beta"]);
   assert.equal(currentContext(), undefined);
 });
@@ -95,6 +119,7 @@ test("invalid path/query/header/body surfaces fail before rate limiting, auth, a
         return {
           pathTemplate: "/v1/items/{id}",
           pathParams: { id: "not-a-uuid" },
+          headerNames: ["x-client-version"],
           validate() {
             return [{ path: "/headers/x-client-version", code: "required", message: "header is required" }];
           }
@@ -140,6 +165,52 @@ test("strict validator returns 404 when method + pathname have no declared opera
   );
   assert.equal(response.status, 404);
   assert.equal((await response.json()).title, "unknown_operation");
+});
+
+test("runtime-owned, mixed-case, and duplicate header declarations fail closed", async () => {
+  for (const headerNames of [
+    ["authorization"],
+    ["content-length"],
+    ["X-Client-Version"],
+    ["x-client-version", "x-client-version"]
+  ]) {
+    await assert.rejects(
+      () => checkRequestContract(
+        {
+          resolve: () => ({
+            pathTemplate: "/v1/items/{id}",
+            headerNames,
+            validate: () => []
+          })
+        },
+        new Request("https://example.test/v1/items/42")
+      ),
+      /request contract header/
+    );
+  }
+});
+
+test("body readers are repeatable and do not consume the handler request", async () => {
+  const request = jsonRequest("https://example.test/v1/items/42", { name: "repeat" });
+  let first;
+  let second;
+  const failure = await checkRequestContract(
+    {
+      resolve: () => ({
+        pathTemplate: "/v1/items/{id}",
+        async validate(input) {
+          first = await input.body.json();
+          second = await input.body.json();
+          return [];
+        }
+      })
+    },
+    request
+  );
+  assert.equal(failure, undefined);
+  assert.deepEqual(first, { name: "repeat" });
+  assert.deepEqual(second, { name: "repeat" });
+  assert.deepEqual(await request.json(), { name: "repeat" });
 });
 
 test("validator issue arrays are runtime checked and malformed adapters fail closed", async () => {
