@@ -13,8 +13,9 @@ interface RequestContractValidator {
 
 Only method and pathname are available during operation resolution. After the
 match, its validator receives immutable snapshots of path parameters, repeated
-query pairs, canonical header pairs, and a request clone for JSON-body parsing.
-It may return validation issues, but it cannot return or replace a route.
+query pairs, only the application headers declared by that operation, and
+isolated body readers. It may return validation issues, but it cannot return or
+replace a route.
 
 This makes header-based and query-based routing structurally unavailable while
 still supporting compile-time generated request types and Draft 2020-12 runtime
@@ -25,16 +26,47 @@ schemas.
 At application startup, compile the `api-docs` schemas with the JSON Schema
 validator selected by the service. Build a method/path matcher from generated
 route metadata. Its `resolve` callback returns the already-compiled operation
-validator and path parameters. Do not pass query parameters or headers into the
-matcher.
+validator, path parameters, and the generated application-header names. Do not
+pass query parameters or headers into the matcher.
+
+```ts
+return {
+  pathTemplate: operation.pathTemplate,
+  pathParams,
+  headerNames: operation.applicationHeaderNames,
+  async validate(input) {
+    const parsedBody = input.body.present ? await input.body.json() : undefined;
+    return validateGeneratedRequestSchema({
+      method: input.method,
+      pathTemplate: input.pathTemplate,
+      path: Object.fromEntries(Object.entries(input.pathParams)),
+      query: Object.fromEntries(input.query),
+      headers: Object.fromEntries(input.headers),
+      body: parsedBody
+    });
+  }
+};
+```
+
+`headerNames` must contain unique canonical lower-case HTTP tokens. The
+middleware rejects authentication, cookies, tracing, proxy forwarding, HTTP
+framing, and hop-by-hop header names before invoking the validator. Consequently
+a closed per-route header schema sees only its declared application metadata and
+never receives `authorization`, `cookie`, `traceparent`, forwarded IP data, or
+similar runtime-owned values.
+
+The validator receives repeatable `json()` and `text()` body readers backed by
+isolated request clones—not a `Request` object. It therefore cannot inspect
+credentials or consume the request body that the handler will receive.
 
 At request time the middleware:
 
 1. applies payload-size, content negotiation, TLS, forwarded-header, and IP checks;
 2. resolves the request contract from normalized method + pathname;
-3. validates path/query/header/body data from a cloned request;
-4. rejects unknown operations with 404 and invalid request surfaces with 400;
-5. runs rate limiting, authentication, telemetry, and the handler only after validation succeeds.
+3. projects only declared application headers;
+4. validates path/query/header/body data through immutable inputs;
+5. rejects unknown operations with 404 and invalid request surfaces with 400;
+6. runs rate limiting, authentication, telemetry, and the handler only after validation succeeds.
 
 Validation failures intentionally use a generic public problem response. Detailed
 schema paths remain available to the adapter for bounded internal telemetry and
