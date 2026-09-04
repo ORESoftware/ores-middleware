@@ -14,8 +14,8 @@ reporter_failure_is_ignored_and_failure_is_redacted_test() ->
         Reporter,
         Operation
     ),
-    ?assertEqual(panic, maps:get(kind, Failure)),
-    ?assertEqual(<<"operation_panicked">>, maps:get(code, Failure)),
+    ?assertEqual(error, maps:get(kind, Failure)),
+    ?assertEqual(<<"operation_failed">>, maps:get(code, Failure)),
     ?assertEqual(<<"orders.read">>, maps:get(operation, Failure)),
     ?assertEqual(maps:get(request_id, Inner), maps:get(request_id, Failure)),
     ?assertNot(maps:is_key(message, Failure)),
@@ -55,6 +55,8 @@ malformed_operation_name_is_bounded_test() ->
         fun(_Event) -> ok end,
         fun() -> throw(private_reason) end
     ),
+    ?assertEqual(panic, maps:get(kind, Failure)),
+    ?assertEqual(<<"operation_panicked">>, maps:get(code, Failure)),
     ?assertEqual(<<"operation">>, maps:get(operation, Failure)),
     ?assertEqual(<<"throw">>, maps:get(error_type, Failure)),
     ?assertEqual(undefined, ores_middleware_context:current()).
