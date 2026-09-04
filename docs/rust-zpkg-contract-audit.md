@@ -26,3 +26,11 @@ TypeSpec and JSON Schema/OpenAPI remain independent, human-authored, top-level
 authorities. The Rust checker rejects removal of either peer, authority
 precedence in either direction, missing translation/round-trip/catalog/ORM
 gates, or any mismatch policy other than `STOPPED_FOR_EVALUATION`.
+
+## Review discipline
+
+Admission is always based on the exact pull-request head. A formatting,
+documentation, compatibility-shim, or checker change must rerun the typed Rust
+workflow and every repository convergence workflow; an older green head is not
+merge evidence. Reviewers must confirm byte-identical direct-Rust and
+Python-shim receipts before marking the change ready.
