@@ -345,13 +345,25 @@ def compare_orm_matrix(
     )
 
 
+def resolve_cli_path(root: Path, value: Path | None, default: Path) -> Path:
+    """Resolve a CLI evidence path against the selected repository root."""
+    candidate = default if value is None else value
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    return candidate.resolve()
+
+
 def run(
     root: Path = ROOT,
     output_root: Path | None = None,
     database_url: str | None = None,
 ) -> tuple[list[Discrepancy], dict[str, Any]]:
     started = now()
-    output_root = output_root or root / "target" / "orm-matrix-gate"
+    output_root = resolve_cli_path(
+        root,
+        output_root,
+        root / "target" / "orm-matrix-gate",
+    )
     database_url = database_url or os.environ.get("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL or --database-url is required")
@@ -516,7 +528,11 @@ def main() -> int:
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
-    output_root = args.output_root or root / "target" / "orm-matrix-gate"
+    output_root = resolve_cli_path(
+        root,
+        args.output_root,
+        root / "target" / "orm-matrix-gate",
+    )
     started = now()
     try:
         findings, report = run(root, output_root, args.database_url)
@@ -544,7 +560,11 @@ def main() -> int:
             "zeroUnexplainedFindings": False,
             "discrepancies": [asdict(item)],
         }
-    report_path = args.report or output_root / "receipt.json"
+    report_path = resolve_cli_path(
+        root,
+        args.report,
+        output_root / "receipt.json",
+    )
     write_json(report_path, report)
     if findings:
         print(

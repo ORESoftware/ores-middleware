@@ -16,10 +16,23 @@
     }
   ],
   "flows": {
-    "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
+    "typespec": [
+      "interfaces-types",
+      "runtime-code",
+      "sql-when-applicable",
+      "diesel",
+      "seaorm",
+      "protobuf",
+      "grpc",
+      "wire-clients"
+    ],
     "json-schema-openapi": [
       "interfaces-types",
+      "runtime-code",
       "sql-when-applicable",
+      "diesel",
+      "seaorm",
+      "openapi",
       "write-clients"
     ]
   },
@@ -34,6 +47,7 @@
     "sql-catalog-readback-when-applicable",
     "generated-client-type-fixtures",
     "diesel-seaorm-catalog-parity-when-applicable",
+    "diesel-seaorm-row-level-parity-when-applicable",
     "runtime-conformance-fixtures"
   ],
   "onUnexplainedMismatch": "STOPPED_FOR_EVALUATION"

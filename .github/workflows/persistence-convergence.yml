@@ -18,7 +18,7 @@ concurrency:
 jobs:
   orm-catalog:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:17-bookworm
@@ -69,10 +69,12 @@ jobs:
           python3 -m unittest \
             scripts/test_orm_catalog_gate.py \
             scripts/test_orm_matrix_gate.py \
+            scripts/test_orm_data_plane_gate.py \
             scripts/test_subprocess_capture.py \
             -v
+          python3 scripts/check_zpkg.py
 
-      - name: Compile four real ORM witnesses and compare PostgreSQL catalogs
+      - name: Compile both ORMs from both authorities and compare PostgreSQL catalogs
         shell: bash
         env:
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
@@ -81,8 +83,43 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/orm_matrix_gate.py
+          jq -e '
+            .schema == "ores.orm-catalog-convergence-report/v2" and
+            .status == "passed" and
+            .zeroUnexplainedFindings == true and
+            (.discrepancies | length) == 0 and
+            (.ormManifests | keys | sort == [
+              "json-schema-openapi-diesel",
+              "json-schema-openapi-seaorm",
+              "typespec-diesel",
+              "typespec-seaorm"
+            ])
+          ' target/orm-matrix-gate/receipt.json
 
-      - name: Upload execution receipts, lockfile, sources, SQL, catalogs, and polyglot outputs
+      - name: Execute both ORMs against both independently generated SQL lanes
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          CARGO_TERM_COLOR: never
+          RUSTFLAGS: -Dwarnings
+        run: |
+          set -euo pipefail
+          python3 scripts/orm_data_plane_gate.py
+          jq -e '
+            .schema == "ores.orm-data-plane-convergence-report/v1" and
+            .status == "passed" and
+            .zeroUnexplainedFindings == true and
+            (.discrepancies | length) == 0 and
+            (.witnesses | keys | sort == [
+              "json-schema-openapi-diesel",
+              "json-schema-openapi-seaorm",
+              "typespec-diesel",
+              "typespec-seaorm"
+            ]) and
+            ([.witnesses[].witness.rejections[] | select(. == true)] | length) == 24
+          ' target/orm-data-plane-gate/receipt.json
+
+      - name: Upload catalog and row-level convergence evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -90,9 +127,11 @@ jobs:
           path: |
             scripts/orm_catalog_gate.py
             scripts/orm_matrix_gate.py
+            scripts/orm_data_plane_gate.py
             scripts/subprocess_capture.py
             scripts/test_orm_catalog_gate.py
             scripts/test_orm_matrix_gate.py
+            scripts/test_orm_data_plane_gate.py
             scripts/test_subprocess_capture.py
             target/orm-matrix-gate/receipt.json
             target/orm-matrix-gate/catalog/*.json
@@ -100,6 +139,12 @@ jobs:
             target/orm-matrix-gate/rust-witness/Cargo.toml
             target/orm-matrix-gate/rust-witness/Cargo.lock
             target/orm-matrix-gate/rust-witness/src/main.rs
+            target/orm-data-plane-gate/receipt.json
+            target/orm-data-plane-gate/sql/*.sql
+            target/orm-data-plane-gate/witnesses/*.json
+            target/orm-data-plane-gate/rust-data-plane/Cargo.toml
+            target/orm-data-plane-gate/rust-data-plane/Cargo.lock
+            target/orm-data-plane-gate/rust-data-plane/src/main.rs
             target/schema-convergence/**/*
           if-no-files-found: error
           retention-days: 90

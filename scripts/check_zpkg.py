@@ -27,8 +27,25 @@ EXPECTED_OUTPUTS = {
     "target/package",
 }
 EXPECTED_FLOWS = {
-    "typespec": ["sql-when-applicable", "protobuf", "grpc", "wire-clients"],
-    "json-schema-openapi": ["interfaces-types", "sql-when-applicable", "write-clients"],
+    "typespec": [
+        "interfaces-types",
+        "runtime-code",
+        "sql-when-applicable",
+        "diesel",
+        "seaorm",
+        "protobuf",
+        "grpc",
+        "wire-clients",
+    ],
+    "json-schema-openapi": [
+        "interfaces-types",
+        "runtime-code",
+        "sql-when-applicable",
+        "diesel",
+        "seaorm",
+        "openapi",
+        "write-clients",
+    ],
 }
 POLYGLOT_COMMAND = (
     "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml "
@@ -49,7 +66,9 @@ EXPECTED_WORKSPACE_SCRIPTS = {
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
     "contracts:polyglot-generate": POLYGLOT_COMMAND,
     "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
-    "persistence:check": "python3 scripts/orm_matrix_gate.py",
+    "persistence:catalog": "python3 scripts/orm_matrix_gate.py",
+    "persistence:data-plane": "python3 scripts/orm_data_plane_gate.py",
+    "persistence:check": "npm run persistence:catalog && npm run persistence:data-plane",
     "zpkg:check": "python3 scripts/check_zpkg.py",
 }
 
@@ -124,7 +143,10 @@ def validate(root: Path) -> list[str]:
         "scripts/validate-generated-polyglot.mjs",
         "scripts/orm_matrix_gate.py",
         "scripts/test_orm_matrix_gate.py",
+        "scripts/orm_data_plane_gate.py",
+        "scripts/test_orm_data_plane_gate.py",
         "scripts/orm_catalog_gate.py",
+        "docs/orm-data-plane-convergence.md",
         "scripts/subprocess_capture.py",
         "scripts/build_targets.py",
         "scripts/cross_translate.py",
@@ -135,6 +157,77 @@ def validate(root: Path) -> list[str]:
     for required_path in required_paths:
         if not (root / required_path).is_file():
             errors.append(f"missing required convergence/package gate file: {required_path}")
+
+    matrix_source = (root / "scripts/orm_matrix_gate.py").read_text(encoding="utf-8")
+    for lane in (
+        "typespec-diesel",
+        "typespec-seaorm",
+        "json-schema-openapi-diesel",
+        "json-schema-openapi-seaorm",
+    ):
+        if lane not in matrix_source:
+            errors.append(f"four-way ORM matrix must retain lane {lane!r}")
+    for required_text in (
+        "def resolve_cli_path(",
+        "output_root = resolve_cli_path(",
+        "report_path = resolve_cli_path(",
+    ):
+        if required_text not in matrix_source:
+            errors.append(
+                f"ORM matrix must root-anchor relative evidence paths: missing {required_text!r}"
+            )
+
+    compatibility_source = (root / "scripts/orm_catalog_gate.py").read_text(
+        encoding="utf-8"
+    )
+    for required_text in (
+        "from scripts.orm_matrix_gate import main as matrix_main",
+        "return matrix_main()",
+    ):
+        if required_text not in compatibility_source:
+            errors.append(
+                "legacy ORM entrypoint must delegate to the complete "
+                f"TypeSpec/JSON-Schema x Diesel/SeaORM matrix: missing {required_text!r}"
+            )
+
+    data_plane_source = (root / "scripts/orm_data_plane_gate.py").read_text(
+        encoding="utf-8"
+    )
+    for lane in (
+        "typespec-diesel",
+        "typespec-seaorm",
+        "json-schema-openapi-diesel",
+        "json-schema-openapi-seaorm",
+    ):
+        if lane not in data_plane_source:
+            errors.append(f"row-level ORM matrix must retain lane {lane!r}")
+    for required_text in (
+        "diesel::insert_into",
+        "DeriveEntityModel",
+        "execute_unprepared",
+        "ores.orm-data-plane-convergence-report/v1",
+        "orm-data-plane-negative-case-accepted",
+        'tinyvec = {{ version = "=1.13.0"',
+    ):
+        if required_text not in data_plane_source:
+            errors.append(
+                "row-level gate must execute real Diesel and SeaORM paths for "
+                f"both authorities: missing {required_text!r}"
+            )
+
+    persistence_workflow = (
+        root / ".github/workflows/persistence-convergence.yml"
+    ).read_text(encoding="utf-8")
+    for required_text in (
+        "scripts/test_orm_data_plane_gate.py",
+        "python3 scripts/orm_matrix_gate.py",
+        "python3 scripts/orm_data_plane_gate.py",
+        "target/orm-data-plane-gate/receipt.json",
+    ):
+        if required_text not in persistence_workflow:
+            errors.append(
+                f"persistence CI must retain catalog and row-level gates: missing {required_text!r}"
+            )
 
     smoke_test = manifest.get("publish", {}).get("smoke_test", "")
     if smoke_test != EXPECTED_INSTALLED_SMOKE_TEST:
@@ -172,6 +265,7 @@ def validate(root: Path) -> list[str]:
         "round-trip-witnesses",
         "sql-catalog-readback-when-applicable",
         "diesel-seaorm-catalog-parity-when-applicable",
+        "diesel-seaorm-row-level-parity-when-applicable",
     }
     if not required_gates.issubset(gates):
         errors.append(
@@ -197,7 +291,7 @@ def main() -> int:
         ".zpkg.toml polyglot contract passed: repository + rust + typescript + "
         "golang + gleam + elixir + erlang + installed build-output smoke + "
         "independent TypeSpec/JSON-Schema generation + bidirectional witnesses + "
-        "four-way Diesel/SeaORM database-backed convergence"
+        "four-way Diesel/SeaORM catalog and row-level convergence"
     )
     return 0
 
