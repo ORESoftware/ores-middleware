@@ -20,7 +20,7 @@ invoke(Context, Descriptor, Reporter, Fun) ->
         {ok, Fun()}
     catch
         Class:_Reason:_Stacktrace ->
-            fail(Context, Descriptor, Reporter, panic, safe_class(Class))
+            fail(Context, Descriptor, Reporter, failure_kind(Class), safe_class(Class))
     end.
 
 preflight_failure(#{cancelled := true}) -> cancelled;
@@ -83,6 +83,14 @@ failure_code(error) -> <<"operation_failed">>;
 failure_code(panic) -> <<"operation_panicked">>;
 failure_code(cancelled) -> <<"operation_cancelled">>;
 failure_code(deadline_exceeded) -> <<"operation_deadline_exceeded">>.
+
+%% Erlang's exception class is semantically significant. A normal runtime
+%% exception maps to the cross-language `error` outcome; non-local exits and
+%% throws remain `panic`, matching the Elixir rescue/catch split.
+failure_kind(error) -> error;
+failure_kind(exit) -> panic;
+failure_kind(throw) -> panic;
+failure_kind(_) -> panic.
 
 safe_class(error) -> <<"error">>;
 safe_class(exit) -> <<"exit">>;
