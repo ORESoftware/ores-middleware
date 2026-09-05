@@ -12,6 +12,12 @@ keywords = ["middleware", "polyglot", "typespec", "json-schema", "opentelemetry"
 vcs = "git"
 url = "https://github.com/ORESoftware/ores-middleware"
 
+[dependencies]
+# Cross-repository runtime code is resolved through an immutable Zed artifact,
+# never through an unauthenticated private Cargo Git URL. The frozen lock must
+# bind version, digest, tag, source commit, archive format, size, and source.
+"ores-rate-limit/ores-rl-lib-core" = "^0.1.0"
+
 [build]
 command = "python3 scripts/build_targets.py"
 outputs = [
