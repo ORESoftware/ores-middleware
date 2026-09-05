@@ -1,0 +1,60 @@
+{
+  "name": "@oresoftware/ores-middleware",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters.d.ts",
+      "import": "./dist/adapters.js"
+    },
+    "./nextjs": {
+      "types": "./dist/nextjs.d.ts",
+      "import": "./dist/nextjs.js"
+    },
+    "./proxy-auth": {
+      "types": "./dist/proxy-auth.d.ts",
+      "import": "./dist/proxy-auth.js"
+    },
+    "./context": {
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js"
+    },
+    "./docs-serving": {
+      "types": "./dist/docs-serving.d.ts",
+      "import": "./dist/docs-serving.js"
+    },
+    "./operation": {
+      "types": "./dist/operation.d.ts",
+      "import": "./dist/operation.js"
+    },
+    "./request-contract": {
+      "types": "./dist/request-contract.d.ts",
+      "import": "./dist/request-contract.js"
+    },
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "import": "./dist/otel.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-docs-serving.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "descriptor": "node dist/contractcheck.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@oresoftware/next-loggers": "git+https://github.com/ores-otel/ores.otel.log.git#b55271c047be761c4711d87cbd500a49eefda3d9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.0"
+  }
+}
