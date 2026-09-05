@@ -150,7 +150,7 @@ fn snake_case(value: &str) -> String {
 
 fn pascal_case(value: &str) -> String {
     value
-        .split(|character: char| character == '_' || character == '-')
+        .split(['_', '-'])
         .filter(|part| !part.is_empty())
         .map(|part| {
             let mut characters = part.chars();
