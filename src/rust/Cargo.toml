@@ -34,6 +34,9 @@ uuid = { version = "1", features = ["serde", "v4"] }
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "74bc1c421f5a56be28cade1a47f5d45de51f3b4b", default-features = false, features = ["axum"] }
+
 [[bin]]
 name = "contractcheck"
 path = "src/bin/contractcheck.rs"
