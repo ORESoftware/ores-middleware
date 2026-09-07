@@ -44,7 +44,10 @@ async fn middleware_and_browser_bridge_keep_interleaved_requests_correlated() {
                 let context = otel::current_log_context();
                 assert_eq!(context.trace_id.as_deref(), Some(trace.trace_id()));
                 assert!(context.logged_in_user.is_empty());
-                logger.info_context(vec![otel::json!("handler.complete")]).send().unwrap();
+                logger
+                    .info_context(vec![otel::json!("handler.complete")])
+                    .send()
+                    .unwrap();
                 (StatusCode::ACCEPTED, Json(otel::json!({"ok": true})))
             }
         }),
@@ -55,7 +58,10 @@ async fn middleware_and_browser_bridge_keep_interleaved_requests_correlated() {
     config.environment = RuntimeEnvironment::Test;
     config.settings.tls.mode = "disabled".into();
     config.settings.tls.require_https = false;
-    let app = install_with_logger(axum_audit::install_with_config(router, config).unwrap(), logger);
+    let app = install_with_logger(
+        axum_audit::install_with_config(router, config).unwrap(),
+        logger,
+    );
     let parents = [
         "00-11111111111111111111111111111111-1111111111111111-00",
         "00-22222222222222222222222222222222-2222222222222222-00",
@@ -74,15 +80,32 @@ async fn middleware_and_browser_bridge_keep_interleaved_requests_correlated() {
     );
     for (response, parent) in [(a.unwrap(), parents[0]), (b.unwrap(), parents[1])] {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
-        let actual: TraceParent = response.headers()["traceparent"].to_str().unwrap().parse().unwrap();
-        assert_eq!(actual.trace_id(), parent.parse::<TraceParent>().unwrap().trace_id());
+        let actual: TraceParent = response.headers()["traceparent"]
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            actual.trace_id(),
+            parent.parse::<TraceParent>().unwrap().trace_id()
+        );
     }
     assert!(otel::current_log_context().trace_id.is_none());
     let records = capture.0.lock().unwrap();
-    assert_eq!(records.len(), 4, "one handler and one bridge record per request");
+    assert_eq!(
+        records.len(),
+        4,
+        "one handler and one bridge record per request"
+    );
     for parent in parents {
         let expected: TraceParent = parent.parse().unwrap();
-        assert_eq!(records.iter().filter(|record| record.trace_id.as_deref() == Some(expected.trace_id())).count(), 2);
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.trace_id.as_deref() == Some(expected.trace_id()))
+                .count(),
+            2
+        );
     }
     for record in records.iter() {
         assert!(!record.to_json().unwrap().contains("synthetic-do-not-log"));
