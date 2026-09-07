@@ -4,7 +4,7 @@
   "currentProductionRepository": "ORESoftware/ores-middleware",
   "trackingIssue": "ORESoftware/ores-middleware#60",
   "coordinatorRepository": "ores-redis-lru-cache-test/ores-redis-lru-e2e-test",
-  "coordinatorBranch": "DEN-3954-cross-org-fleet-audit",
+  "coordinatorBranch": "main",
   "manifestPath": "fleet/manifests/ores-middleware.json",
   "status": "blocked",
   "blockers": [
@@ -23,5 +23,5 @@
     "ores-chat-test/security-boundary-tests",
     "ores-chat-test/contract-conformance-tests"
   ],
-  "lastReviewedAt": "2026-09-07T23:00:00Z"
+  "lastReviewedAt": "2026-09-07T23:15:00Z"
 }
