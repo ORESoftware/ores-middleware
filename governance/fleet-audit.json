@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "ores.fleet-audit.pointer.v1",
+  "logicalOrganization": "ores-middleware",
+  "currentProductionRepository": "ORESoftware/ores-middleware",
+  "trackingIssue": "ORESoftware/ores-middleware#60",
+  "coordinatorRepository": "ores-redis-lru-cache-test/ores-redis-lru-e2e-test",
+  "coordinatorBranch": "DEN-3954-cross-org-fleet-audit",
+  "manifestPath": "fleet/manifests/ores-middleware.json",
+  "status": "blocked",
+  "blockers": [
+    "the dedicated ores-middleware organization is not currently available",
+    "the ores-middleware-test organization is not currently available",
+    "ORES Chat test repositories are temporary integration consumers, not the native middleware test authority"
+  ],
+  "policy": {
+    "readOnly": true,
+    "failClosedWithoutCredential": true,
+    "nativeTestOrganizationRequired": true,
+    "preserveExistingRepositoryHistory": true,
+    "neverPublishSecretsOrRequestPayloads": true
+  },
+  "temporaryTestTargets": [
+    "ores-chat-test/security-boundary-tests",
+    "ores-chat-test/contract-conformance-tests"
+  ],
+  "lastReviewedAt": "2026-09-07T23:00:00Z"
+}
