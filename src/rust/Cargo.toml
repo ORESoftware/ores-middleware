@@ -19,7 +19,9 @@ axum = { version = "0.8", optional = true }
 futures-util = "0.3"
 hmac = "0.12"
 http = "1"
-next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log.git", rev = "b55271c047be761c4711d87cbd500a49eefda3d9" }
+# Match ores-otel-web's source identity: one logger/context carrier and one
+# compatible serde_json graph, rather than a second SDK at an older revision.
+next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log", rev = "74bc1c421f5a56be28cade1a47f5d45de51f3b4b" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
