@@ -44,7 +44,8 @@ pub fn shared_conformance_fixture_test() {
 
     assert docs_serving.action_name(decision.action) == expected_action
     assert status_name(decision.status) == expected_status
-    assert representation_name(decision.representation) == expected_representation
+    assert representation_name(decision.representation)
+      == expected_representation
     assert decision.head_only == { expected_head_only == "true" }
 
     case decision.action {
@@ -117,19 +118,18 @@ fn representation_name(
 }
 
 @external(erlang, "docs_serving_test_ffi", "fixture_rows")
-fn fixture_rows() ->
-  List(
-    #(
-      String,
-      String,
-      String,
-      String,
-      String,
-      String,
-      String,
-      String,
-      String,
-      String,
-      String,
-    ),
-  )
+fn fixture_rows() -> List(
+  #(
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+  ),
+)
