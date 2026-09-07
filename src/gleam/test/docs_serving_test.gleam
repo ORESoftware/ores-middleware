@@ -48,17 +48,23 @@ pub fn shared_conformance_fixture_test() {
     assert decision.head_only == { expected_head_only == "true" }
 
     case decision.action {
-      docs_serving.Pass -> assert dict.size(decision.headers) == 0
+      docs_serving.Pass -> {
+        assert dict.size(decision.headers) == 0
+        Nil
+      }
       _ -> {
         assert dict.get(decision.headers, "Cache-Control") == Ok("no-store")
         let assert Ok(vary) = dict.get(decision.headers, "Vary")
         assert string.contains(vary, docs_serving.docs_format_header)
+        Nil
       }
     }
 
     case decision.action {
-      docs_serving.MethodNotAllowed ->
+      docs_serving.MethodNotAllowed -> {
         assert dict.get(decision.headers, "Allow") == Ok("GET, HEAD")
+        Nil
+      }
       _ -> Nil
     }
 
@@ -68,6 +74,7 @@ pub fn shared_conformance_fixture_test() {
         let assert Ok(policy) =
           dict.get(decision.headers, "Content-Security-Policy")
         assert string.contains(policy, "frame-ancestors 'none'")
+        Nil
       }
       _ -> Nil
     }
@@ -76,9 +83,11 @@ pub fn shared_conformance_fixture_test() {
       decision.action == docs_serving.Serve
       && string.length(optional(docs_digest)) == 64
     {
-      True ->
+      True -> {
         assert dict.get(decision.headers, docs_serving.contract_digest_header)
           == Ok(docs_digest)
+        Nil
+      }
       False -> Nil
     }
   })
