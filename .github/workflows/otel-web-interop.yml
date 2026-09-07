@@ -1,0 +1,49 @@
+name: Verify unified logger and web bridge
+on:
+  push:
+    branches: ['DEN-3432-unify-otel-source']
+    paths: ['src/rust/Cargo.toml', 'src/rust/tests/otel_web_interop.rs', '.github/workflows/otel-web-interop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: otel-web-interop-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'ORESoftware/ores-middleware' && github.ref == 'refs/heads/DEN-3432-unify-otel-source'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: DEN-3432-unify-otel-source
+          clean: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - run: cargo update --workspace
+      - run: rustfmt --edition 2024 src/rust/tests/otel_web_interop.rs
+      - run: cargo test --workspace --all-targets --all-features --locked
+      - run: cargo test -p ores-middleware --no-default-features --locked
+      - name: Require one canonical logger source across both libraries
+        run: |
+          cargo tree -p ores-middleware --locked --edges normal,dev --prefix none --no-dedupe > "$RUNNER_TEMP/otel-tree.txt"
+          grep '^oresoftware-next-loggers v' "$RUNNER_TEMP/otel-tree.txt" | sort -u > "$RUNNER_TEMP/logger-sources.txt"
+          test "$(wc -l < "$RUNNER_TEMP/logger-sources.txt")" -eq 1
+          grep -F '74bc1c42' "$RUNNER_TEMP/logger-sources.txt"
+      - name: Publish only Cargo-generated lock and formatted new test
+        run: |
+          set -eu
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- Cargo.lock src/rust/tests/otel_web_interop.rs
+          if git diff --cached --quiet; then exit 0; fi
+          git diff --cached --stat
+          git commit -m 'DEN-3432: commit tested unified logger graph and interop regression'
+          git push origin HEAD:refs/heads/DEN-3432-unify-otel-source
+# No main write, force push, or merge permission. Full ordinary contract and
+# language CI remains required on the resulting current PR head.
