@@ -37,6 +37,13 @@ tower = { version = "0.5", features = ["util"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "74bc1c421f5a56be28cade1a47f5d45de51f3b4b", default-features = false, features = ["axum"] }
 
+# This suite imports the optional HTTP adapter; it still runs in the default
+# and all-feature gates. Portable core tests also run with no default features.
+[[test]]
+name = "otel_adversarial"
+path = "tests/otel_adversarial.rs"
+required-features = ["axum"]
+
 [[bin]]
 name = "contractcheck"
 path = "src/bin/contractcheck.rs"
