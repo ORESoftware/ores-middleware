@@ -102,10 +102,12 @@ fn decide_known_path(request: Request, kind: PathKind) -> Decision {
   case method == "GET" || method == "HEAD" {
     False -> reject(MethodNotAllowed, 405, [#("Allow", "GET, HEAD")])
     True ->
-      case digest_failure(
-        request.runtime_contract_digest,
-        request.docs_contract_digest,
-      ) {
+      case
+        digest_failure(
+          request.runtime_contract_digest,
+          request.docs_contract_digest,
+        )
+      {
         True -> reject(StoppedForEvaluation, 503, [])
         False -> decide_representation(request, kind, method == "HEAD")
       }
@@ -306,9 +308,7 @@ fn accepts_representation(
 fn parse_accept(value: String) -> List(MediaRange) {
   value
   |> string.split(",")
-  |> list.index_map(fn(raw_part, index) {
-    parse_media_range(raw_part, index)
-  })
+  |> list.index_map(fn(raw_part, index) { parse_media_range(raw_part, index) })
   |> list.filter_map(fn(result) { result })
   |> list.sort(by: compare_media_ranges)
 }
@@ -403,7 +403,8 @@ fn digest_failure(runtime_digest: String, docs_digest: String) -> Bool {
     False ->
       case docs_present && !valid_sha256_digest(docs_digest) {
         True -> True
-        False -> runtime_present && { !docs_present || runtime_digest != docs_digest }
+        False ->
+          runtime_present && { !docs_present || runtime_digest != docs_digest }
       }
   }
 }
