@@ -5,6 +5,7 @@
   "trackingIssue": "ORESoftware/ores-middleware#60",
   "coordinatorRepository": "ores-redis-lru-cache-test/ores-redis-lru-e2e-test",
   "coordinatorBranch": "main",
+  "coordinatorCommit": "26fadc95f9cca08aa00936025ed649dd5401f475",
   "manifestPath": "fleet/manifests/ores-middleware.json",
   "status": "blocked",
   "blockers": [
@@ -23,5 +24,5 @@
     "ores-chat-test/security-boundary-tests",
     "ores-chat-test/contract-conformance-tests"
   ],
-  "lastReviewedAt": "2026-09-07T23:15:00Z"
+  "lastReviewedAt": "2026-09-07T23:34:00Z"
 }
