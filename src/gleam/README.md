@@ -1,11 +1,16 @@
 # Gleam adapter boundary
 
-This directory is reserved for the Gleam implementation of
-`ores.docs-serving/v1`. It must remain a thin, routing-neutral core and
-must pass `fixtures/docs-serving-conformance.tsv` before any framework adapter
-is published.
+The Gleam package now includes the routing-neutral implementation of
+`ores.docs-serving/v1` in `src/ores_middleware/docs_serving.gleam`.
 
-The first contract PR intentionally lands executable reference cores in Rust,
-TypeScript/JavaScript, and Go. The Gleam implementation follows in a separate
-PR so review can validate OTP/framework semantics without weakening the shared
-discrepancy gate.
+The implementation consumes the same request semantics as the Rust,
+TypeScript/JavaScript, and Go cores and is exercised against the shared
+`../../fixtures/docs-serving-conformance.tsv` corpus during `gleam test`.
+Unknown routes pass through without added headers; handled routes preserve the
+contract's method, representation, digest, HEAD, cache, and security-header
+rules.
+
+Framework-specific Wisp, Mist, Cowboy, and OTP adapters remain intentionally
+out of scope until the routing-neutral conformance job is green on the exact
+reviewed commit. Adapters must delegate to this core rather than reimplementing
+content negotiation or discrepancy handling.
