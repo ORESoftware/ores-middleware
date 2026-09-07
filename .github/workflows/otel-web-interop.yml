@@ -25,8 +25,12 @@ jobs:
         with:
           toolchain: 1.95.0
           components: rustfmt
-      - run: cargo update --workspace
+      - name: Resolve the SDK-required serializer without a wholesale dependency refresh
+        run: |
+          cargo update -p serde_json --precise 1.0.151
+          cargo update --workspace
       - run: rustfmt --edition 2024 src/rust/tests/otel_web_interop.rs
+      - run: cargo test -p ores-middleware --test otel_web_interop --all-features --locked
       - run: cargo test --workspace --all-targets --all-features --locked
       - run: cargo test -p ores-middleware --no-default-features --locked
       - name: Require one canonical logger source across both libraries
