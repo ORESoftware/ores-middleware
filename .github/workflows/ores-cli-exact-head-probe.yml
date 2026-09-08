@@ -28,11 +28,11 @@ jobs:
             exit 1
           fi
 
-      - name: Check out exact ores-cli hardening commit
+      - name: Check out exact ores-cli boolean-negation consumer commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ORESoftware/ores-cli
-          ref: bc23d97ce2d01b5ef74904c796bc564e32f2c957
+          ref: 12a1d25334f9e4aec2607bd60f89d9b068f11431
           token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
           persist-credentials: false
           fetch-depth: 1
@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           actual=$(git rev-parse HEAD)
-          test "$actual" = bc23d97ce2d01b5ef74904c796bc564e32f2c957
+          test "$actual" = 12a1d25334f9e4aec2607bd60f89d9b068f11431
           git diff --check
 
       - name: Verify shell integration assets
@@ -75,7 +75,7 @@ jobs:
         working-directory: ores-cli
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
-      - name: Run all Rust tests
+      - name: Run all Rust tests including both CLI negation entrypoints
         working-directory: ores-cli
         run: cargo test --all-targets --all-features --locked
 
