@@ -14,6 +14,7 @@ pub mod otel;
 mod pipeline;
 pub mod rate_limit;
 pub mod rate_limit_v2;
+pub mod shared_auth;
 
 use std::collections::BTreeMap;
 
@@ -52,6 +53,12 @@ pub use rate_limit::{
 pub use rate_limit_v2::{
     RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError,
     RateLimitPolicyV2, RateLimitPolicyViolation,
+};
+pub use shared_auth::{
+    NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV,
+    SUPABASE_ADMIN_DATABASE_URL_ENV, SUPABASE_AUTH_DATABASE_URL_ENV,
+    SharedAuthDataPlane, SharedAuthDatabaseEnvKeys, SharedAuthDecisionMode,
+    SharedAuthReadyStack, SharedAuthRuntimeTopology, SharedAuthServerRole,
 };
 
 pub const CONTRACT_VERSION: &str = "1.0.0";
