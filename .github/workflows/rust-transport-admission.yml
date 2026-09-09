@@ -6,6 +6,9 @@ on:
       - src/rust/**
       - Cargo.toml
       - Cargo.lock
+      - contracts/function-bodies/**
+      - scripts/lib/function-body-contracts.mjs
+      - tests/rust-operation-binding.test.mjs
       - .github/workflows/rust-transport-admission.yml
   push:
     branches: [main, dev]
@@ -13,6 +16,9 @@ on:
       - src/rust/**
       - Cargo.toml
       - Cargo.lock
+      - contracts/function-bodies/**
+      - scripts/lib/function-body-contracts.mjs
+      - tests/rust-operation-binding.test.mjs
       - .github/workflows/rust-transport-admission.yml
   workflow_dispatch:
 
@@ -44,20 +50,27 @@ jobs:
           mkdir -p target/transport-evidence
           # This selected source snapshot is inspection evidence, not a full
           # dependency cache or standalone copy of every workspace fixture.
-          git archive --format=tar.gz --output=target/transport-evidence/source.tar.gz HEAD Cargo.toml Cargo.lock src/rust
+          git archive --format=tar.gz --output=target/transport-evidence/source.tar.gz HEAD Cargo.toml Cargo.lock src/rust contracts/function-bodies tests/rust-operation-binding.test.mjs
           printf '%s\n' "$EXPECTED_SHA" > target/transport-evidence/source-commit.txt
           sha256sum target/transport-evidence/source.tar.gz > target/transport-evidence/source.sha256
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
           components: rustfmt, clippy
-      - name: Retain formatting projections without changing tested source
+      - name: Check actual source bindings and negative ordering mutations
         shell: bash
         run: |
           set -euo pipefail
-          for file in src/rust/src/operation.rs src/rust/src/lib.rs src/rust/tests/operation_admission.rs src/rust/tests/operation_controlled.rs src/rust/tests/tcp_lifecycle.rs; do
+          node --version | tee target/transport-evidence/node-version.txt
+          node --test tests/rust-operation-binding.test.mjs 2>&1 | tee target/transport-evidence/source-binding.log
+      - name: Check formatting of the new transport regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in src/rust/tests/operation_admission.rs src/rust/tests/operation_controlled.rs src/rust/tests/tcp_lifecycle.rs; do
             mkdir -p "target/transport-evidence/formatted/$(dirname "$file")"
             rustfmt --edition 2024 --emit stdout < "$file" > "target/transport-evidence/formatted/$file"
+            cmp "$file" "target/transport-evidence/formatted/$file"
           done
       - name: Run actual Rust operation and transport tests
         shell: bash
@@ -66,20 +79,8 @@ jobs:
           rustc --version | tee target/transport-evidence/toolchain.txt
           cargo test --locked --manifest-path src/rust/Cargo.toml --all-features 2>&1 | tee target/transport-evidence/all-features.log
           cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features 2>&1 | tee target/transport-evidence/portable-core.log
-          git diff --exit-code -- Cargo.toml Cargo.lock src/rust
+          git diff --exit-code -- Cargo.toml Cargo.lock src/rust contracts/function-bodies
           printf 'passed\n' > target/transport-evidence/result.txt
-      - name: Retain a separate lockfile repair proposal after failure
-        if: ${{ failure() }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p tmp/transport-lock-proposal target/transport-evidence
-          git archive HEAD Cargo.toml Cargo.lock src/rust tools/middleware-adversarial-runner | tar -x -C tmp/transport-lock-proposal
-          cargo metadata --manifest-path tmp/transport-lock-proposal/src/rust/Cargo.toml --format-version 1 > target/transport-evidence/proposed-metadata.json
-          cp tmp/transport-lock-proposal/Cargo.lock target/transport-evidence/Cargo.lock.proposed
-          # A proposal does not turn a failed locked build into a pass. It must
-          # be reviewed, committed and re-executed under --locked separately.
-          git diff --exit-code -- Cargo.toml Cargo.lock src/rust
       - name: Retain source and real execution logs
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

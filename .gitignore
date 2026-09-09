@@ -41,6 +41,6 @@ __pycache__/
 .idea/
 .vscode/
 
-# Disposable local scratch paths
+# Disposable tool checkouts and temporary state
 tmp/
 temp/
