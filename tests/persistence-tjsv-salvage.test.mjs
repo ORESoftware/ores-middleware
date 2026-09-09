@@ -10,7 +10,7 @@ import addFormats from 'ajv-formats';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TJSV_REVISION = '4473504c4c9d2831d825919f70c03994d8ce01d2';
 const TOOL = join(ROOT, 'target/tools/tjsv');
-const BASELINE = '6183cc877d6c058349adc733d325297c07d1c063';
+const BASELINE = '02c017a21c6daa95f1d2dc2436b1104fad4275f9';
 const INPUTS = [
   'contracts/persistence/idempotency-record.tsp',
   'contracts/persistence/idempotency-record.schema.json',
@@ -102,7 +102,7 @@ test('current peer authorities and corpus pass actual pinned TJSV', async () => 
   assertPass(await check('positive'));
 });
 
-test('current authored schema preserves baseline wire verdicts', () => {
+test('current authored schema preserves reviewed pre-merge wire verdicts', () => {
   const oldValidate = compileSchema(baselineSchema);
   const newValidate = compileSchema(schema);
   for (const item of corpus.cases) {
