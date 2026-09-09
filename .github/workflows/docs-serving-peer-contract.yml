@@ -1,0 +1,71 @@
+name: docs-serving-peer-contract
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-serving-peer-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-serving-peer-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source head and historical baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+      - name: Read the existing immutable TJSV policy
+        id: policy
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFileSync } from 'node:fs';
+          import { TJSV_REV } from './scripts/check-tjsv-docs.mjs';
+          assert(/^[a-f0-9]{40}$/.test(TJSV_REV));
+          appendFileSync(process.env.GITHUB_OUTPUT, `revision=${TJSV_REV}\n`);
+          NODE
+      - name: Check out immutable TJSV
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: ${{ steps.policy.outputs.revision }}
+          path: tmp/tjsv
+          persist-credentials: false
+          show-progress: false
+      - name: Install locked dependencies and the reviewed flags-2-env native binding
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix tmp/tjsv --ignore-scripts --no-audit --no-fund
+          npm rebuild --prefix tmp/tjsv @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+      - name: Require baseline preservation, actual TJSV parity, and seven rejection controls
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/docs-serving-peers
+          node --test tests/docs-serving-peers.test.mjs 2>&1 | tee target/docs-serving-peers/test.log
+      - name: Retain exact-run evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: docs-serving-peers-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/docs-serving-peers/
+          if-no-files-found: error
+          retention-days: 30
