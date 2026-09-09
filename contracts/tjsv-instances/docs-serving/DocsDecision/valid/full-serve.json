@@ -1,0 +1,9 @@
+{
+  "action": "serve",
+  "headOnly": false,
+  "headers": {
+    "content-type": "text/html"
+  },
+  "status": 200,
+  "representation": "html"
+}

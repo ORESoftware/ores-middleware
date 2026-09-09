@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/docs",
+  "accept": "application/json",
+  "format": "catalog",
+  "runtimeContractDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "docsContractDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+}

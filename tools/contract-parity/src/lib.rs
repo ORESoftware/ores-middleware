@@ -1,3 +1,5 @@
+mod flat_string_map;
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -84,6 +86,12 @@ fn string_shape(pattern: Option<String>) -> Value {
 
 fn normalize_tsp_type(type_name: &str, pattern: Option<String>) -> Result<Value> {
     let type_name = type_name.trim();
+    if pattern.is_none() && flat_string_map::is_anonymous(type_name)? {
+        return Ok(json!({
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+        }));
+    }
     match type_name {
         "string" => Ok(string_shape(pattern)),
         "boolean" if pattern.is_none() => Ok(json!({"type": "boolean"})),
@@ -114,7 +122,9 @@ fn parse_pattern_decorator(line: &str) -> Result<Option<String>> {
 
 fn parse_tsp_model(source: &str, name: &str) -> Result<Value> {
     let body = extract_block(source, "model", name)?;
-    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*([^;]+);$")?;
+    // Capture the complete type expression, then validate its exact supported
+    // grammar below. An anonymous Record spread contains an inner semicolon.
+    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*(.+);$")?;
     let mut properties = Map::new();
     let mut pending_pattern = None;
 
@@ -192,6 +202,9 @@ fn normalize_json_shape(value: &Value) -> Result<Value> {
         )),
         Some("boolean") => Ok(json!({"type": "boolean"})),
         Some("object") => {
+            if let Some(shape) = flat_string_map::normalize_unevaluated(object)? {
+                return Ok(shape);
+            }
             if let Some(additional) = object.get("additionalProperties") {
                 if additional.is_object() {
                     return Ok(json!({

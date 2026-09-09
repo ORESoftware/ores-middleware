@@ -32,7 +32,6 @@
     "DocsRequest": {
       "type": "object",
       "additionalProperties": false,
-      "unevaluatedProperties": false,
       "required": ["method", "path"],
       "properties": {
         "method": { "type": "string" },
@@ -49,16 +48,9 @@
         }
       }
     },
-    "DocsHeaders": {
-      "type": "object",
-      "properties": {},
-      "additionalProperties": { "type": "string" },
-      "unevaluatedProperties": { "type": "string" }
-    },
     "DocsDecision": {
       "type": "object",
       "additionalProperties": false,
-      "unevaluatedProperties": false,
       "required": ["action", "headOnly", "headers"],
       "properties": {
         "action": { "$ref": "#/$defs/DocsAction" },
@@ -69,7 +61,11 @@
         },
         "representation": { "$ref": "#/$defs/DocsRepresentation" },
         "headOnly": { "type": "boolean" },
-        "headers": { "$ref": "#/$defs/DocsHeaders" }
+        "headers": {
+          "type": "object",
+          "properties": {},
+          "unevaluatedProperties": { "type": "string" }
+        }
       }
     }
   }
