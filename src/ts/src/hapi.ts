@@ -27,7 +27,10 @@ function requestToWeb(request: any): Request {
     const framedNull = payload === null && (
       Number(headers.get("content-length")) > 0 || headers.has("transfer-encoding")
     );
-    if (typeof payload === "string") body = payload;
+    const mediaType = (headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    const parsedJson = request.route?.settings?.payload?.parse !== false &&
+      (mediaType === "application/json" || mediaType.endsWith("+json"));
+    if (typeof payload === "string") body = parsedJson ? JSON.stringify(payload) : payload;
     else if (payload instanceof Uint8Array) body = Buffer.from(payload) as BodyInit;
     else if (payload !== null || framedNull) {
       if (payload && typeof payload === "object" && typeof payload.pipe === "function") {

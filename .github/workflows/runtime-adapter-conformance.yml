@@ -1,0 +1,85 @@
+name: runtime-adapter-conformance
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+permissions:
+  contents: read
+concurrency:
+  group: runtime-adapters-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  hapi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+      - run: npm ci --prefix src/ts
+      - run: npm --prefix src/ts test
+      - name: Install isolated real-framework probe
+        run: npm install --prefix target/runtime-adapters --ignore-scripts --save-exact --no-audit --no-fund @hapi/hapi@21.4.10
+      - name: Execute real Hapi lifecycle and handler tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ls --prefix target/runtime-adapters --all --json > target/runtime-adapters/dependency-tree.json
+          node --test tests/runtime-adapters/hapi.test.mjs | tee target/runtime-adapters/hapi.tap
+          node tests/runtime-adapters/fetch-smoke.mjs | tee target/runtime-adapters/node-fetch.jsonl
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: hapi-conformance-${{ github.run_id }}
+          path: |
+            target/runtime-adapters/hapi.tap
+            target/runtime-adapters/node-fetch.jsonl
+            target/runtime-adapters/dependency-tree.json
+            target/runtime-adapters/package-lock.json
+          if-no-files-found: error
+  native-fetch:
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [bun, deno]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+      - run: npm ci --prefix src/ts && npm --prefix src/ts run build
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        if: matrix.runtime == 'bun'
+        with:
+          bun-version: 1.4.2
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+        if: matrix.runtime == 'deno'
+        with:
+          deno-version: 2.9.6
+      - name: Native Bun core and loopback HTTP admission
+        if: matrix.runtime == 'bun'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/runtime-adapters
+          bun tests/runtime-adapters/fetch-smoke.mjs | tee target/runtime-adapters/bun.jsonl
+      - name: Native Deno core and loopback HTTP admission
+        if: matrix.runtime == 'deno'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/runtime-adapters
+          deno run --no-prompt --allow-env --allow-read --allow-sys --allow-net=127.0.0.1 --node-modules-dir=manual tests/runtime-adapters/fetch-smoke.mjs | tee target/runtime-adapters/deno.jsonl
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: native-fetch-${{ matrix.runtime }}-${{ github.run_id }}
+          path: target/runtime-adapters/*.jsonl
+          if-no-files-found: error

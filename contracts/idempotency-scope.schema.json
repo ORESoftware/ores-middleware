@@ -6,7 +6,7 @@
   "$defs": {
     "IdempotencyScope": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": ["serviceName", "tenantId", "userId", "method", "path", "query", "idempotencyKey"],
       "properties": {
         "serviceName": { "type": "string", "minLength": 1 },
