@@ -31,7 +31,9 @@ export function assertMatrix(matrix) {
   const ids = new Set();
   const sources = new Set();
   for (const lane of matrix.lanes) {
-    exactKeys(lane, ['id', 'typespec', 'authoredSchema'], 'lane');
+    const keys = ['id', 'typespec', 'authoredSchema'];
+    if (lane && Object.hasOwn(lane, 'corpus')) keys.push('corpus');
+    exactKeys(lane, keys, 'lane');
     assert.match(lane.id, /^[a-z][a-z0-9-]{0,63}$/u);
     assert(!ids.has(lane.id), 'duplicate lane');
     assert(!sources.has(lane.typespec), 'duplicate TypeSpec input');
@@ -41,6 +43,11 @@ export function assertMatrix(matrix) {
     contractPath(lane.authoredSchema, 'authored schema path');
     assert(lane.typespec.endsWith('.tsp'), 'TypeSpec entry must be explicit');
     assert.notEqual(lane.typespec, lane.authoredSchema, 'authorities must be independent');
+    if (Object.hasOwn(lane, 'corpus')) {
+      contractPath(lane.corpus, 'corpus path');
+      assert(lane.corpus.endsWith('.json'), 'corpus must be an explicit JSON manifest');
+      assert.notEqual(lane.corpus, lane.authoredSchema, 'corpus must be independent of the schema');
+    }
   }
   return matrix;
 }

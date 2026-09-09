@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { assertMatrix, assertPassingReport } from './tjsv-evidence.mjs';
+import { prepareCorpus, assertCorpusReport } from './tjsv-corpus.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -14,6 +15,8 @@ function git(root, args) {
 // Bind the receipt to the committed input/tool-policy closure, not unrelated WIP.
 export function assertSourceClean(root) {
   const paths = ['contracts', 'scripts/tjsv-check.mjs', 'scripts/tjsv-evidence.mjs',
+    'scripts/tjsv-corpus.mjs', 'tests/tjsv-corpus.test.mjs',
+    'tests/docs-serving-contract.test.mjs', 'tests/fixtures/docs-serving-v1.schema.json',
     'tests/tjsv-evidence.test.mjs', 'tests/tjsv-compiler.test.mjs',
     '.github/workflows/tjsv-contract-boundaries.yml', 'package.json', 'package-lock.json'];
   assert.equal(git(root, ['status', '--porcelain', '--untracked-files=all', '--', ...paths]), '',
@@ -74,14 +77,24 @@ export async function runMatrix(root = ROOT) {
       for (const input of [typespec, authoredSchema]) {
         assert(input.startsWith(`${contracts}${sep}`), 'input escaped authored contracts');
       }
+      let prepared;
+      let instances;
+      if (lane.corpus) {
+        const manifest = await realpath(join(root, lane.corpus));
+        assert(manifest.startsWith(`${contracts}${sep}`), 'corpus escaped authored contracts');
+        instances = join(outputRoot, `${lane.id}-instances`);
+        prepared = await prepareCorpus(manifest, instances);
+        result.corpus = { manifest: lane.corpus, sha256: prepared.digest, cases: prepared.corpus.cases.length };
+      }
       const report = await validator.runCheck(checkOptions(typespec, authoredSchema,
-        join(outputRoot, lane.id, 'witness'), toolRoot));
+        join(outputRoot, lane.id, 'witness'), toolRoot, instances));
       const receipt = join(outputRoot, `${lane.id}.json`);
       await validator.writeReport(receipt, report);
-      result = { id: lane.id, status: report.status, runId: report.runId,
+      result = { ...result, id: lane.id, status: report.status, runId: report.runId,
         receipt: relative(outputRoot, receipt), counts: report.counts,
         differential: report.differential?.summary };
       assertPassingReport(report);
+      if (prepared) assertCorpusReport(prepared.corpus, report);
       console.log(`${lane.id}: passed (${report.differential.summary.probesEvaluated} probes)`);
     } catch (error) {
       // Keep exercising later lanes, but never turn a stopped/failed lane green.
