@@ -87,6 +87,7 @@ jobs:
           git diff --exit-code -- \
             contracts/function-bodies \
             scripts/validate-function-bodies.mjs \
+            scripts/lib/function-body-contracts.mjs \
             tests/e2e/function-body-contract.e2e.mjs
 
       - name: Retain exact-head parity evidence
