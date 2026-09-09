@@ -48,7 +48,6 @@ jobs:
           executable="$GITHUB_WORKSPACE/bin/typespec-json-schema-validator.mjs"
           typespec="$GITHUB_WORKSPACE/test/fixtures/pass/main.tsp"
           authored="$GITHUB_WORKSPACE/test/fixtures/pass/authored.schema.json"
-          instances="$GITHUB_WORKSPACE/test/fixtures/pass/instances"
           generated="$run_dir/generated"
           report="$run_dir/report.json"
           sarif="$run_dir/report.sarif"
@@ -58,7 +57,6 @@ jobs:
           node "$executable" check \
             --typespec="$typespec" \
             --schema="$authored" \
-            --instances="$instances" \
             --output-dir="$generated" \
             --report="$report" \
             --sarif="$sarif" \
@@ -114,7 +112,6 @@ jobs:
           node "$executable" check \
             --typespec="$source_dir/main.tsp" \
             --schema="$source_dir/authored.schema.json" \
-            --instances="$GITHUB_WORKSPACE/test/fixtures/pass/instances" \
             --output-dir="$source_dir/generated" \
             --report="$source_dir/report.json" \
             --contract-ir="$source_dir/contract-ir.json" \
