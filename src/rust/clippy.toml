@@ -1,6 +1,0 @@
-# Shared Auth provider evidence has eight security-relevant fields: provider,
-# subject, tenant, session, issuer, audience, organization, and data plane.
-# Keep the lint active for larger APIs while admitting this bounded value
-# constructor. Runtime validation still checks every field against the
-# immutable provider context before producing an AuthDecision.
-too-many-arguments-threshold = 8
