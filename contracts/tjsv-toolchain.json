@@ -1,0 +1,5 @@
+{
+  "repository": "ORESoftware/typespec-json-schema-validator",
+  "commit": "4473504c4c9d2831d825919f70c03994d8ce01d2",
+  "role": "comparison-only; independent TypeSpec and JSON Schema authorities"
+}

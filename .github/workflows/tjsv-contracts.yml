@@ -1,0 +1,37 @@
+name: tjsv-contracts
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+permissions:
+  contents: read
+concurrency:
+  group: tjsv-contracts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  peer-authorities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 4473504c4c9d2831d825919f70c03994d8ce01d2
+          path: target/tooling/tjsv
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+      - run: npm ci --prefix target/tooling/tjsv
+      - name: Compile independent peers, execute corpus, verify IR, and reject intentional drift
+        run: node scripts/check-tjsv-contracts.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: middleware-tjsv-${{ github.sha }}
+          path: target/tjsv/
+          if-no-files-found: error
+          retention-days: 30
