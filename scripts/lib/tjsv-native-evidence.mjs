@@ -13,7 +13,7 @@ export const sourcePaths = Object.freeze([
 ]);
 const extensions = { typescript: 'mjs', rust: 'rs', golang: 'go', gleam: 'gleam', elixir: 'ex', erlang: 'erl' };
 export const cells = Object.freeze(lanes.flatMap(authority => languages.map(language => Object.freeze({
-  id: `${authority}/${language}`, authority, language,
+  id: `${authority}/${language}`, adapterId: `${authority}.${language}`, authority, language,
   artifact: `target/schema-convergence/${authority}/${language}/idempotency_record.${extensions[language]}`,
   result: `target/generated-runtime-convergence/results/${authority}/${language}.json`,
 }))));
@@ -114,16 +114,19 @@ export function buildNativeEvidence({ binding, receipt, files, harnessPaths, com
       assert.deepEqual(value.normalized, value.accepted ? expected.value : null, 'runtime roundtrip mismatch');
       return { caseId: value.id, declaration: declarationId, verdict: value.accepted ? 'accepted' : 'rejected' };
     });
-    assert(typeof toolchains[cell.language] === 'string' && toolchains[cell.language].trim().length > 0, 'missing measured toolchain');
+    assert(typeof toolchains[cell.language] === 'string', 'missing measured toolchain');
+    // Preserve measured version lines in TJSV's bounded single-line metadata.
+    const toolchain = toolchains[cell.language].split(/\r?\n/u).map(line => line.trim()).filter(Boolean).join('; ');
+    assert(toolchain.length > 0 && toolchain.length <= 512 && !/[\u0000-\u001f\u007f]/u.test(toolchain), 'invalid measured toolchain');
     return {
-      id: cell.id, language: cell.language,
+      id: cell.adapterId, language: cell.language,
       runtime: cell.language === 'typescript' ? 'nodejs' : cell.language,
-      validator: 'generated-idempotency-record', toolchain: toolchains[cell.language], status: 'passed', results,
+      validator: 'generated-idempotency-record', toolchain, status: 'passed', results,
     };
   });
   return {
     evidence: { schema: 'ores.typespec-json-schema-validator.runtime-evidence/v1', ...binding, corpusDigest: digest(files.get(fixturePath)), adapters },
     expectedCases,
-    requiredAdapters: cells.map(cell => ({ id: cell.id, language: cell.language, validator: 'generated-idempotency-record' })),
+    requiredAdapters: cells.map(cell => ({ id: cell.adapterId, language: cell.language, validator: 'generated-idempotency-record' })),
   };
 }

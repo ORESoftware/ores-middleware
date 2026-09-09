@@ -105,3 +105,28 @@ for (const [name, mutate] of Object.entries({
   mutate(value);
   assert.throws(() => parseFixture(json(value)));
 });
+
+
+test('maps native path identities to unique TJSV protocol identities', () => {
+  const result = buildNativeEvidence(scenario());
+  const ids = result.evidence.adapters.map(adapter => adapter.id);
+  assert.equal(new Set(ids).size, 12);
+  assert(ids.every(id => /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/.test(id)));
+  assert.deepEqual(ids, result.requiredAdapters.map(adapter => adapter.id));
+  assert(cells.every(cell => cell.id === `${cell.authority}/${cell.language}`));
+  assert.equal(ids[0], 'typespec.typescript');
+});
+test('preserves multiline measured toolchain information as single-line metadata', () => {
+  const input = scenario();
+  input.toolchains.elixir = 'Erlang/OTP 27\r\n\r\nElixir 1.18.4\n';
+  const result = buildNativeEvidence(input);
+  assert.equal(result.evidence.adapters.find(adapter => adapter.language === 'elixir').toolchain,
+    'Erlang/OTP 27; Elixir 1.18.4');
+});
+for (const [name, version] of [['control characters', 'rustc \u001b[31m1.95'], ['oversized version', 'v'.repeat(513)]]) {
+  test(`rejects measured toolchain with ${name}`, () => {
+    const input = scenario();
+    input.toolchains.rust = version;
+    assert.throws(() => buildNativeEvidence(input));
+  });
+}
