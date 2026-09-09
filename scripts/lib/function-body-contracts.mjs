@@ -165,7 +165,13 @@ export function comparePeerAuthorities(typespec, planSchema, bindingSchema) {
     const typeSpecValues = parseTypeSpecEnum(typespec, name);
     if (!typeSpecValues || !Array.isArray(schemaValues) || !sameSet(typeSpecValues, schemaValues)) findings.push(finding("peer-enum-mismatch", `/authorities/${name}`, `TypeSpec=${JSON.stringify(typeSpecValues)} JSON-Schema=${JSON.stringify(schemaValues)}`));
   }
-  for (const [name, properties] of [["FunctionBodyStep", planSchema.$defs?.step?.properties], ["FunctionBodyPlan", planSchema.properties], ["BodyStepEvidence", bindingSchema.$defs?.stepEvidence?.properties], ["LanguageBodyBinding", bindingSchema.$defs?.binding?.properties], ["FunctionBodyBindings", bindingSchema.properties]]) {
+  for (const [name, properties] of [
+    ["FunctionBodyStep", planSchema.$defs?.step?.properties],
+    ["FunctionBodyPlan", planSchema.$defs?.functionBodyPlan?.properties ?? planSchema.properties],
+    ["BodyStepEvidence", bindingSchema.$defs?.stepEvidence?.properties],
+    ["LanguageBodyBinding", bindingSchema.$defs?.binding?.properties],
+    ["FunctionBodyBindings", bindingSchema.$defs?.functionBodyBindings?.properties ?? bindingSchema.properties],
+  ]) {
     const typeSpecProperties = parseTypeSpecModelProperties(typespec, name);
     const schemaProperties = properties ? Object.keys(properties).sort() : undefined;
     if (!typeSpecProperties || !schemaProperties || !sameSet(typeSpecProperties, schemaProperties)) findings.push(finding("peer-model-mismatch", `/authorities/${name}`, `TypeSpec=${JSON.stringify(typeSpecProperties)} JSON-Schema=${JSON.stringify(schemaProperties)}`));
