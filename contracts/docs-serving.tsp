@@ -4,6 +4,8 @@
  * This file and docs-serving.schema.json are independent, human-authored peer
  * authorities. Neither file may be generated from or overwrite the other.
  */
+import "@typespec/json-schema";
+
 namespace Ores.Middleware.Docs;
 
 enum DocsRepresentation {
@@ -23,6 +25,8 @@ enum DocsAction {
   stoppedForEvaluation: "stopped-for-evaluation",
 }
 
+// Explicit wire closure matches the independently authored object policy.
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model DocsRequest {
   method: string;
   path: string;
@@ -34,6 +38,8 @@ model DocsRequest {
   docsContractDigest?: string;
 }
 
+// Explicit wire closure matches the independently authored object policy.
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model DocsDecision {
   action: DocsAction;
   status?: uint16;

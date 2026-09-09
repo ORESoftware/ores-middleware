@@ -1,0 +1,70 @@
+name: tjsv-docs-serving
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tjsv-docs-serving-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-serving-data-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out middleware
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install repository-standard Node version
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          package-manager-cache: false
+      - name: Install locked repository decorator dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run gate unit tests (not compiler-backed conformance)
+        run: npm run docs-serving:tjsv:test
+      - name: Check out exact upstream TJSV source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 6bb5b7c1ee41c8b43741e50a264c33a1165549c4
+          path: tmp/tjsv
+          persist-credentials: false
+      - name: Install upstream locked compiler and dependencies
+        run: npm ci --prefix tmp/tjsv --ignore-scripts --no-audit --no-fund
+      - name: Build only the locked flags-2-env native dependency
+        working-directory: tmp/tjsv
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm rebuild @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+          test -s node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
+      - name: Require source and differential docs-serving parity
+        run: |
+          npm run docs-serving:tjsv
+          git diff --exit-code -- contracts scripts tests package.json package-lock.json
+      - name: Record exact checked revisions
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p target/tjsv
+          git rev-parse HEAD > target/tjsv/source-commit.txt
+          git -C tmp/tjsv rev-parse HEAD > target/tjsv/tool-commit.txt
+      - name: Retain fresh parity and gate evidence, including failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tjsv-docs-serving-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/tjsv/docs-serving-*/**/*
+            target/tjsv/*-commit.txt
+          if-no-files-found: error
+          retention-days: 30

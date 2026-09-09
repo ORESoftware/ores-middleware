@@ -1,0 +1,7 @@
+{
+  "action": "serve",
+  "headOnly": false,
+  "headers": {
+    "x-header": null
+  }
+}

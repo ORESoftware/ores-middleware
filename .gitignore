@@ -40,3 +40,10 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Disposable tool checkouts and temporary state
+tmp/
+temp/
+
+# Root dependency cache
+/node_modules/
