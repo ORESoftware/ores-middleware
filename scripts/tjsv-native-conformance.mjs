@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildNativeEvidence, cells, digest, fixturePath, languages, parseFixture, sourcePaths } from './lib/tjsv-native-evidence.mjs';
@@ -14,23 +15,68 @@ const nativeReceipt = 'target/generated-runtime-convergence/receipt.json';
 const command = (file, args) => execFileSync(file, args, {
   cwd: root, encoding: 'utf8', timeout: 30000, maxBuffer: 65536, stdio: ['ignore', 'pipe', 'pipe'],
 }).trim();
+function relativeParts(name) {
+  assert(typeof name === 'string' && !path.isAbsolute(name) && !name.includes('\\')
+    && !name.split('/').some(part => ['', '.', '..'].includes(part)), 'unsafe relative path');
+  return name.split('/');
+}
+
+// The checkout must have one trusted writer. These checks reject pre-existing
+// links/special files; they do not sandbox hostile concurrent directory renames.
+async function outputPath(name) {
+  const parts = relativeParts(name);
+  assert(name.startsWith(`${output}/`), 'output is outside the policy directory');
+  let current = root;
+  for (const part of parts.slice(0, -1)) {
+    current = path.join(current, part);
+    try { await mkdir(current); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    const info = await lstat(current);
+    assert(info.isDirectory() && !info.isSymbolicLink(), 'unsafe output directory');
+  }
+  const destination = path.join(current, parts.at(-1));
+  let info;
+  try { info = await lstat(destination); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  assert(!info || (info.isFile() && !info.isSymbolicLink() && info.nlink === 1), 'unsafe output file');
+  return destination;
+}
 const writeJson = async (name, value) => {
-  await mkdir(path.dirname(path.join(root, name)), { recursive: true });
-  await writeFile(path.join(root, name), `${JSON.stringify(value, null, 2)}\n`);
+  const destination = await outputPath(name);
+  const temporary = path.join(path.dirname(destination), `.${path.basename(name)}.${randomUUID()}.tmp`);
+  const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    try {
+      await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+      await handle.sync();
+    } finally { await handle.close(); }
+    await outputPath(name);
+    // Replace a complete file, never truncate a linked report in place.
+    await rename(temporary, destination);
+  } finally {
+    try { await unlink(temporary); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
 };
 
 // All input paths are fixed policy paths or independently enumerated harnesses.
 // Refuse symlinks and boundedly read regular files, not receipt-selected paths.
 async function readBytes(name) {
-  assert(!path.isAbsolute(name) && !name.split('/').some(part => ['', '.', '..'].includes(part)), 'unsafe input path');
+  const parts = relativeParts(name);
   let current = root;
-  for (const part of name.split('/')) {
+  let before;
+  for (const [index, part] of parts.entries()) {
     current = path.join(current, part);
-    assert(!(await lstat(current)).isSymbolicLink(), 'symlink input is not admissible');
+    before = await lstat(current);
+    assert(!before.isSymbolicLink(), 'symlink input is not admissible');
+    if (index < parts.length - 1) assert(before.isDirectory(), 'non-directory input ancestor');
   }
-  const handle = await open(current, constants.O_RDONLY | constants.O_NOFOLLOW);
+  assert(before.isFile() && before.size <= 4 * 1024 * 1024, 'input must be a bounded regular file');
+  // Nonblocking also prevents a replaced leaf FIFO from hanging open().
+  const handle = await open(current, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await handle.stat();
+    assert(info.dev === before.dev && info.ino === before.ino, 'input replaced while opening');
     assert(info.isFile() && info.size <= 4 * 1024 * 1024, 'input must be a bounded regular file');
     const bytes = Buffer.alloc(info.size + 1);
     let length = 0;
@@ -58,7 +104,6 @@ async function harnessInventory(directory = 'tests/generated-runtime') {
 /** Fixed-path task, no separate command-line option parser. */
 export async function prepareCorpus() {
   // mkdir without recursive fails on reuse: old instances cannot survive a rerun.
-  await mkdir(path.join(root, output), { recursive: true });
   await writeJson(`${output}/runtime-report.json`, { status: 'failed', stage: 'not-yet-admitted' });
   await mkdir(path.join(root, output, 'instances'));
   const fixture = parseFixture(await readBytes(fixturePath));
