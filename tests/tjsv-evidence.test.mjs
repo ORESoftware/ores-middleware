@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { assertMatrix, assertPassingReport, VALIDATOR_PACKAGE } from '../scripts/tjsv-evidence.mjs';
-import { checkOptions } from '../scripts/tjsv-check.mjs';
+import { assertSourceClean, checkOptions } from '../scripts/tjsv-check.mjs';
 
 const matrix = JSON.parse(await readFile(new URL('../contracts/tjsv.matrix.json', import.meta.url), 'utf8'));
 const copy = value => structuredClone(value);
@@ -112,4 +115,32 @@ test('compiler invocation preserves independent inputs and fixes strict settings
   assert.equal(options.tspBin, '/tool/node_modules/.bin/tsp');
   assert.equal(options.mapping, undefined);
   assert.notEqual(options.typespec, options.authoredSchema);
+});
+
+async function sourceFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'ores-tjsv-source-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = args => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
+  git(['init']);
+  await mkdir(join(root, 'contracts'));
+  await writeFile(join(root, 'contracts/main.tsp'), 'model Envelope {}\n');
+  git(['add', '--', 'contracts/main.tsp']);
+  git(['-c', 'user.name=TJSV test', '-c', 'user.email=tjsv-test@example.invalid',
+    '-c', 'commit.gpgsign=false', 'commit', '-m', 'test fixture']);
+  return root;
+}
+test('commit binding allows unrelated WIP without including it in evidence', async t => {
+  const root = await sourceFixture(t);
+  await writeFile(join(root, 'unrelated.txt'), 'local WIP\n');
+  assertSourceClean(root);
+});
+test('commit binding rejects modified contract sources', async t => {
+  const root = await sourceFixture(t);
+  await writeFile(join(root, 'contracts/main.tsp'), 'model Changed {}\n');
+  assert.throws(() => assertSourceClean(root), /source closure/);
+});
+test('commit binding rejects new untracked contract sources', async t => {
+  const root = await sourceFixture(t);
+  await writeFile(join(root, 'contracts/extra.tsp'), 'model Extra {}\n');
+  assert.throws(() => assertSourceClean(root), /source closure/);
 });

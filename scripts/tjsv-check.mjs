@@ -11,6 +11,15 @@ function git(root, args) {
   return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 30_000 }).trim();
 }
 
+// Bind the receipt to the committed input/tool-policy closure, not unrelated WIP.
+export function assertSourceClean(root) {
+  const paths = ['contracts', 'scripts/tjsv-check.mjs', 'scripts/tjsv-evidence.mjs',
+    'tests/tjsv-evidence.test.mjs', 'tests/tjsv-compiler.test.mjs',
+    '.github/workflows/tjsv-contract-boundaries.yml', 'package.json', 'package-lock.json'];
+  assert.equal(git(root, ['status', '--porcelain', '--untracked-files=all', '--', ...paths]), '',
+    'TJSV source closure differs from the recorded commit');
+}
+
 async function noSymlinks(path) {
   const info = await lstat(path);
   assert(!info.isSymbolicLink(), 'contract/tool inputs must not be symlinks');
@@ -45,6 +54,8 @@ export function checkOptions(typespec, authoredSchema, outputDir, toolRoot, inst
 }
 
 export async function runMatrix(root = ROOT) {
+  assertSourceClean(root);
+  const sourceCommit = git(root, ['rev-parse', 'HEAD']);
   const { matrix, validator, toolRoot } = await loadPinnedValidator(root);
   const contracts = join(root, 'contracts');
   await noSymlinks(contracts);
@@ -53,10 +64,10 @@ export async function runMatrix(root = ROOT) {
   assert.equal(await realpath(parent), parent, 'evidence destination must not be redirected');
   // Never consume a prior run's witness or receipt as current evidence.
   const outputRoot = await mkdtemp(join(parent, 'run-'));
-  const sourceCommit = git(root, ['rev-parse', 'HEAD']);
   const results = [];
   let exitCode = 0;
   for (const lane of matrix.lanes) {
+    let result = { id: lane.id, status: 'failed' };
     try {
       const typespec = await realpath(join(root, lane.typespec));
       const authoredSchema = await realpath(join(root, lane.authoredSchema));
@@ -67,18 +78,27 @@ export async function runMatrix(root = ROOT) {
         join(outputRoot, lane.id, 'witness'), toolRoot));
       const receipt = join(outputRoot, `${lane.id}.json`);
       await validator.writeReport(receipt, report);
+      result = { id: lane.id, status: report.status, runId: report.runId,
+        receipt: relative(outputRoot, receipt), counts: report.counts,
+        differential: report.differential?.summary };
       assertPassingReport(report);
-      results.push({ id: lane.id, status: 'passed', runId: report.runId, receipt: relative(outputRoot, receipt) });
       console.log(`${lane.id}: passed (${report.differential.summary.probesEvaluated} probes)`);
     } catch (error) {
       // Keep exercising later lanes, but never turn a stopped/failed lane green.
       exitCode = 2;
-      results.push({ id: lane.id, status: 'blocked', error: error.message });
+      if (result.status === 'passed') result.status = 'invalid_evidence';
+      result.error = error.message;
       console.error(`${lane.id}: blocked; inspect the retained receipt or matrix summary`);
     }
+    results.push(result);
   }
+  let sourceIntegrity = 'verified';
+  try {
+    assert.equal(git(root, ['rev-parse', 'HEAD']), sourceCommit, 'source HEAD changed during validation');
+    assertSourceClean(root);
+  } catch { sourceIntegrity = 'changed'; exitCode = 2; }
   await writeFile(join(outputRoot, 'matrix-summary.json'), `${JSON.stringify({
-    schema: 'ores.middleware.tjsv-execution/v1', sourceCommit,
+    schema: 'ores.middleware.tjsv-execution/v1', sourceCommit, sourceIntegrity,
     validator: matrix.validator, status: exitCode === 0 ? 'passed' : 'blocked', results,
   }, null, 2)}\n`, { flag: 'wx' });
   return exitCode;

@@ -8,12 +8,14 @@ import { assertPassingReport } from '../scripts/tjsv-evidence.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Literal, independently written fixtures. Neither authority is emitted from the other.
+// The non-composed control uses Draft 2020-12 unevaluatedProperties explicitly;
+// the pinned emitter seals with that keyword and TJSV also compares structure.
 const typespec = 'model Envelope { payload: string; }\n';
 const schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://schemas.oresoftware.com/middleware/tjsv-control.json',
   $defs: { Envelope: { type: 'object', properties: { payload: { type: 'string' } },
-    required: ['payload'], additionalProperties: false } },
+    required: ['payload'], unevaluatedProperties: false } },
 };
 
 async function fixture() {
@@ -63,6 +65,7 @@ test('agreement cannot override independently authored corpus expectations', asy
   await writeFile(join(corpus, 'Envelope/valid/number.json'), '{"payload":42}\n');
   const report = await f.check('corpus-expectation', corpus);
   assert.equal(report.status, 'stopped_for_evaluation');
+  assert.equal(report.counts.structuralFindings, 0, 'only the corpus should disagree');
   assert.equal(report.differential.summary.divergences, 0);
   assert.equal(report.differential.summary.corpusInstances, 1);
   assert(report.findings.some(item => item.ruleId === 'corpus-instance-rejected'));

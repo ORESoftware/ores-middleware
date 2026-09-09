@@ -28,7 +28,9 @@ accounting. A `passed` string or exit zero without that evidence is rejected.
 Missing tools fail startup; mismatches block the gate while the remaining lanes
 still run to collect diagnostics. Fresh receipts and witnesses go only under
 ignored `target/tjsv/`, tagged in the matrix summary with the source commit and
-validator revision. Old output cannot be reused as current evidence.
+validator revision. The committed input/tool-policy closure must be clean before
+and after execution, and HEAD must not change. Unrelated WIP is neither staged
+nor included in the receipt. Old output cannot be reused as current evidence.
 
 The compiler-backed controls require a genuine matching pair to pass, a
 one-sided scalar change to produce a counterexample, and a contradictory
@@ -49,9 +51,9 @@ node --test tests/tjsv-evidence.test.mjs tests/tjsv-compiler.test.mjs
 node scripts/tjsv-check.mjs
 ```
 
-The scripts have fixed policy and accept no custom gate options. The TJSV
-compiler CLI uses upstream's canonical flags-2-env implementation. No secondary
-CLI option parser is introduced here. Run the dependency-free receipt tests
+The scripts have fixed policy and accept no custom gate options. This integration
+uses TJSV's programmatic API; TJSV's separate CLI retains upstream's canonical
+flags-2-env implementation. No secondary CLI option parser is introduced here. Run the dependency-free receipt tests
 alone before the tool checkout is available:
 
 ```sh
