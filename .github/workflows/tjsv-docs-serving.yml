@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ORESoftware/typespec-json-schema-validator
-          ref: 6bb5b7c1ee41c8b43741e50a264c33a1165549c4
+          ref: 2281843126ab644607b11cf8281d84f382d68dfc
           path: tmp/tjsv
           persist-credentials: false
       - name: Install upstream locked compiler and dependencies
