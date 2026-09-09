@@ -56,3 +56,18 @@ corpus tests, prior receipt tests and real compiler controls before all five
 contract pairs. The aggregate gate remains red until every remaining contract
 pair is reconciled and the other required runtime/review gates pass. No ignore,
 waiver, changed validator pin, or continue-on-error approval path is introduced.
+
+## Integration with merged native persistence work
+
+PR #67 landed as `ad8b845530848c07112da0efb5fcd2a1672c6f2c` after the eight
+workflows and twelve native admission cells passed. The ordinary two-parent
+integration retains its native workflow, helpers, tests, and compiler-visible
+TypeSpec persistence policy without altering that authored JSON Schema.
+
+The broad matrix respects that explicit `additionalProperties: false` contract
+instead of adding a second generic emitter-closure keyword. This is limited to
+the exact IdempotencyRecord source pair and requires the reviewed simple object
+shape with explicit unknown-property rejection. A changed source identity,
+missing closure, or new composition keyword fails before invoking the tool.
+Every other lane still requires emitter sealing. TJSV's strict structural and
+differential checks, source integrity, and native evidence gates remain intact.

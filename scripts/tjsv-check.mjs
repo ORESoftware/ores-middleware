@@ -15,7 +15,7 @@ function git(root, args) {
 // Bind the receipt to the committed input/tool-policy closure, not unrelated WIP.
 export function assertSourceClean(root) {
   const paths = ['contracts', 'scripts/tjsv-check.mjs', 'scripts/tjsv-evidence.mjs',
-    'scripts/tjsv-corpus.mjs', 'tests/tjsv-corpus.test.mjs',
+    'scripts/tjsv-corpus.mjs', 'tests/tjsv-corpus.test.mjs', 'tests/tjsv-lane-policy.test.mjs',
     'tests/docs-serving-contract.test.mjs', 'tests/fixtures/docs-serving-v1.schema.json',
     'tests/tjsv-evidence.test.mjs', 'tests/tjsv-compiler.test.mjs',
     '.github/workflows/tjsv-contract-boundaries.yml', 'package.json', 'package-lock.json'];
@@ -56,6 +56,24 @@ export function checkOptions(typespec, authoredSchema, outputDir, toolRoot, inst
   };
 }
 
+/** Preserve PR #67's explicit persistence closure, not a global sealing opt-out. */
+export function applyLanePolicy(lane, options, authoredSchema) {
+  if (lane.id !== 'persistence') return options;
+  assert.equal(lane.typespec, 'contracts/persistence/idempotency-record.tsp');
+  assert.equal(lane.authoredSchema, 'contracts/persistence/idempotency-record.schema.json');
+  const model = authoredSchema?.$defs?.IdempotencyRecord;
+  assert.equal(model?.type, 'object', 'persistence closure requires the reviewed object model');
+  assert.equal(model?.additionalProperties, false, 'persistence must explicitly reject unknown properties');
+  for (const key of ['$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf', 'not', 'if',
+    'then', 'else', 'dependentSchemas', 'patternProperties', 'unevaluatedProperties']) {
+    assert(!Object.hasOwn(model, key), `composed persistence closure requires review: ${key}`);
+  }
+  // TypeSpec now declares additionalProperties=false with the official extension
+  // decorator. Generic emitter sealing would add a second, different keyword.
+  // TJSV still requires exact parity, full coverage and rejecting unknown fields.
+  return { ...options, sealObjectSchemas: false };
+}
+
 export async function runMatrix(root = ROOT) {
   assertSourceClean(root);
   const sourceCommit = git(root, ['rev-parse', 'HEAD']);
@@ -86,8 +104,10 @@ export async function runMatrix(root = ROOT) {
         prepared = await prepareCorpus(manifest, instances);
         result.corpus = { manifest: lane.corpus, sha256: prepared.digest, cases: prepared.corpus.cases.length };
       }
-      const report = await validator.runCheck(checkOptions(typespec, authoredSchema,
-        join(outputRoot, lane.id, 'witness'), toolRoot, instances));
+      const options = applyLanePolicy(lane, checkOptions(typespec, authoredSchema,
+        join(outputRoot, lane.id, 'witness'), toolRoot, instances),
+      lane.id === 'persistence' ? JSON.parse(await readFile(authoredSchema, 'utf8')) : undefined);
+      const report = await validator.runCheck(options);
       const receipt = join(outputRoot, `${lane.id}.json`);
       await validator.writeReport(receipt, report);
       result = { ...result, id: lane.id, status: report.status, runId: report.runId,

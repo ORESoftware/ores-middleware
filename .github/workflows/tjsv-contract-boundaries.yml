@@ -58,7 +58,7 @@ jobs:
       - name: Exercise receipt gate, corpus compatibility and compiler-backed controls
         run: >-
           node --test tests/tjsv-evidence.test.mjs tests/tjsv-compiler.test.mjs
-          tests/tjsv-corpus.test.mjs tests/docs-serving-contract.test.mjs
+          tests/tjsv-corpus.test.mjs tests/docs-serving-contract.test.mjs tests/tjsv-lane-policy.test.mjs
 
       - name: Check every existing peer-authority lane
         # Retain findings from every lane even if a negative-control test fails.

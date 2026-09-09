@@ -41,7 +41,7 @@ __pycache__/
 .idea/
 .vscode/
 
-# Local scratch and root dependency installation
+# Disposable tool checkouts, temporary state, and root dependency installation
 tmp/
 temp/
 /node_modules/
