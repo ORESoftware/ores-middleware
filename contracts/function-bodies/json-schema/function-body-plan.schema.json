@@ -3,43 +3,7 @@
   "$id": "https://schemas.oresoftware.com/middleware/function-body-plan.schema.json",
   "title": "ORES Middleware Function Body Plan",
   "description": "Independently authored runtime authority for executable middleware pseudocode bodies. This schema is not generated from TypeSpec and must remain a peer authority.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schemaVersion", "contractId", "function", "intent", "inputs", "outputs", "publicFailureFields", "forbiddenPublicFields", "steps"],
-  "properties": {
-    "schemaVersion": {"const": "1.0.0"},
-    "contractId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"},
-    "function": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$"},
-    "intent": {"type": "string", "minLength": 20, "maxLength": 1024},
-    "inputs": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
-    "outputs": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
-    "publicFailureFields": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 32,
-      "uniqueItems": true,
-      "items": {"$ref": "#/$defs/safeIdentifier"},
-      "not": {"type": "array", "contains": {"enum": ["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]}}
-    },
-    "forbiddenPublicFields": {
-      "type": "array",
-      "minItems": 8,
-      "maxItems": 32,
-      "uniqueItems": true,
-      "items": {"$ref": "#/$defs/safeIdentifier"},
-      "allOf": [
-        {"type": "array", "contains": {"const": "cause"}},
-        {"type": "array", "contains": {"const": "message"}},
-        {"type": "array", "contains": {"const": "stack"}},
-        {"type": "array", "contains": {"const": "body"}},
-        {"type": "array", "contains": {"const": "authorization"}},
-        {"type": "array", "contains": {"const": "cookie"}},
-        {"type": "array", "contains": {"const": "token"}},
-        {"type": "array", "contains": {"const": "rawIdentity"}}
-      ]
-    },
-    "steps": {"type": "array", "minItems": 11, "maxItems": 32, "items": {"$ref": "#/$defs/step"}}
-  },
+  "$ref": "#/$defs/functionBodyPlan",
   "$defs": {
     "safeIdentifier": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"},
     "opcode": {"type": "string", "enum": ["capture-context", "normalize-input", "enter-context", "enter-failure-boundary", "arm-termination-guard", "invoke-operation", "classify-failure", "redact-public-failure", "report-failure-fail-open", "restore-context", "return-typed-outcome"]},
@@ -79,6 +43,45 @@
           "then": {"properties": {"phase": {"const": "terminal"}, "opcode": {"const": "return-typed-outcome"}, "effects": {"type": "array", "contains": {"const": "return-outcome"}}}}
         }
       ]
+    },
+    "functionBodyPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "contractId", "function", "intent", "inputs", "outputs", "publicFailureFields", "forbiddenPublicFields", "steps"],
+      "properties": {
+        "schemaVersion": {"const": "1.0.0"},
+        "contractId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"},
+        "function": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$"},
+        "intent": {"type": "string", "minLength": 20, "maxLength": 1024},
+        "inputs": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
+        "outputs": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/safeIdentifier"}},
+        "publicFailureFields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/safeIdentifier"},
+          "not": {"type": "array", "contains": {"enum": ["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]}}
+        },
+        "forbiddenPublicFields": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/safeIdentifier"},
+          "allOf": [
+            {"type": "array", "contains": {"const": "cause"}},
+            {"type": "array", "contains": {"const": "message"}},
+            {"type": "array", "contains": {"const": "stack"}},
+            {"type": "array", "contains": {"const": "body"}},
+            {"type": "array", "contains": {"const": "authorization"}},
+            {"type": "array", "contains": {"const": "cookie"}},
+            {"type": "array", "contains": {"const": "token"}},
+            {"type": "array", "contains": {"const": "rawIdentity"}}
+          ]
+        },
+        "steps": {"type": "array", "minItems": 11, "maxItems": 32, "items": {"$ref": "#/$defs/step"}}
+      }
     }
   }
 }
