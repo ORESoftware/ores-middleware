@@ -45,5 +45,6 @@ model DocsDecision {
   status?: uint16;
   representation?: DocsRepresentation;
   headOnly: boolean;
-  headers: Record<string>;
+  // Anonymous spread retains string-map semantics without a public RecordString type.
+  headers: { ...Record<string>; };
 }

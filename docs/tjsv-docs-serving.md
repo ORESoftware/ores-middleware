@@ -3,8 +3,9 @@
 This additive gate executes `ORESoftware/typespec-json-schema-validator` at
 `6bb5b7c1ee41c8b43741e50a264c33a1165549c4` against the two existing,
 independently human-authored docs-serving authorities. JSON Schema is unchanged;
-TypeSpec gains explicit object-closure annotations without changing its fields. Existing Rust, native-language, schema, transport, and formal checks
-remain necessary and unchanged.
+TypeSpec gains explicit object-closure annotations and an anonymous headers-map
+expression with the same wire fields and value constraints. Existing Rust,
+native-language, schema, transport, and formal checks remain necessary and unchanged.
 
 ## Scope and limits
 
@@ -31,6 +32,12 @@ a different structural keyword. Unknown-property rejection remains mandatory
 in both models' negative corpus. This is an explicit flat-model policy, not
 a waiver or a rule for composed/inherited models. Both authored sources remain
 independent; no generated comparison file replaces either one.
+
+The `headers` property uses an anonymous `{ ...Record<string>; }` model.
+This retains arbitrary string-valued keys, including the empty map, without
+emitting a separate public `RecordString` declaration. The authored JSON Schema
+continues to define the map inline. Numeric/null/array values and non-object
+maps remain rejected; this is not an untyped object or ignored declaration.
 
 ## Invocation
 

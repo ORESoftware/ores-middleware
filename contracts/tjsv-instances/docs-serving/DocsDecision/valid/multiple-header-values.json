@@ -1,0 +1,9 @@
+{
+  "action": "serve",
+  "headOnly": false,
+  "headers": {
+    "content-type": "application/json",
+    "x-request-id": "abc",
+    "x-empty": ""
+  }
+}
