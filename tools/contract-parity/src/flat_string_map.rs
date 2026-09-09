@@ -79,7 +79,10 @@ mod tests {
         let new = json!({
             "type": "object", "properties": {}, "unevaluatedProperties": {"type": "string"}
         });
-        assert_eq!(normalize_json_shape(&old).unwrap(), normalize_json_shape(&new).unwrap());
+        assert_eq!(
+            normalize_json_shape(&old).unwrap(),
+            normalize_json_shape(&new).unwrap()
+        );
     }
 
     #[test]
@@ -97,7 +100,10 @@ mod tests {
             ("unevaluatedProperties", json!(true)),
             ("unevaluatedProperties", json!(false)),
             ("unevaluatedProperties", json!({"type": "integer"})),
-            ("unevaluatedProperties", json!({"type": "string", "minLength": 1})),
+            (
+                "unevaluatedProperties",
+                json!({"type": "string", "minLength": 1}),
+            ),
         ] {
             let mut altered = baseline.clone();
             altered[key] = value;
