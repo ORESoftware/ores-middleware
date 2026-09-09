@@ -23,16 +23,23 @@ jobs:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           show-progress: false
           fetch-depth: 1
+      - name: Verify exact candidate revision
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - name: Check out immutable TJSV toolchain
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ORESoftware/typespec-json-schema-validator
-          ref: 4473504c4c9d2831d825919f70c03994d8ce01d2
+          ref: 2281843126ab644607b11cf8281d84f382d68dfc
           path: tmp/tjsv-tool
           persist-credentials: false
+      - name: Verify exact TJSV revision
+        run: test "$(git -C tmp/tjsv-tool rev-parse HEAD)" = "2281843126ab644607b11cf8281d84f382d68dfc"
       - name: Install Node 22.23.1
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -83,7 +90,28 @@ jobs:
             --seal-object-schemas=false \
             --output-dir=target/tjsv-native/generated \
             --report=target/tjsv-native/parity-report.json \
+            --sarif=target/tjsv-native/parity-report.sarif \
             --contract-ir=target/tjsv-native/contract-ir.json
+      - name: Verify complete current Contract IR declaration scope
+        uses: ORESoftware/typespec-json-schema-validator/actions/verify-contract-ir@2281843126ab644607b11cf8281d84f382d68dfc
+        with:
+          contract_ir: target/tjsv-native/contract-ir.json
+          report: target/tjsv-native/parity-report.json
+          typespec: contracts/persistence/idempotency-record.tsp
+          schema: contracts/persistence/idempotency-record.schema.json
+          generated_schema: target/tjsv-native/generated/typespec.generated.schema.json
+          expected_declarations: '["Ores.Middleware.Persistence.IdempotencyRecord","Ores.Middleware.Persistence.IdempotencyStatus"]'
+          verification: target/tjsv-native/consumer-verification.json
+      - name: Prove nineteen altered or incomplete evidence cases are rejected
+        uses: ORESoftware/typespec-json-schema-validator/actions/test-consumer-admission@2281843126ab644607b11cf8281d84f382d68dfc
+        with:
+          contract_ir: target/tjsv-native/contract-ir.json
+          report: target/tjsv-native/parity-report.json
+          typespec: contracts/persistence/idempotency-record.tsp
+          schema: contracts/persistence/idempotency-record.schema.json
+          generated_schema: target/tjsv-native/generated/typespec.generated.schema.json
+          expected_declarations: '["Ores.Middleware.Persistence.IdempotencyRecord","Ores.Middleware.Persistence.IdempotencyStatus"]'
+          verification: target/tjsv-native/consumer-regression-verification.json
       - name: Generate both independent authority lanes
         run: npm run contracts:polyglot-generate
       - name: Execute TypeSpec and JSON Schema artifacts in six native runtimes
@@ -101,7 +129,7 @@ jobs:
             and ([.witnesses[].state] | all(. == "executed"))
             and (.discrepancies | length) == 0
           ' target/generated-runtime-convergence/receipt.json
-      - name: Admit exact native witnesses through TJSV and test rejection paths
+      - name: Admit exact native witnesses through TJSV and test runtime-specific rejection paths
         run: node --input-type=module -e "import { admitNativeEvidence } from './scripts/tjsv-native-conformance.mjs'; await admitNativeEvidence();"
       - name: Upload runtime witnesses, raw logs, and generated artifacts
         if: ${{ always() }}
