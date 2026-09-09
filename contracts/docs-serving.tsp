@@ -23,6 +23,9 @@ enum DocsAction {
   stoppedForEvaluation: "stopped-for-evaluation",
 }
 
+// Name the existing string dictionary; its wire representation is unchanged.
+model DocsHeaders is Record<string>;
+
 model DocsRequest {
   method: string;
   path: string;
@@ -39,5 +42,5 @@ model DocsDecision {
   status?: uint16;
   representation?: DocsRepresentation;
   headOnly: boolean;
-  headers: Record<string>;
+  headers: DocsHeaders;
 }

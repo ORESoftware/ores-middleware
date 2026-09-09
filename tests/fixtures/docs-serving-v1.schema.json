@@ -29,14 +29,9 @@
         "stopped-for-evaluation"
       ]
     },
-    "DocsHeaders": {
-      "type": "object",
-      "properties": {},
-      "unevaluatedProperties": { "type": "string" }
-    },
     "DocsRequest": {
       "type": "object",
-      "unevaluatedProperties": false,
+      "additionalProperties": false,
       "required": ["method", "path"],
       "properties": {
         "method": { "type": "string" },
@@ -55,7 +50,7 @@
     },
     "DocsDecision": {
       "type": "object",
-      "unevaluatedProperties": false,
+      "additionalProperties": false,
       "required": ["action", "headOnly", "headers"],
       "properties": {
         "action": { "$ref": "#/$defs/DocsAction" },
@@ -66,7 +61,10 @@
         },
         "representation": { "$ref": "#/$defs/DocsRepresentation" },
         "headOnly": { "type": "boolean" },
-        "headers": { "$ref": "#/$defs/DocsHeaders" }
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
       }
     }
   }
