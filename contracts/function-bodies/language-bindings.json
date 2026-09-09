@@ -12,7 +12,7 @@
         {"stepId": "normalize-input", "source": "src/rust/src/operation.rs", "requiredFragments": ["normalize_descriptor(descriptor)"], "ordered": false},
         {"stepId": "enter-context", "source": "src/rust/src/operation.rs", "requiredFragments": ["run_with_context("], "ordered": false},
         {"stepId": "enter-failure-boundary", "source": "src/rust/src/operation.rs", "requiredFragments": ["AssertUnwindSafe(operation).catch_unwind().await"], "ordered": false},
-        {"stepId": "arm-termination-guard", "source": "src/rust/src/operation.rs", "requiredFragments": ["tokio::time::timeout(", "tokio::select!"], "ordered": false},
+        {"stepId": "arm-termination-guard", "source": "src/rust/src/operation.rs", "requiredFragments": ["tokio::time::Instant::now().checked_add(budget)", "tokio::time::sleep_until(at).await", "tokio::select!", "biased;", "_ = &mut cancellation => BoundaryEvent::Cancelled", "_ = &mut expiry => BoundaryEvent::DeadlineExceeded", "outcome = &mut guarded => BoundaryEvent::Outcome(outcome)"], "ordered": true},
         {"stepId": "invoke-operation", "source": "src/rust/src/operation.rs", "requiredFragments": ["Ok(Ok(value)) => OperationOutcome::Completed(value)"], "ordered": false},
         {"stepId": "classify-failure", "source": "src/rust/src/operation.rs", "requiredFragments": ["OperationFailureKind::DeadlineExceeded", "OperationFailureKind::Cancelled", "OperationFailureKind::Panic"], "ordered": false},
         {"stepId": "redact-public-failure", "source": "src/rust/src/operation.rs", "requiredFragments": ["pub struct OperationFailure {", "pub error_type: String"], "ordered": true},

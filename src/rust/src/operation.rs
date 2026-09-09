@@ -125,9 +125,10 @@ where
     run_scoped(context, normalize_descriptor(descriptor), operation).await
 }
 
-/// Deadline-bounded variant. The timed-out operation future is dropped, which
-/// also drops both task-local scopes. The timeout failure is then reported in a
-/// fresh scope carrying the same request and tracing identifiers.
+/// Deadline-bounded variant. A zero or unrepresentable deadline rejects the
+/// operation without polling it. At each yield, deadline admission is checked
+/// before the handler. This cannot preempt a non-yielding future or undo effects
+/// completed before cancellation. The budget starts on first poll.
 pub async fn run_operation_boundary_with_timeout<F, T, E>(
     context: RequestContext,
     descriptor: OperationDescriptor,
@@ -137,29 +138,20 @@ pub async fn run_operation_boundary_with_timeout<F, T, E>(
 where
     F: Future<Output = Result<T, E>>,
 {
-    let descriptor = normalize_descriptor(descriptor);
-    match tokio::time::timeout(
-        timeout,
-        run_scoped(context.clone(), descriptor.clone(), operation),
+    run_controlled(
+        context,
+        descriptor,
+        Some(timeout),
+        std::future::pending(),
+        operation,
     )
     .await
-    {
-        Ok(outcome) => outcome,
-        Err(_) => {
-            report_terminal_failure(
-                context,
-                descriptor,
-                OperationFailureKind::DeadlineExceeded,
-                "DeadlineExceeded",
-            )
-            .await
-        }
-    }
 }
 
 /// Cooperative cancellation variant for connection loops and server shutdown.
-/// Resolving `cancellation` drops the guarded operation and reports a typed,
-/// request-correlated cancellation outcome.
+/// An already-ready cancellation rejects the operation without polling it.
+/// Cancellation wins a simultaneous readiness tie. The owned operation future
+/// is dropped before a terminal failure is reported in a fresh correlated scope.
 pub async fn run_operation_boundary_with_cancellation<F, C, T, E>(
     context: RequestContext,
     descriptor: OperationDescriptor,
@@ -170,18 +162,91 @@ where
     F: Future<Output = Result<T, E>>,
     C: Future<Output = ()>,
 {
+    run_controlled(context, descriptor, None, cancellation, operation).await
+}
+
+/// Applies a monotonic deadline and cancellation in one operation boundary.
+/// Poll priority is cancellation, deadline, then handler. This avoids nested
+/// guards producing a completed outer outcome around an inner failure.
+///
+/// Keep side effects inside the supplied future, not in its constructor. A
+/// dropped JoinHandle does not abort its separately spawned task. Application
+/// code still owns such tasks, framing, authorization, backpressure and retries.
+pub async fn run_operation_boundary_with_timeout_and_cancellation<F, C, T, E>(
+    context: RequestContext,
+    descriptor: OperationDescriptor,
+    timeout: Duration,
+    cancellation: C,
+    operation: F,
+) -> OperationOutcome<T>
+where
+    F: Future<Output = Result<T, E>>,
+    C: Future<Output = ()>,
+{
+    run_controlled(context, descriptor, Some(timeout), cancellation, operation).await
+}
+
+enum BoundaryEvent<T> {
+    Outcome(OperationOutcome<T>),
+    Cancelled,
+    DeadlineExceeded,
+}
+
+async fn run_controlled<F, C, T, E>(
+    context: RequestContext,
+    descriptor: OperationDescriptor,
+    timeout: Option<Duration>,
+    cancellation: C,
+    operation: F,
+) -> OperationOutcome<T>
+where
+    F: Future<Output = Result<T, E>>,
+    C: Future<Output = ()>,
+{
     let descriptor = normalize_descriptor(descriptor);
-    let context_for_failure = context.clone();
-    let descriptor_for_failure = descriptor.clone();
-    tokio::select! {
-        outcome = run_scoped(context, descriptor, operation) => outcome,
-        _ = cancellation => {
+    let deadline = timeout.and_then(|budget| tokio::time::Instant::now().checked_add(budget));
+    let event = {
+        // All owned futures live in this block. In particular the losing
+        // operation is dropped before report_terminal_failure below runs.
+        let cancellation = cancellation;
+        let expiry = async move {
+            match (timeout, deadline) {
+                (None, _) => std::future::pending::<()>().await,
+                (Some(budget), _) if budget.is_zero() => (),
+                // Invalid/overflowing budgets fail closed rather than panic or
+                // silently become unlimited. No timer allocation is needed.
+                (Some(_), None) => (),
+                (Some(_), Some(at)) => tokio::time::sleep_until(at).await,
+            }
+        };
+        let guarded = run_scoped(context.clone(), descriptor.clone(), operation);
+        tokio::pin!(cancellation, expiry, guarded);
+        tokio::select! {
+            biased;
+            _ = &mut cancellation => BoundaryEvent::Cancelled,
+            _ = &mut expiry => BoundaryEvent::DeadlineExceeded,
+            outcome = &mut guarded => BoundaryEvent::Outcome(outcome),
+        }
+    };
+    match event {
+        BoundaryEvent::Outcome(outcome) => outcome,
+        BoundaryEvent::Cancelled => {
             report_terminal_failure(
-                context_for_failure,
-                descriptor_for_failure,
+                context,
+                descriptor,
                 OperationFailureKind::Cancelled,
                 "Cancelled",
-            ).await
+            )
+            .await
+        }
+        BoundaryEvent::DeadlineExceeded => {
+            report_terminal_failure(
+                context,
+                descriptor,
+                OperationFailureKind::DeadlineExceeded,
+                "DeadlineExceeded",
+            )
+            .await
         }
     }
 }

@@ -38,7 +38,8 @@ pub use middleware_order::{
 };
 pub use operation::{
     run_operation_boundary, run_operation_boundary_with_cancellation,
-    run_operation_boundary_with_timeout, OperationDescriptor, OperationFailure,
+    run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
+    OperationDescriptor, OperationFailure,
     OperationFailureKind, OperationOutcome, OperationScope, OperationTransport,
 };
 pub use otel::{run_with_ores_log_context, to_ores_log_context, RequestLogger};

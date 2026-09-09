@@ -31,6 +31,8 @@ tracing = "0.1"
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
+# Explicit features for real socket and deterministic timer regression tests.
+tokio = { version = "1", features = ["net", "io-util", "test-util"] }
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 
