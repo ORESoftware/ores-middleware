@@ -1,0 +1,99 @@
+name: function-body-tjsv
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: function-body-tjsv-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  function-body-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact middleware source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install repository-standard Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+
+      - name: Install middleware TypeSpec dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Preserve existing function-body runtime and source checks
+        run: npm run function-bodies:check
+
+      - name: Check out immutable mapping-aware TJSV
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 05230b6de97f64b274f87b41d68d059f3d5cbd64
+          path: tmp/tjsv-function-bodies
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install locked TJSV compiler dependencies
+        run: npm ci --prefix tmp/tjsv-function-bodies --ignore-scripts --no-audit --no-fund
+
+      - name: Build only the reviewed flags-2-env native dependency
+        working-directory: tmp/tjsv-function-bodies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm rebuild @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+          test -s node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
+
+      - name: Run compiler-backed peer-authority parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/function-body-tjsv
+          node tmp/tjsv-function-bodies/bin/typespec-json-schema-validator.mjs check \
+            --typespec=contracts/function-bodies/typespec/main.tsp \
+            --schema=contracts/function-bodies/json-schema \
+            --mapping=contracts/function-bodies/tjsv.mapping.json \
+            --tsp-bin=tmp/tjsv-function-bodies/node_modules/.bin/tsp \
+            --report=target/function-body-tjsv/report.json \
+            --output-dir=target/function-body-tjsv/generated \
+            --probes=true \
+            --max-probes=128 \
+            --seal-object-schemas=false \
+            --int64-strategy=string \
+            --polymorphic-models-strategy=oneOf \
+            --format-assertion=true \
+            --quiet=true
+
+      - name: Verify exact source/tool revisions and input immutability
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git -C tmp/tjsv-function-bodies rev-parse HEAD)" = "05230b6de97f64b274f87b41d68d059f3d5cbd64"
+          git diff --exit-code -- \
+            contracts/function-bodies \
+            scripts/validate-function-bodies.mjs \
+            tests/e2e/function-body-contract.e2e.mjs
+
+      - name: Retain exact-head parity evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: function-body-tjsv-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/function-body-tjsv/
+          if-no-files-found: error
+          retention-days: 30
