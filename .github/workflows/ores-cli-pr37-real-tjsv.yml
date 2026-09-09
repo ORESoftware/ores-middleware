@@ -39,7 +39,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install canonical validator from committed lockfile
-        run: npm ci --ignore-scripts
+        run: npm ci
 
       - name: Run canonical producer and consumer admission
         run: |
