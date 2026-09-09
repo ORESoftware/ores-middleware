@@ -38,11 +38,14 @@ jobs:
           node-version: 22.23.1
           package-manager-cache: false
 
-      - name: Install from committed lockfile and smoke executable
+      - name: Install from committed lockfile and smoke declared CLI
         run: |
           set -euo pipefail
           npm ci
-          node bin/typespec-json-schema-validator.mjs --version
+          node bin/typespec-json-schema-validator.mjs inventory \
+            --typespec test/fixtures/pass/main.tsp \
+            --quiet > "$RUNNER_TEMP/tjsv-inventory.json"
+          test -s "$RUNNER_TEMP/tjsv-inventory.json"
 
       - name: Package public runtime
         run: |
