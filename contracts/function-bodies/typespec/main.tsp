@@ -167,12 +167,14 @@ model FunctionBodyStep {
 @minItems(1)
 @maxItems(32)
 @TypeSpec.JsonSchema.uniqueItems
-@TypeSpec.JsonSchema.extension("not", #{
-  `type`: "array",
-  `contains`: #{
-    `enum`: #["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]
+@TypeSpec.JsonSchema.extension("allOf", #[#{
+  `not`: #{
+    `type`: "array",
+    `contains`: #{
+      `enum`: #["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]
+    }
   }
-})
+}])
 model PublicFailureFields is Array<SafeIdentifier>;
 
 /** Every reviewed private field must remain explicitly forbidden. */
@@ -232,7 +234,9 @@ model FunctionBodyPlan {
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 model BodyStepEvidence {
-  stepId: SafeIdentifier;
+  @pattern("^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+  stepId: string;
+
   source: RelativePath;
 
   @minItems(1)
@@ -245,6 +249,7 @@ model BodyStepEvidence {
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 model LanguageBodyBinding {
+  @TypeSpec.JsonSchema.extension("enum", #["rust", "typescript", "golang", "gleam", "elixir", "erlang"])
   language: "rust" | "typescript" | "golang" | "gleam" | "elixir" | "erlang";
 
   @minLength(3)

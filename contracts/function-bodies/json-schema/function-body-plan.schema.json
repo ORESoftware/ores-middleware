@@ -166,21 +166,25 @@
       "maxItems": 32,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/safeIdentifier"},
-      "not": {
-        "type": "array",
-        "contains": {
-          "enum": [
-            "cause",
-            "message",
-            "stack",
-            "body",
-            "authorization",
-            "cookie",
-            "token",
-            "rawIdentity"
-          ]
+      "allOf": [
+        {
+          "not": {
+            "type": "array",
+            "contains": {
+              "enum": [
+                "cause",
+                "message",
+                "stack",
+                "body",
+                "authorization",
+                "cookie",
+                "token",
+                "rawIdentity"
+              ]
+            }
+          }
         }
-      }
+      ]
     },
     "forbiddenPublicFields": {
       "type": "array",

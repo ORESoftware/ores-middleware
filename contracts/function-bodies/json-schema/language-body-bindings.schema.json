@@ -37,8 +37,15 @@
       ],
       "properties": {
         "language": {
-          "type": "string",
-          "enum": ["rust", "typescript", "golang", "gleam", "elixir", "erlang"]
+          "enum": ["rust", "typescript", "golang", "gleam", "elixir", "erlang"],
+          "anyOf": [
+            {"type": "string", "const": "rust"},
+            {"type": "string", "const": "typescript"},
+            {"type": "string", "const": "golang"},
+            {"type": "string", "const": "gleam"},
+            {"type": "string", "const": "elixir"},
+            {"type": "string", "const": "erlang"}
+          ]
         },
         "symbol": {"type": "string", "minLength": 3, "maxLength": 256},
         "sources": {
@@ -68,7 +75,8 @@
       "required": ["stepId", "source", "requiredFragments", "ordered"],
       "properties": {
         "stepId": {
-          "$ref": "https://schemas.oresoftware.com/middleware/function-body-plan.schema.json#/$defs/safeIdentifier"
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
         },
         "source": {"$ref": "#/$defs/relativePath"},
         "requiredFragments": {
