@@ -65,13 +65,14 @@ final candidate's retained logs for their execution result.
 
 ## Contract and runtime coverage boundaries
 
-The merged [TJSV native gate (#67)](https://github.com/ORESoftware/ores-middleware/pull/67)
-uses `ORESoftware/typespec-json-schema-validator` pinned to
-`4473504c4c9d2831d825919f70c03994d8ce01d2`. TypeSpec and authored JSON Schema remain
-independent peers. IdempotencyRecord admission binds a verified current-input
-Contract IR to actual Node, Rust, Go, Gleam, Elixir and Erlang executions in both
-authority lanes. Its 12 native cells do not certify every middleware contract.
-Filesystem evidence hardening is separately tracked in
+The native TJSV gate uses `ORESoftware/typespec-json-schema-validator` pinned to
+`2281843126ab644607b11cf8281d84f382d68dfc`. TypeSpec and authored JSON Schema remain
+independent peers. IdempotencyRecord admission re-verifies the complete two-declaration
+Contract IR scope against current source and generated comparison evidence, runs
+TJSV's nineteen standard altered/incomplete-evidence rejection cases, and binds
+actual Node, Rust, Go, Gleam, Elixir and Erlang executions in both authority lanes.
+Its 12 native cells and seven runtime-specific attacks do not certify every middleware
+contract. Filesystem evidence hardening is separately tracked in
 [PR #72](https://github.com/ORESoftware/ores-middleware/pull/72).
 
 | Surface | Evidence and remaining acceptance work |
