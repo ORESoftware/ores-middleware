@@ -9,7 +9,7 @@ import { buildNativeEvidence, cells, digest, fixturePath, languages, parseFixtur
 
 const root = process.cwd();
 const output = 'target/tjsv-native';
-const pin = '4473504c4c9d2831d825919f70c03994d8ce01d2';
+const pin = '2281843126ab644607b11cf8281d84f382d68dfc';
 const tool = 'tmp/tjsv-tool';
 const nativeReceipt = 'target/generated-runtime-convergence/receipt.json';
 const command = (file, args) => execFileSync(file, args, {
