@@ -19,18 +19,18 @@ jobs:
   runtime-matrix:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
           persist-credentials: false
           show-progress: false
           fetch-depth: 1
       - name: Verify exact candidate revision
-        env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
       - name: Check out immutable TJSV toolchain
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
