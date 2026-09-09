@@ -40,3 +40,8 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Local scratch and root dependency installation
+tmp/
+temp/
+/node_modules/

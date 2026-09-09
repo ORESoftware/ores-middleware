@@ -1,0 +1,14 @@
+{
+  "schema": "ores.middleware.tjsv-matrix/v1",
+  "validator": {
+    "repository": "ORESoftware/typespec-json-schema-validator",
+    "revision": "4473504c4c9d2831d825919f70c03994d8ce01d2"
+  },
+  "lanes": [
+    { "id": "middleware", "typespec": "contracts/typespec/main.tsp", "authoredSchema": "contracts/json-schema" },
+    { "id": "docs-serving", "typespec": "contracts/docs-serving.tsp", "authoredSchema": "contracts/docs-serving.schema.json" },
+    { "id": "function-bodies", "typespec": "contracts/function-bodies/typespec/main.tsp", "authoredSchema": "contracts/function-bodies/json-schema" },
+    { "id": "persistence", "typespec": "contracts/persistence/idempotency-record.tsp", "authoredSchema": "contracts/persistence/idempotency-record.schema.json" },
+    { "id": "rate-limit-v2", "typespec": "contracts/rate-limit-v2/typespec/main.tsp", "authoredSchema": "contracts/rate-limit-v2/json-schema" }
+  ]
+}

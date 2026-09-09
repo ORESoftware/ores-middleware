@@ -1,0 +1,74 @@
+name: tjsv-contract-boundaries
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tjsv-contract-boundaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-boundaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+
+      - name: Validate immutable tool and contract matrix
+        id: policy
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { assertMatrix } from './scripts/tjsv-evidence.mjs';
+          const policy = assertMatrix(JSON.parse(readFileSync('contracts/tjsv.matrix.json', 'utf8')));
+          appendFileSync(process.env.GITHUB_OUTPUT, `revision=${policy.validator.revision}\n`);
+          NODE
+
+      - name: Check out pinned upstream TJSV
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: ${{ steps.policy.outputs.revision }}
+          path: target/tools/tjsv
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install locked compiler and source dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix target/tools/tjsv --ignore-scripts --no-audit --no-fund
+
+      - name: Exercise receipt gate and compiler-backed negative controls
+        run: node --test tests/tjsv-evidence.test.mjs tests/tjsv-compiler.test.mjs
+
+      - name: Check every existing peer-authority lane
+        # Retain findings from every lane even if a negative-control test fails.
+        # A previous step failure still makes the whole job fail.
+        if: ${{ !cancelled() && steps.policy.outcome == 'success' }}
+        run: node scripts/tjsv-check.mjs
+
+      - name: Retain exact-run parity and control receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tjsv-contract-boundaries-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/tjsv/
+          if-no-files-found: error
+          retention-days: 30
