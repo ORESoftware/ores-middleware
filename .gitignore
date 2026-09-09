@@ -40,3 +40,7 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Temporary agent/tooling state
+tmp/
+temp/
