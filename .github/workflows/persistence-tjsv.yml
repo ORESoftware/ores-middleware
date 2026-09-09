@@ -1,0 +1,116 @@
+name: persistence-tjsv
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/persistence-tjsv.yml'
+      - 'contracts/persistence/idempotency-record.tsp'
+      - 'contracts/persistence/idempotency-record.schema.json'
+      - 'fixtures/generated-runtime-conformance.json'
+      - 'tests/persistence-tjsv.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches: [main, dev]
+    paths:
+      - '.github/workflows/persistence-tjsv.yml'
+      - 'contracts/persistence/idempotency-record.tsp'
+      - 'contracts/persistence/idempotency-record.schema.json'
+      - 'fixtures/generated-runtime-conformance.json'
+      - 'tests/persistence-tjsv.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: persistence-tjsv-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  persistence-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      TJSV_REVISION: 733bc1b6b4b45433a38625fc4dd9ddb108b60519
+    steps:
+      - name: Check out exact source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact source revision
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+
+      - name: Check out exact hardened TJSV source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: ${{ env.TJSV_REVISION }}
+          path: target/tools/tjsv
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify immutable validator revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C target/tools/tjsv rev-parse HEAD)" = "$TJSV_REVISION"
+
+      - name: Install locked source and compiler dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix target/tools/tjsv --ignore-scripts --no-audit --no-fund
+
+      - name: Execute real compiler, corpus, and adversarial controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/persistence-tjsv
+          node --test tests/persistence-tjsv.test.mjs 2>&1 | tee target/persistence-tjsv/tests.log
+
+      - name: Preserve independent compiler and cross-translation behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/persistence-tjsv
+          npm run contracts:compile 2>&1 | tee target/persistence-tjsv/compile.log
+          npm run contracts:cross-translate 2>&1 | tee target/persistence-tjsv/cross-translate.log
+
+      - name: Retain exact-run receipts and regression logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: persistence-tjsv-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/persistence-tjsv/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require tracked authorities and tests to remain unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --exit-code -- \
+            contracts/persistence/idempotency-record.tsp \
+            contracts/persistence/idempotency-record.schema.json \
+            fixtures/generated-runtime-conformance.json \
+            tests/persistence-tjsv.test.mjs \
+            .github/workflows/persistence-tjsv.yml \
+            package.json package-lock.json
+          test -z "$(git status --porcelain --untracked-files=no)"
