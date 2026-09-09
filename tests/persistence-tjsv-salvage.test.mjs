@@ -102,7 +102,7 @@ test('current peer authorities and corpus pass actual pinned TJSV', async () => 
   assertPass(await check('positive'));
 });
 
-test('current authored schema preserves reviewed pre-merge wire verdicts', () => {
+test('dual flat-object closure preserves reviewed pre-merge wire verdicts', () => {
   const oldValidate = compileSchema(baselineSchema);
   const newValidate = compileSchema(schema);
   for (const item of corpus.cases) {
@@ -112,6 +112,10 @@ test('current authored schema preserves reviewed pre-merge wire verdicts', () =>
   }
   const model = schema.$defs.IdempotencyRecord;
   assert.equal(model.additionalProperties, false);
+  assert.equal(model.unevaluatedProperties, false);
+  for (const keyword of ['allOf', 'anyOf', 'oneOf', 'patternProperties', 'if', 'then', 'else']) {
+    assert(!Object.hasOwn(model, keyword), `composition requires new closure review: ${keyword}`);
+  }
   assert.equal(model['x-ores-sql'].table, 'middleware_idempotency');
   assert.deepEqual(model['x-ores-sql'].primaryKey, ['id']);
   assert.deepEqual(model['x-ores-sql'].unique, [['tenantId', 'idempotencyKey']]);
@@ -141,9 +145,10 @@ test('TJSV rejects tenant scalar drift with real verdict divergences', async () 
   assert(report.differential.summary.divergences > 0);
 });
 
-test('TJSV rejects opening the record to unknown properties', async () => {
+test('TJSV rejects opening both closure guards to unknown properties', async () => {
   const authored = structuredClone(schema);
   delete authored.$defs.IdempotencyRecord.additionalProperties;
+  delete authored.$defs.IdempotencyRecord.unevaluatedProperties;
   const report = await check('unknown-property-drift', { authored });
   assertBlocked(report);
   assert(report.differential.summary.divergences > 0);
