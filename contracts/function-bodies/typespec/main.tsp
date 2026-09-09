@@ -92,54 +92,54 @@ enum BodyFailurePolicy {
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 @TypeSpec.JsonSchema.extension("allOf", #[
   #{
-    if: #{
-      properties: #{ opcode: #{ const: "report-failure-fail-open" } },
-      required: #["opcode"]
+    `if`: #{
+      `properties`: #{ `opcode`: #{ `const`: "report-failure-fail-open" } },
+      `required`: #["opcode"]
     },
-    then: #{
-      properties: #{
-        when: #{ const: "on-failure" },
-        failurePolicy: #{ const: "ignore-reporter-failure" },
-        effects: #{ type: "array", contains: #{ const: "emit-bounded-telemetry" } }
+    `then`: #{
+      `properties`: #{
+        `when`: #{ `const`: "on-failure" },
+        `failurePolicy`: #{ `const`: "ignore-reporter-failure" },
+        `effects`: #{ `type`: "array", `contains`: #{ `const`: "emit-bounded-telemetry" } }
       }
     }
   },
   #{
-    if: #{
-      properties: #{ opcode: #{ const: "restore-context" } },
-      required: #["opcode"]
+    `if`: #{
+      `properties`: #{ `opcode`: #{ `const`: "restore-context" } },
+      `required`: #["opcode"]
     },
-    then: #{
-      properties: #{
-        phase: #{ const: "finalization" },
-        when: #{ const: "finally" },
-        failurePolicy: #{ const: "always-run" },
-        effects: #{ type: "array", contains: #{ const: "restore-ambient-context" } }
+    `then`: #{
+      `properties`: #{
+        `phase`: #{ `const`: "finalization" },
+        `when`: #{ `const`: "finally" },
+        `failurePolicy`: #{ `const`: "always-run" },
+        `effects`: #{ `type`: "array", `contains`: #{ `const`: "restore-ambient-context" } }
       }
     }
   },
   #{
-    if: #{
-      properties: #{ opcode: #{ const: "invoke-operation" } },
-      required: #["opcode"]
+    `if`: #{
+      `properties`: #{ `opcode`: #{ `const`: "invoke-operation" } },
+      `required`: #["opcode"]
     },
-    then: #{
-      properties: #{
-        when: #{ const: "unless-failed" },
-        effects: #{ type: "array", contains: #{ const: "invoke-user-code" } }
+    `then`: #{
+      `properties`: #{
+        `when`: #{ `const`: "unless-failed" },
+        `effects`: #{ `type`: "array", `contains`: #{ `const`: "invoke-user-code" } }
       }
     }
   },
   #{
-    if: #{
-      properties: #{ terminal: #{ const: true } },
-      required: #["terminal"]
+    `if`: #{
+      `properties`: #{ `terminal`: #{ `const`: true } },
+      `required`: #["terminal"]
     },
-    then: #{
-      properties: #{
-        phase: #{ const: "terminal" },
-        opcode: #{ const: "return-typed-outcome" },
-        effects: #{ type: "array", contains: #{ const: "return-outcome" } }
+    `then`: #{
+      `properties`: #{
+        `phase`: #{ `const`: "terminal" },
+        `opcode`: #{ `const`: "return-typed-outcome" },
+        `effects`: #{ `type`: "array", `contains`: #{ `const`: "return-outcome" } }
       }
     }
   }
@@ -196,9 +196,9 @@ model FunctionBodyPlan {
   @maxItems(32)
   @TypeSpec.JsonSchema.uniqueItems
   @TypeSpec.JsonSchema.extension("not", #{
-    type: "array",
-    contains: #{
-      enum: #["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]
+    `type`: "array",
+    `contains`: #{
+      `enum`: #["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]
     }
   })
   publicFailureFields: SafeIdentifier[];
@@ -207,14 +207,14 @@ model FunctionBodyPlan {
   @maxItems(32)
   @TypeSpec.JsonSchema.uniqueItems
   @TypeSpec.JsonSchema.extension("allOf", #[
-    #{ type: "array", contains: #{ const: "cause" } },
-    #{ type: "array", contains: #{ const: "message" } },
-    #{ type: "array", contains: #{ const: "stack" } },
-    #{ type: "array", contains: #{ const: "body" } },
-    #{ type: "array", contains: #{ const: "authorization" } },
-    #{ type: "array", contains: #{ const: "cookie" } },
-    #{ type: "array", contains: #{ const: "token" } },
-    #{ type: "array", contains: #{ const: "rawIdentity" } }
+    #{ `type`: "array", `contains`: #{ `const`: "cause" } },
+    #{ `type`: "array", `contains`: #{ `const`: "message" } },
+    #{ `type`: "array", `contains`: #{ `const`: "stack" } },
+    #{ `type`: "array", `contains`: #{ `const`: "body" } },
+    #{ `type`: "array", `contains`: #{ `const`: "authorization" } },
+    #{ `type`: "array", `contains`: #{ `const`: "cookie" } },
+    #{ `type`: "array", `contains`: #{ `const`: "token" } },
+    #{ `type`: "array", `contains`: #{ `const`: "rawIdentity" } }
   ])
   forbiddenPublicFields: SafeIdentifier[];
 
