@@ -66,7 +66,7 @@ jobs:
             --typespec=contracts/function-bodies/typespec/main.tsp \
             --schema=contracts/function-bodies/json-schema \
             --mapping=contracts/function-bodies/tjsv.mapping.json \
-            --tsp-bin=tmp/tjsv-function-bodies/node_modules/.bin/tsp \
+            --tsp-bin="${GITHUB_WORKSPACE}/tmp/tjsv-function-bodies/node_modules/.bin/tsp" \
             --report=target/function-body-tjsv/report.json \
             --output-dir=target/function-body-tjsv/generated \
             --probes=true \
