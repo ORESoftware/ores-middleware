@@ -1,4 +1,8 @@
 #![forbid(unsafe_code)]
+#![expect(
+    clippy::too_many_arguments,
+    reason = "SharedAuthVerifiedPrincipal keeps all provider, identity, tenant, session, issuer, audience, organization, and realm evidence explicit at construction"
+)]
 
 mod bootstrap;
 mod compat;
