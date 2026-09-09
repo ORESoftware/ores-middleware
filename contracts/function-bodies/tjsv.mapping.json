@@ -1,0 +1,27 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    {"typespec":"Ores.Middleware.FunctionBodies.SafeIdentifier","generated":"SafeIdentifier","authored":"safeIdentifier"},
+    {"typespec":"Ores.Middleware.FunctionBodies.RelativePath","generated":"RelativePath","authored":"relativePath"},
+    {"typespec":"Ores.Middleware.FunctionBodies.RequiredFragment","generated":"RequiredFragment","authored":"requiredFragment"},
+    {"typespec":"Ores.Middleware.FunctionBodies.ForbiddenFragment","generated":"ForbiddenFragment","authored":"forbiddenFragment"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyLanguage","generated":"BodyLanguage","authored":"language"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyOpcode","generated":"BodyOpcode","authored":"opcode"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyPhase","generated":"BodyPhase","authored":"phase"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyWhen","generated":"BodyWhen","authored":"when"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyEffect","generated":"BodyEffect","authored":"effect"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyFailurePolicy","generated":"BodyFailurePolicy","authored":"failurePolicy"},
+    {"typespec":"Ores.Middleware.FunctionBodies.FunctionBodyStep","generated":"FunctionBodyStep","authored":"step"},
+    {"typespec":"Ores.Middleware.FunctionBodies.PublicFailureFields","generated":"PublicFailureFields","authored":"publicFailureFields"},
+    {"typespec":"Ores.Middleware.FunctionBodies.ForbiddenPublicFields","generated":"ForbiddenPublicFields","authored":"forbiddenPublicFields"},
+    {"typespec":"Ores.Middleware.FunctionBodies.FunctionBodyPlan","generated":"FunctionBodyPlan","authored":"functionBodyPlan"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyStepEvidence","generated":"BodyStepEvidence","authored":"stepEvidence"},
+    {"typespec":"Ores.Middleware.FunctionBodies.LanguageBodyBinding","generated":"LanguageBodyBinding","authored":"binding"},
+    {"typespec":"Ores.Middleware.FunctionBodies.FunctionBodyBindings","generated":"FunctionBodyBindings","authored":"functionBodyBindings"}
+  ],
+  "ignore": {
+    "typespec": [],
+    "generated": [],
+    "authored": []
+  }
+}
