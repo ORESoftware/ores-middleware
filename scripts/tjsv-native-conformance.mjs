@@ -117,7 +117,8 @@ export async function admitNativeEvidence() {
   await writeJson(`${output}/runtime-report.json`, { status: 'failed', stage: 'verification-started' });
   assert.equal(command('git', ['-C', tool, 'rev-parse', 'HEAD']), pin, 'unexpected TJSV revision');
   const commit = command('git', ['rev-parse', 'HEAD']);
-  if (process.env.GITHUB_SHA) assert.equal(commit, process.env.GITHUB_SHA, 'checkout is not the workflow source');
+  const expectedSource = process.env.ORES_WORKFLOW_SOURCE_SHA ?? process.env.GITHUB_SHA;
+  if (expectedSource) assert.equal(commit, expectedSource, 'checkout is not the workflow source');
   const api = await import(pathToFileURL(path.join(root, tool, 'src/runtime-conformance/index.mjs')).href);
   const inputs = {
     contractIr: JSON.parse(await readBytes(`${output}/contract-ir.json`)),
