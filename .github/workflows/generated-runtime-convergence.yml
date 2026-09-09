@@ -115,14 +115,20 @@ jobs:
       - name: Generate both independent authority lanes
         run: npm run contracts:polyglot-generate
       - name: Execute TypeSpec and JSON Schema artifacts in six native runtimes
-        run: node scripts/generated_runtime_matrix.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Bind the generated runtime receipt to the verified source head, not
+          # GitHub's synthetic pull-request merge commit exposed as GITHUB_SHA.
+          GITHUB_SHA="$ORES_WORKFLOW_SOURCE_SHA" node scripts/generated_runtime_matrix.mjs
       - name: Assert complete fail-closed receipt
         if: ${{ success() }}
         shell: bash
         run: |
           set -euo pipefail
-          jq -e '
+          jq -e --arg expected "$ORES_WORKFLOW_SOURCE_SHA" '
             .schema == "ores.generated-runtime-convergence-report/v1"
+            and .commit == $expected
             and .status == "passed"
             and .zeroUnexplainedFindings == true
             and (.witnesses | length) == 12
