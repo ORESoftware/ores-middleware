@@ -1,8 +1,12 @@
 # TJSV docs-serving contract gate — initial integration slice
 
 This additive gate executes `ORESoftware/typespec-json-schema-validator` at
-`6bb5b7c1ee41c8b43741e50a264c33a1165549c4` against the two existing,
-independently human-authored docs-serving authorities. TypeSpec gains explicit
+`2281843126ab644607b11cf8281d84f382d68dfc` against the two existing,
+independently human-authored docs-serving authorities. That immutable validator
+revision includes the merged dense consumer-scope admission hardening and semantic
+date/time/IP format checks; this docs gate still invokes format assertions as disabled
+for its current contract surface, so the pin advance is compatibility evidence rather
+than a claim that those format semantics are exercised here. TypeSpec gains explicit
 object-closure annotations and an anonymous headers-map expression. The authored
 JSON Schema header map is manually reconciled to an equivalent flat-map spelling;
 wire fields and accepted value constraints are preserved. Existing Rust,
