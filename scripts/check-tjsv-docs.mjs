@@ -9,7 +9,7 @@ import {
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const TJSV_REV = '6bb5b7c1ee41c8b43741e50a264c33a1165549c4';
+export const TJSV_REV = '2281843126ab644607b11cf8281d84f382d68dfc';
 export const DECLARATIONS = Object.freeze([
   'DocsAction', 'DocsDecision', 'DocsRepresentation', 'DocsRequest',
 ]);
