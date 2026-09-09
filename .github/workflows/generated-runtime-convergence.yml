@@ -80,7 +80,7 @@ jobs:
             --schema=contracts/persistence/idempotency-record.schema.json \
             --instances=target/tjsv-native/instances \
             --format-assertion=true \
-            --seal-object-schemas=true \
+            --seal-object-schemas=false \
             --output-dir=target/tjsv-native/generated \
             --report=target/tjsv-native/parity-report.json \
             --contract-ir=target/tjsv-native/contract-ir.json

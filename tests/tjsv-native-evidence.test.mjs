@@ -51,6 +51,8 @@ test('translates all twelve actual witness verdict sets deterministically', () =
   const result = buildNativeEvidence(input);
   assert.equal(result.evidence.adapters.length, 12);
   assert.equal(result.requiredAdapters.length, 12);
+  assert.equal(result.expectedCases[0].declaration, 'Ores.Middleware.Persistence.IdempotencyRecord');
+  assert.equal(result.evidence.adapters[0].results[0].declaration, result.expectedCases[0].declaration);
   assert.equal(result.evidence.adapters[0].results[1].verdict, 'rejected');
   assert.deepEqual(result, buildNativeEvidence(input));
 });

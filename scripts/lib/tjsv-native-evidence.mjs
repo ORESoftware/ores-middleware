@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 
 export const lanes = Object.freeze(['typespec', 'json-schema-openapi']);
 export const languages = Object.freeze(['typescript', 'rust', 'golang', 'gleam', 'elixir', 'erlang']);
+export const declarationId = 'Ores.Middleware.Persistence.IdempotencyRecord';
 export const fixturePath = 'fixtures/generated-runtime-conformance.json';
 export const sourcePaths = Object.freeze([
   'contracts/persistence/idempotency-record.tsp',
@@ -89,7 +90,7 @@ export function buildNativeEvidence({ binding, receipt, files, harnessPaths, com
   }
   exact(receipt.witnesses.map(item => `${item.authority}/${item.language}`), cells.map(item => item.id), 'native cells');
   const expectedCases = fixture.cases.map(item => ({
-    id: item.id, declaration: fixture.model, expectation: item.expect === 'accept' ? 'accepted' : 'rejected',
+    id: item.id, declaration: declarationId, expectation: item.expect === 'accept' ? 'accepted' : 'rejected',
   }));
   const adapters = cells.map(cell => {
     const item = receipt.witnesses.find(value => `${value.authority}/${value.language}` === cell.id);
@@ -111,7 +112,7 @@ export function buildNativeEvidence({ binding, receipt, files, harnessPaths, com
       const expected = fixture.cases.find(entry => entry.id === value.id);
       assert.equal(value.accepted, expected.expect === 'accept', 'runtime verdict mismatch');
       assert.deepEqual(value.normalized, value.accepted ? expected.value : null, 'runtime roundtrip mismatch');
-      return { caseId: value.id, declaration: fixture.model, verdict: value.accepted ? 'accepted' : 'rejected' };
+      return { caseId: value.id, declaration: declarationId, verdict: value.accepted ? 'accepted' : 'rejected' };
     });
     assert(typeof toolchains[cell.language] === 'string' && toolchains[cell.language].trim().length > 0, 'missing measured toolchain');
     return {

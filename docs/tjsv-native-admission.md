@@ -43,3 +43,26 @@ semantic gates remain required; a schema pass does not establish authorization,
 transaction semantics, or complete production deployment readiness.
 
 Linear: DEN-3828.
+
+## Explicit compiler-visible persistence policy
+
+The first real compiler run found three structural differences despite 84 agreeing
+instance probes: the emitter's generic sealing option used `unevaluatedProperties`,
+the authored wire contract used `additionalProperties`, and SQL policy existed only
+as TypeSpec comments rather than emitted metadata. No finding is ignored or waived.
+
+`IdempotencyRecord` now explicitly declares `additionalProperties: false` and the
+existing table/primary-key/unique policy using the standard TypeSpec JSON Schema
+`@extension` decorator. The original SQL comments remain for the existing native
+generator. The authored JSON Schema and model fields are unchanged. Generic emitter
+sealing is disabled for this explicit contract because it adds a *different* keyword;
+the independently authored unknown-property rejection fixture remains mandatory.
+A future composed/inherited model requires a new semantic review of closure policy.
+
+The bridge uses the fully qualified TypeSpec declaration ID, as required by TJSV's
+Contract IR, while existing native witness model names remain unchanged. Failed
+TJSV admission findings are retained separately from the final passing report.
+
+References:
+- https://typespec.io/docs/emitters/json-schema/reference/decorators/#extension
+- https://typespec.io/docs/emitters/json-schema/reference/emitter/#seal-object-schemas

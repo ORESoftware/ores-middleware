@@ -95,11 +95,12 @@ export async function admitNativeEvidence() {
   assert.equal(Object.keys(toolchains).length, languages.length);
   const translated = buildNativeEvidence({ binding, receipt: JSON.parse(nativeBytes), files, harnessPaths, commit, toolchains });
   const options = { ...inputs, ...translated, expectedCorpusDigest: digest(files.get(fixturePath)) };
+  await writeJson(`${output}/runtime-evidence.json`, translated.evidence);
   const report = await api.verifyRuntimeEvidenceAgainstCurrentInputs(options);
+  await writeJson(`${output}/runtime-admission-attempt.json`, report);
   assert.equal(report.status, 'passed', 'TJSV did not admit native evidence');
   assert.equal(report.contractIrVerified, true);
   assert.equal(report.zeroUnexplainedFindings, true);
-  await writeJson(`${output}/runtime-evidence.json`, translated.evidence);
   await writeJson(`${output}/provenance.json`, {
     schema: 'ores.middleware.tjsv-native-provenance/v1', commit, validatorCommit: pin,
     nativeReceiptSha256: digest(nativeBytes),
