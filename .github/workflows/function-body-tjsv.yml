@@ -37,11 +37,11 @@ jobs:
       - name: Preserve existing function-body runtime and source checks
         run: npm run function-bodies:check
 
-      - name: Check out immutable mapping-aware TJSV
+      - name: Check out immutable hardened TJSV
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ORESoftware/typespec-json-schema-validator
-          ref: 05230b6de97f64b274f87b41d68d059f3d5cbd64
+          ref: 733bc1b6b4b45433a38625fc4dd9ddb108b60519
           path: tmp/tjsv-function-bodies
           persist-credentials: false
           show-progress: false
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git -C tmp/tjsv-function-bodies rev-parse HEAD)" = "05230b6de97f64b274f87b41d68d059f3d5cbd64"
+          test "$(git -C tmp/tjsv-function-bodies rev-parse HEAD)" = "733bc1b6b4b45433a38625fc4dd9ddb108b60519"
           git diff --exit-code -- \
             contracts/function-bodies \
             scripts/validate-function-bodies.mjs \
