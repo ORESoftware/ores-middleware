@@ -1,0 +1,10 @@
+{
+  "action": "serve",
+  "headOnly": false,
+  "headers": {
+    "x-header": [
+      "a",
+      "b"
+    ]
+  }
+}

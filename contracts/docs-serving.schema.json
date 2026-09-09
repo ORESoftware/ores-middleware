@@ -63,7 +63,8 @@
         "headOnly": { "type": "boolean" },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "properties": {},
+          "unevaluatedProperties": { "type": "string" }
         }
       }
     }
