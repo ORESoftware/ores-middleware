@@ -85,7 +85,7 @@ async fn assert_closed(client: &mut TcpStream) {
                 io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe
             ) =>
         {
-            ()
+            // Reset and broken-pipe outcomes also prove that the socket closed.
         }
         other => panic!("owned socket did not close: {other:?}"),
     }
