@@ -1,9 +1,17 @@
+import "@typespec/json-schema";
+
 /**
  * Independently authored compile-time authority for critical middleware
  * function/method body plans. JSON Schema is a peer authority, not an emitter
  * target or fallback for this source.
  */
 namespace Ores.Middleware.FunctionBodies;
+
+/** Shared identifier shape used by plan and evidence records. */
+scalar SafeIdentifier extends string;
+
+/** Relative repository path used by native-source evidence bindings. */
+scalar RelativePath extends string;
 
 /** Stable pseudocode operations whose ordering and effects are executable. */
 enum BodyOpcode {
@@ -57,12 +65,13 @@ enum BodyFailurePolicy {
   notApplicable: "not-applicable",
 }
 
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model FunctionBodyStep {
-  id: string;
+  id: SafeIdentifier;
   opcode: BodyOpcode;
   phase: BodyPhase;
   when: BodyWhen;
-  dependsOn: string[];
+  dependsOn: SafeIdentifier[];
   effects: BodyEffect[];
   failurePolicy: BodyFailurePolicy;
   terminal: boolean;
@@ -73,33 +82,37 @@ model FunctionBodyStep {
  * use different syntax, runtimes, or control primitives, but must provide
  * source and runtime evidence for every semantic step.
  */
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model FunctionBodyPlan {
   schemaVersion: "1.0.0";
   contractId: string;
   function: string;
   intent: string;
-  inputs: string[];
-  outputs: string[];
-  publicFailureFields: string[];
-  forbiddenPublicFields: string[];
+  inputs: SafeIdentifier[];
+  outputs: SafeIdentifier[];
+  publicFailureFields: SafeIdentifier[];
+  forbiddenPublicFields: SafeIdentifier[];
   steps: FunctionBodyStep[];
 }
 
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model BodyStepEvidence {
-  stepId: string;
-  source: string;
+  stepId: SafeIdentifier;
+  source: RelativePath;
   requiredFragments: string[];
   ordered: boolean;
 }
 
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model LanguageBodyBinding {
   language: "rust" | "typescript" | "golang" | "gleam" | "elixir" | "erlang";
   symbol: string;
-  sources: string[];
+  sources: RelativePath[];
   stepEvidence: BodyStepEvidence[];
   forbiddenFragments: string[];
 }
 
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model FunctionBodyBindings {
   schemaVersion: "1.0.0";
   contractId: string;
