@@ -26,25 +26,33 @@ jobs:
           persist-credentials: false
           show-progress: false
           fetch-depth: 1
-
+      - name: Check out immutable TJSV toolchain
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 4473504c4c9d2831d825919f70c03994d8ce01d2
+          path: tmp/tjsv-tool
+          persist-credentials: false
       - name: Install Node 22.23.1
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.23.1"
           package-manager-cache: false
-
+      - name: Test native evidence admission boundary
+        run: node --test tests/tjsv-native-evidence.test.mjs
+      - name: Install lockfile-pinned TJSV dependencies
+        working-directory: tmp/tjsv-tool
+        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Install Go 1.25.0
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25.0"
           cache: false
-
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
           components: rustfmt
-
       - name: Install pinned BEAM toolchains
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
@@ -52,20 +60,31 @@ jobs:
           elixir-version: "1.18.4"
           gleam-version: "1.18.1"
           rebar3-version: "3.24.0"
-
       - name: Install exact workspace dependencies
         shell: bash
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
           npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
-
+      - name: Prepare independent positive and negative corpus
+        run: node --input-type=module -e "import { prepareCorpus } from './scripts/tjsv-native-conformance.mjs'; await prepareCorpus();"
+      - name: Verify peer authorities and emit source-bound TJSV Contract IR
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tmp/tjsv-tool/bin/typespec-json-schema-validator.mjs check \
+            --typespec=contracts/persistence/idempotency-record.tsp \
+            --schema=contracts/persistence/idempotency-record.schema.json \
+            --instances=target/tjsv-native/instances \
+            --format-assertion=true \
+            --seal-object-schemas=true \
+            --output-dir=target/tjsv-native/generated \
+            --report=target/tjsv-native/parity-report.json \
+            --contract-ir=target/tjsv-native/contract-ir.json
       - name: Generate both independent authority lanes
         run: npm run contracts:polyglot-generate
-
       - name: Execute TypeSpec and JSON Schema artifacts in six native runtimes
         run: node scripts/generated_runtime_matrix.mjs
-
       - name: Assert complete fail-closed receipt
         if: ${{ success() }}
         shell: bash
@@ -79,13 +98,15 @@ jobs:
             and ([.witnesses[].state] | all(. == "executed"))
             and (.discrepancies | length) == 0
           ' target/generated-runtime-convergence/receipt.json
-
+      - name: Admit exact native witnesses through TJSV and test rejection paths
+        run: node --input-type=module -e "import { admitNativeEvidence } from './scripts/tjsv-native-conformance.mjs'; await admitNativeEvidence();"
       - name: Upload runtime witnesses, raw logs, and generated artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: generated-runtime-convergence-${{ github.run_id }}
           path: |
+            target/tjsv-native/**/*
             target/generated-runtime-convergence/**/*
             target/schema-convergence/receipt.json
             target/schema-convergence/typespec/{typescript,rust,golang,gleam,elixir,erlang}/**/*
