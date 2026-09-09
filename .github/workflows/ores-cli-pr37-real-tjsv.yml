@@ -1,0 +1,173 @@
+name: Ores CLI PR37 full and real TJSV probe
+
+on:
+  push:
+    branches:
+      - DEN-390-ores-cli-pr37-real-tjsv-probe
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-cli-pr37-real-tjsv
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Require private repository read credential
+        env:
+          FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN"
+
+      - name: Check out exact ores-cli PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/ores-cli
+          ref: 6411eba8aa4f5d844251160703528359c4689cf3
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: ores-cli
+
+      - name: Check out canonical TJSV
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 2281843126ab644607b11cf8281d84f382d68dfc
+          persist-credentials: false
+          fetch-depth: 1
+          path: tjsv
+
+      - name: Verify immutable source identities
+        run: |
+          set -euo pipefail
+          test "$(git -C ores-cli rev-parse HEAD)" = 6411eba8aa4f5d844251160703528359c4689cf3
+          test "$(git -C tjsv rev-parse HEAD)" = 2281843126ab644607b11cf8281d84f382d68dfc
+          git -C ores-cli diff --check
+          git -C tjsv diff --check
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          package-manager-cache: false
+
+      - name: Install canonical validator from its committed lock
+        working-directory: tjsv
+        run: npm ci --ignore-scripts
+
+      - name: Expose exact TJSV executable
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          printf '#!/usr/bin/env bash\nset -euo pipefail\nexec node "%s" "$@"\n' \
+            "$GITHUB_WORKSPACE/tjsv/bin/typespec-json-schema-validator.mjs" \
+            > "$RUNNER_TEMP/bin/tjsv"
+          chmod 0700 "$RUNNER_TEMP/bin/tjsv"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/tjsv" --version
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Verify shell assets
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          bash -n post-install.sh
+          bash -n reconcile-selected-orgs.sh
+          bash -n tests/post_install.sh
+          bash -n tests/reconcile_selected_orgs.sh
+          bash tests/post_install.sh
+          bash tests/reconcile_selected_orgs.sh
+
+      - name: Verify complete Rust application
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version=1 >/dev/null
+          cargo fmt --all --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+
+      - name: Exercise both binaries
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo run --quiet --locked --bin ores-cli -- --no-json doctor > "$RUNNER_TEMP/ores-cli-doctor.txt"
+          cargo run --quiet --locked --bin oresc -- --no-json doctor > "$RUNNER_TEMP/oresc-doctor.txt"
+          grep -F 'status=passed command=doctor' "$RUNNER_TEMP/ores-cli-doctor.txt"
+          grep -F 'status=passed command=doctor' "$RUNNER_TEMP/oresc-doctor.txt"
+
+      - name: Run real TJSV pass and retained-path verify-ir through oresc
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          run_dir=$(mktemp -d "$RUNNER_TEMP/ores-cli-tjsv-pass.XXXXXXXX")
+          report="$run_dir/parity.json"
+          cargo run --quiet --locked --bin oresc -- --no-json audit contract \
+            --typespec "$GITHUB_WORKSPACE/tjsv/test/fixtures/pass/main.tsp" \
+            --schema "$GITHUB_WORKSPACE/tjsv/test/fixtures/pass/authored.schema.json" \
+            --report "$report" \
+            --validator "$RUNNER_TEMP/bin/tjsv" \
+            > "$run_dir/result.txt"
+          grep -F 'INFO contract-parity-passed' "$run_dir/result.txt"
+          grep -F 'status=passed command=audit contract' "$run_dir/result.txt"
+          test -s "$report"
+          test -s "$run_dir/parity.sarif"
+          test -s "$run_dir/parity.contract-ir.json"
+          test -s "$run_dir/parity.consumer-verification.json"
+          test -s "$run_dir/parity.generated/typespec.generated.schema.json"
+          sha256sum \
+            "$report" \
+            "$run_dir/parity.sarif" \
+            "$run_dir/parity.contract-ir.json" \
+            "$run_dir/parity.consumer-verification.json" \
+            "$run_dir/parity.generated/typespec.generated.schema.json" \
+            > "$run_dir/before.sha256"
+          set +e
+          cargo run --quiet --locked --bin oresc -- --no-json audit contract \
+            --typespec "$GITHUB_WORKSPACE/tjsv/test/fixtures/pass/main.tsp" \
+            --schema "$GITHUB_WORKSPACE/tjsv/test/fixtures/pass/authored.schema.json" \
+            --report "$report" \
+            --validator "$RUNNER_TEMP/bin/tjsv" \
+            > "$run_dir/reuse.txt"
+          reuse_status=$?
+          set -e
+          test "$reuse_status" -eq 2
+          grep -F 'contract-output-already-exists' "$run_dir/reuse.txt"
+          sha256sum -c "$run_dir/before.sha256"
+
+      - name: Run real TJSV drift control through ores-cli
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          run_dir=$(mktemp -d "$RUNNER_TEMP/ores-cli-tjsv-drift.XXXXXXXX")
+          set +e
+          cargo run --quiet --locked --bin ores-cli -- --no-json audit contract \
+            --typespec "$GITHUB_WORKSPACE/tjsv/test/fixtures/drift/main.tsp" \
+            --schema "$GITHUB_WORKSPACE/tjsv/test/fixtures/drift/authored.schema.json" \
+            --report "$run_dir/parity.json" \
+            --validator "$RUNNER_TEMP/bin/tjsv" \
+            > "$run_dir/result.txt"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          grep -F 'contract-parity-stopped-for-evaluation' "$run_dir/result.txt"
+          grep -F 'status=stopped_for_evaluation command=audit contract' "$run_dir/result.txt"
+
+      - name: Run repository and package self-audits
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo run --quiet --locked --bin oresc -- audit repo --path . --profile rust-cli > "$RUNNER_TEMP/repository-audit.jsonl"
+          cargo run --quiet --locked --bin oresc -- audit package --path . > "$RUNNER_TEMP/package-audit.jsonl"
