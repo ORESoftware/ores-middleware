@@ -163,6 +163,34 @@ model FunctionBodyStep {
   terminal: boolean;
 }
 
+/** Public failure fields cannot include any reviewed private field. */
+@minItems(1)
+@maxItems(32)
+@TypeSpec.JsonSchema.uniqueItems
+@TypeSpec.JsonSchema.extension("not", #{
+  `type`: "array",
+  `contains`: #{
+    `enum`: #["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]
+  }
+})
+model PublicFailureFields is Array<SafeIdentifier>;
+
+/** Every reviewed private field must remain explicitly forbidden. */
+@minItems(8)
+@maxItems(32)
+@TypeSpec.JsonSchema.uniqueItems
+@TypeSpec.JsonSchema.extension("allOf", #[
+  #{ `type`: "array", `contains`: #{ `const`: "cause" } },
+  #{ `type`: "array", `contains`: #{ `const`: "message" } },
+  #{ `type`: "array", `contains`: #{ `const`: "stack" } },
+  #{ `type`: "array", `contains`: #{ `const`: "body" } },
+  #{ `type`: "array", `contains`: #{ `const`: "authorization" } },
+  #{ `type`: "array", `contains`: #{ `const`: "cookie" } },
+  #{ `type`: "array", `contains`: #{ `const`: "token" } },
+  #{ `type`: "array", `contains`: #{ `const`: "rawIdentity" } }
+])
+model ForbiddenPublicFields is Array<SafeIdentifier>;
+
 /**
  * One language-neutral executable pseudocode body. Native implementations may
  * use different syntax, runtimes, or control primitives, but must provide
@@ -172,10 +200,12 @@ model FunctionBodyStep {
 model FunctionBodyPlan {
   schemaVersion: "1.0.0";
 
-  @pattern("^[a-z0-9][a-z0-9._/-]{0,127}$")
+  @maxLength(128)
+  @pattern("^[a-z0-9][a-z0-9._/-]*$")
   contractId: string;
 
-  @pattern("^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$")
+  @maxLength(128)
+  @pattern("^[A-Za-z][A-Za-z0-9_.:/-]*$")
   function: string;
 
   @minLength(20)
@@ -192,31 +222,8 @@ model FunctionBodyPlan {
   @TypeSpec.JsonSchema.uniqueItems
   outputs: SafeIdentifier[];
 
-  @minItems(1)
-  @maxItems(32)
-  @TypeSpec.JsonSchema.uniqueItems
-  @TypeSpec.JsonSchema.extension("not", #{
-    `type`: "array",
-    `contains`: #{
-      `enum`: #["cause", "message", "stack", "body", "authorization", "cookie", "token", "rawIdentity"]
-    }
-  })
-  publicFailureFields: SafeIdentifier[];
-
-  @minItems(8)
-  @maxItems(32)
-  @TypeSpec.JsonSchema.uniqueItems
-  @TypeSpec.JsonSchema.extension("allOf", #[
-    #{ `type`: "array", `contains`: #{ `const`: "cause" } },
-    #{ `type`: "array", `contains`: #{ `const`: "message" } },
-    #{ `type`: "array", `contains`: #{ `const`: "stack" } },
-    #{ `type`: "array", `contains`: #{ `const`: "body" } },
-    #{ `type`: "array", `contains`: #{ `const`: "authorization" } },
-    #{ `type`: "array", `contains`: #{ `const`: "cookie" } },
-    #{ `type`: "array", `contains`: #{ `const`: "token" } },
-    #{ `type`: "array", `contains`: #{ `const`: "rawIdentity" } }
-  ])
-  forbiddenPublicFields: SafeIdentifier[];
+  publicFailureFields: PublicFailureFields;
+  forbiddenPublicFields: ForbiddenPublicFields;
 
   @minItems(11)
   @maxItems(32)
@@ -225,9 +232,7 @@ model FunctionBodyPlan {
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 model BodyStepEvidence {
-  @pattern("^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
-  stepId: string;
-
+  stepId: SafeIdentifier;
   source: RelativePath;
 
   @minItems(1)
@@ -240,7 +245,7 @@ model BodyStepEvidence {
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 model LanguageBodyBinding {
-  language: BodyLanguage;
+  language: "rust" | "typescript" | "golang" | "gleam" | "elixir" | "erlang";
 
   @minLength(3)
   @maxLength(256)
@@ -264,7 +269,8 @@ model LanguageBodyBinding {
 model FunctionBodyBindings {
   schemaVersion: "1.0.0";
 
-  @pattern("^[a-z0-9][a-z0-9._/-]{0,127}$")
+  @maxLength(128)
+  @pattern("^[a-z0-9][a-z0-9._/-]*$")
   contractId: string;
 
   @pattern("^contracts/function-bodies/[A-Za-z0-9._/-]+\\.json$")
