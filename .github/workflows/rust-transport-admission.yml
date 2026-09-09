@@ -29,18 +29,21 @@ jobs:
     timeout-minutes: 25
     env:
       EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CARGO_TERM_COLOR: never
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Retain reproducible public source and identity
+      - name: Retain reviewed Rust source and identity
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           mkdir -p target/transport-evidence
+          # This selected source snapshot is inspection evidence, not a full
+          # dependency cache or standalone copy of every workspace fixture.
           git archive --format=tar.gz --output=target/transport-evidence/source.tar.gz HEAD Cargo.toml Cargo.lock src/rust
           printf '%s\n' "$EXPECTED_SHA" > target/transport-evidence/source-commit.txt
           sha256sum target/transport-evidence/source.tar.gz > target/transport-evidence/source.sha256
@@ -48,6 +51,14 @@ jobs:
         with:
           toolchain: 1.95.0
           components: rustfmt, clippy
+      - name: Retain formatting projections without changing tested source
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in src/rust/src/operation.rs src/rust/src/lib.rs src/rust/tests/operation_admission.rs src/rust/tests/operation_controlled.rs src/rust/tests/tcp_lifecycle.rs; do
+            mkdir -p "target/transport-evidence/formatted/$(dirname "$file")"
+            rustfmt --edition 2024 --emit stdout < "$file" > "target/transport-evidence/formatted/$file"
+          done
       - name: Run actual Rust operation and transport tests
         shell: bash
         run: |
