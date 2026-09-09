@@ -11,6 +11,7 @@
     "IdempotencyRecord": {
       "type": "object",
       "additionalProperties": false,
+      "unevaluatedProperties": false,
       "x-ores-sql": {
         "table": "middleware_idempotency",
         "primaryKey": ["id"],

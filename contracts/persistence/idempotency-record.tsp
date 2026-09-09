@@ -14,9 +14,11 @@ enum IdempotencyStatus {
   failed: "failed",
 }
 
-// State the existing closed wire shape and SQL policy in compiler-visible form.
-// These are authored declarations, not copied from generated comparison output.
+// State the existing flat closed wire shape and SQL policy in compiler-visible form.
+// Both closure keywords are explicit peer-source policy for this non-composed model;
+// they are not a general rewrite rule for inherited/composed schemas.
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
+@TypeSpec.JsonSchema.extension("unevaluatedProperties", false)
 @TypeSpec.JsonSchema.extension("x-ores-sql", #{
   table: "middleware_idempotency",
   primaryKey: #["id"],
