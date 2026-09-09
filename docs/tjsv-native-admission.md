@@ -24,10 +24,14 @@ against a malicious actor who can replace the trusted workflow and all its input
 Artifacts under `target/tjsv-native/` include parity, IR, runtime evidence,
 provenance, runtime admission, and seven real-TJSV rejection regressions.
 A failure leaves a non-passing runtime report rather than a stale success.
+Filesystem regressions cover corpus preservation, reused output, symlinked inputs,
+bounded reads, malformed input, and missing-tool failure tombstones.
+The pinned flags-2-env native addon is rebuilt explicitly after dependency install;
+disabling every install script without that rebuild leaves TJSV unable to parse flags.
 The separate dependency-free bridge tests run with:
 
 ```sh
-node --test tests/tjsv-native-evidence.test.mjs
+node --test tests/tjsv-native-*.test.mjs
 ```
 
 This gate covers the IdempotencyRecord data boundary, not every middleware model
