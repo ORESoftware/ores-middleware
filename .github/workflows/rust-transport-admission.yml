@@ -68,6 +68,18 @@ jobs:
           cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features 2>&1 | tee target/transport-evidence/portable-core.log
           git diff --exit-code -- Cargo.toml Cargo.lock src/rust
           printf 'passed\n' > target/transport-evidence/result.txt
+      - name: Retain a separate lockfile repair proposal after failure
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tmp/transport-lock-proposal target/transport-evidence
+          git archive HEAD Cargo.toml Cargo.lock src/rust tools/middleware-adversarial-runner | tar -x -C tmp/transport-lock-proposal
+          cargo metadata --manifest-path tmp/transport-lock-proposal/src/rust/Cargo.toml --format-version 1 > target/transport-evidence/proposed-metadata.json
+          cp tmp/transport-lock-proposal/Cargo.lock target/transport-evidence/Cargo.lock.proposed
+          # A proposal does not turn a failed locked build into a pass. It must
+          # be reviewed, committed and re-executed under --locked separately.
+          git diff --exit-code -- Cargo.toml Cargo.lock src/rust
       - name: Retain source and real execution logs
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
