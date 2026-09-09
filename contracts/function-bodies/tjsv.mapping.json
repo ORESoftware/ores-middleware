@@ -3,6 +3,9 @@
   "declarations": [
     {"typespec":"Ores.Middleware.FunctionBodies.SafeIdentifier","generated":"SafeIdentifier","authored":"safeIdentifier"},
     {"typespec":"Ores.Middleware.FunctionBodies.RelativePath","generated":"RelativePath","authored":"relativePath"},
+    {"typespec":"Ores.Middleware.FunctionBodies.RequiredFragment","generated":"RequiredFragment","authored":"requiredFragment"},
+    {"typespec":"Ores.Middleware.FunctionBodies.ForbiddenFragment","generated":"ForbiddenFragment","authored":"forbiddenFragment"},
+    {"typespec":"Ores.Middleware.FunctionBodies.BodyLanguage","generated":"BodyLanguage","authored":"language"},
     {"typespec":"Ores.Middleware.FunctionBodies.BodyOpcode","generated":"BodyOpcode","authored":"opcode"},
     {"typespec":"Ores.Middleware.FunctionBodies.BodyPhase","generated":"BodyPhase","authored":"phase"},
     {"typespec":"Ores.Middleware.FunctionBodies.BodyWhen","generated":"BodyWhen","authored":"when"},

@@ -49,7 +49,7 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "contractId", "function", "intent", "inputs", "outputs", "publicFailureFields", "forbiddenPublicFields", "steps"],
       "properties": {
-        "schemaVersion": {"const": "1.0.0"},
+        "schemaVersion": {"type": "string", "const": "1.0.0"},
         "contractId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"},
         "function": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]{0,127}$"},
         "intent": {"type": "string", "minLength": 20, "maxLength": 1024},
