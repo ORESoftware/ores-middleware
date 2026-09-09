@@ -76,7 +76,8 @@
       "properties": {
         "stepId": {
           "type": "string",
-          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+          "maxLength": 128,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*$"
         },
         "source": {"$ref": "#/$defs/relativePath"},
         "requiredFragments": {
@@ -112,5 +113,6 @@
         }
       }
     }
-  }
+  },
+  "additionalProperties": false
 }

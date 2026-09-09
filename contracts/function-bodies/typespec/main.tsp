@@ -234,7 +234,8 @@ model FunctionBodyPlan {
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 model BodyStepEvidence {
-  @pattern("^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+  @maxLength(128)
+  @pattern("^[A-Za-z][A-Za-z0-9_.:-]*$")
   stepId: string;
 
   source: RelativePath;
