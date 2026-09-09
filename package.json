@@ -29,7 +29,7 @@
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "verify": "npm run contracts:compile && npm run contracts:check && npm run zpkg:check && node scripts/check-source-layout.mjs",
     "docs-serving:tjsv": "node scripts/check-tjsv-docs.mjs",
-    "docs-serving:tjsv:test": "node --test tests/tjsv-docs-gate.test.mjs"
+    "docs-serving:tjsv:test": "node --test tests/tjsv-docs-*.test.mjs"
   },
   "devDependencies": {
     "@typespec/compiler": "^1.0.0",

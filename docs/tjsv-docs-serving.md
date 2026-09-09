@@ -2,9 +2,10 @@
 
 This additive gate executes `ORESoftware/typespec-json-schema-validator` at
 `6bb5b7c1ee41c8b43741e50a264c33a1165549c4` against the two existing,
-independently human-authored docs-serving authorities. JSON Schema is unchanged;
-TypeSpec gains explicit object-closure annotations and an anonymous headers-map
-expression with the same wire fields and value constraints. Existing Rust,
+independently human-authored docs-serving authorities. TypeSpec gains explicit
+object-closure annotations and an anonymous headers-map expression. The authored
+JSON Schema header map is manually reconciled to an equivalent flat-map spelling;
+wire fields and accepted value constraints are preserved. Existing Rust,
 native-language, schema, transport, and formal checks remain necessary and unchanged.
 
 ## Scope and limits
@@ -38,6 +39,30 @@ This retains arbitrary string-valued keys, including the empty map, without
 emitting a separate public `RecordString` declaration. The authored JSON Schema
 continues to define the map inline. Numeric/null/array values and non-object
 maps remain rejected; this is not an untyped object or ignored declaration.
+
+The authored header schema now explicitly has `properties: {}` and
+`unevaluatedProperties: {"type":"string"}` instead of
+`additionalProperties: {"type":"string"}`. This is a deliberate peer-source edit,
+not generated-file replacement. For this exact flat object there are no named or
+pattern properties, references, composition or conditional applicators, so no key
+is evaluated before the catch-all constraint: both spellings require every
+value to be a string. The `type: object` constraint and empty-map acceptance stay
+the same. This equivalence is NOT a general rewrite rule for composed schemas.
+
+The rule follows Draft 2020-12 Core sections 10.3.2.3 and 11.3:
+https://json-schema.org/draft/2020-12/json-schema-core
+
+Before committing this change, 793 deterministic header examples were checked
+against both old and new schemas and an independent string-map predicate; all
+59 complete contract fixtures also retained their verdicts in both schemas.
+A unit test pins the flat-map scope of this reasoning. Actual compiler-backed
+TJSV parity and the independent native suites remain required; these compatibility
+checks are not substitutes for either. The previous source bytes remain in Git.
+
+Hosted run `34300722269` motivated this reconciliation: the anonymous map removed
+the extra public declaration, all 198 probes agreed, and TJSV still stopped on
+three keyword/empty-properties findings. They must disappear on a new real run,
+not be ignored or allowed through.
 
 ## Invocation
 
