@@ -14,16 +14,27 @@ function config(serviceName = "framework-adapter-test") {
   return value;
 }
 
+function koaNativeRequest(url, headers = {}) {
+  return {
+    method: "GET",
+    url,
+    headers: { host: "example.test", ...headers },
+    socket: { encrypted: true }
+  };
+}
+
 test("Koa adapter keeps portable context active through downstream middleware", async () => {
   let observedContext;
   const middleware = createMiddleware(config());
   const responseHeaders = {};
+  const requestHeaders = { accept: "application/json", "x-request-id": "koa-request" };
   const context = {
+    req: koaNativeRequest("/koa", requestHeaders),
     method: "GET",
     protocol: "https",
     host: "example.test",
     originalUrl: "/koa",
-    request: { headers: { accept: "application/json", "x-request-id": "koa-request" } },
+    request: { headers: requestHeaders },
     response: { headers: responseHeaders },
     state: {},
     status: 404,
@@ -52,6 +63,7 @@ test("Koa adapter propagates portable short-circuit responses", async () => {
   let downstream = 0;
   const responseHeaders = {};
   const context = {
+    req: { ...koaNativeRequest("/koa-denied"), socket: { encrypted: false } },
     method: "GET",
     protocol: "http",
     host: "example.test",
