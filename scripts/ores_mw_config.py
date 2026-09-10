@@ -18,6 +18,7 @@ TARGET_ROLES = {"server", "client"}
 MIDDLEWARE_MODES = {"stack", "propagation-only", "disabled"}
 TOP_KEYS = {"schema_version", "repository_mode", "allow_overlapping_roots", "default_target", "targets"}
 TARGET_KEYS = {"name", "role", "roots", "enabled", "middleware", "stack_config", "propagate_headers"}
+GENERATED_ROOT_FILES = {"manifest.json", "receipt.json"}
 
 class ManifestError(ValueError):
     def __init__(self, code: str, field: str = "") -> None:
@@ -164,14 +165,67 @@ def require_repo_local_manifest(manifest_path: Path, repo_root: Path) -> None:
     need(manifest.parent == root, "repository-root-manifest-required", str(manifest_path))
 
 def prepare_output(repo_root: Path, out_dir: Path) -> Path:
-    root = repo_root.resolve(strict=True); candidate = out_dir if out_dir.is_absolute() else repo_root / out_dir; candidate.mkdir(parents=True, exist_ok=True)
-    resolved = candidate.resolve(strict=True)
-    try: relative = resolved.relative_to(root)
+    root = repo_root.resolve(strict=True)
+    candidate = out_dir if out_dir.is_absolute() else repo_root / out_dir
+    lexical = Path(os.path.abspath(candidate))
+    try: relative = lexical.relative_to(root)
     except ValueError as exc: raise ManifestError("output-outside-repository", str(out_dir)) from exc
-    need(bool(relative.parts), "output-cannot-be-repository-root", str(out_dir)); current = root
+    need(bool(relative.parts), "output-cannot-be-repository-root", str(out_dir))
+    current = root
     for part in relative.parts:
-        current /= part; need(not current.is_symlink() and current.is_dir(), "output-directory-required", str(out_dir))
-    return resolved
+        current /= part
+        try:
+            st = current.lstat()
+        except FileNotFoundError:
+            try: current.mkdir(mode=0o700)
+            except OSError as exc: raise ManifestError("output-directory-unavailable", str(out_dir)) from exc
+            st = current.lstat()
+        except OSError as exc:
+            raise ManifestError("output-directory-unavailable", str(out_dir)) from exc
+        need(not statmod.S_ISLNK(st.st_mode), "output-symlink-not-allowed", str(out_dir))
+        need(statmod.S_ISDIR(st.st_mode), "output-directory-required", str(out_dir))
+    try: current.resolve(strict=True).relative_to(root)
+    except (OSError, ValueError) as exc: raise ManifestError("output-outside-repository", str(out_dir)) from exc
+    return current
+
+def clear_generated_output(out_dir: Path) -> None:
+    for child in list(out_dir.iterdir()):
+        try: st = child.lstat()
+        except OSError as exc: raise ManifestError("output-entry-unavailable", child.name) from exc
+        need(not statmod.S_ISLNK(st.st_mode), "output-entry-symlink-not-allowed", child.name)
+        if child.name in GENERATED_ROOT_FILES:
+            need(statmod.S_ISREG(st.st_mode) and st.st_nlink == 1, "output-generated-file-required", child.name)
+            child.unlink(); continue
+        if child.name == "targets":
+            need(statmod.S_ISDIR(st.st_mode), "output-targets-directory-required", child.name)
+            for target_file in list(child.iterdir()):
+                try: target_st = target_file.lstat()
+                except OSError as exc: raise ManifestError("output-entry-unavailable", target_file.name) from exc
+                need(not statmod.S_ISLNK(target_st.st_mode), "output-entry-symlink-not-allowed", target_file.name)
+                need(statmod.S_ISREG(target_st.st_mode) and target_st.st_nlink == 1, "output-generated-file-required", target_file.name)
+                need(target_file.suffix == ".json" and TARGET_NAME.fullmatch(target_file.stem) is not None, "output-directory-not-dedicated", target_file.name)
+                target_file.unlink()
+            child.rmdir(); continue
+        raise ManifestError("output-directory-not-dedicated", child.name)
+
+def write_generated_file(out_dir: Path, relative: str, data: bytes) -> None:
+    dst = out_dir / relative
+    parent = dst.parent
+    if parent != out_dir:
+        try: st = parent.lstat()
+        except FileNotFoundError:
+            parent.mkdir(mode=0o700)
+            st = parent.lstat()
+        need(not statmod.S_ISLNK(st.st_mode) and statmod.S_ISDIR(st.st_mode), "output-directory-required", relative)
+    tmp: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=parent, delete=False) as handle:
+            handle.write(data); handle.flush(); os.fsync(handle.fileno()); tmp = Path(handle.name)
+        os.chmod(tmp, 0o600); os.replace(tmp, dst); tmp = None
+    finally:
+        if tmp is not None:
+            try: tmp.unlink()
+            except OSError: pass
 
 def compile_manifest(manifest_path: Path, repo_root: Path, out_dir: Path) -> dict[str, Any]:
     require_repo_local_manifest(manifest_path, repo_root); source, raw = load_manifest(manifest_path); manifest = normalize_manifest(raw); check_referenced_files(manifest, repo_root)
@@ -184,11 +238,8 @@ def compile_manifest(manifest_path: Path, repo_root: Path, out_dir: Path) -> dic
         elif target["middleware"] == "propagation-only": row["propagateHeaders"] = target["propagateHeaders"]
         rows.append(row)
     receipt = {"schema": "ores.middleware.config-receipt/v1", "status": "passed", "schemaVersion": 1, "manifestSourceSha256": digest(source), "normalizedManifestSha256": digest(normalized), "targetCount": len(rows), "targets": rows}
-    rendered["receipt.json"] = canonical(receipt); out_dir = prepare_output(repo_root, out_dir)
-    for relative, data in rendered.items():
-        dst = out_dir / relative; dst.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=dst.parent, delete=False) as handle: handle.write(data); tmp = Path(handle.name)
-        os.chmod(tmp, 0o600); os.replace(tmp, dst)
+    rendered["receipt.json"] = canonical(receipt); out_dir = prepare_output(repo_root, out_dir); clear_generated_output(out_dir)
+    for relative, data in rendered.items(): write_generated_file(out_dir, relative, data)
     return receipt
 
 def resolved_payload(target: dict[str, Any], repo_root: Path) -> dict[str, Any]:
