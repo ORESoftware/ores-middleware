@@ -1,0 +1,17 @@
+schema_version = 1
+repository_mode = "hybrid"
+default_target = "api"
+
+[[targets]]
+name = "api"
+role = "server"
+roots = ["server"]
+middleware = "stack"
+stack_config = "config/middleware.server.json"
+
+[[targets]]
+name = "browser"
+role = "client"
+roots = ["web"]
+middleware = "propagation-only"
+propagate_headers = ["traceparent", "x-request-id"]

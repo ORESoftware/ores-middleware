@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/ores-mw-config/v1.json",
+  "title": "ORES middleware TOML normalized orchestration contract",
+  "description": "Independent JSON Schema/OpenAPI-lane authority for the normalized .ores-mw.toml shape; semantic path, overlap, and target-role invariants are additionally enforced by scripts/ores_mw_config.py.",
+  "$ref": "#/$defs/MiddlewareManifest",
+  "$defs": {
+    "MiddlewareTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "role", "roots", "enabled", "middleware"],
+      "properties": {
+        "name": { "type": "string" },
+        "role": {
+          "anyOf": [
+            { "type": "string", "const": "server" },
+            { "type": "string", "const": "client" }
+          ]
+        },
+        "roots": { "type": "array", "items": { "type": "string" } },
+        "enabled": { "type": "boolean" },
+        "middleware": {
+          "anyOf": [
+            { "type": "string", "const": "stack" },
+            { "type": "string", "const": "propagation-only" },
+            { "type": "string", "const": "disabled" }
+          ]
+        },
+        "stackConfig": { "type": "string" },
+        "propagateHeaders": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "MiddlewareManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "repositoryMode", "allowOverlappingRoots", "targets"],
+      "properties": {
+        "schemaVersion": { "type": "number", "const": 1 },
+        "repositoryMode": {
+          "anyOf": [
+            { "type": "string", "const": "server-only" },
+            { "type": "string", "const": "client-only" },
+            { "type": "string", "const": "hybrid" }
+          ]
+        },
+        "allowOverlappingRoots": { "type": "boolean" },
+        "defaultTarget": { "type": "string" },
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MiddlewareTarget" }
+        }
+      }
+    }
+  }
+}
