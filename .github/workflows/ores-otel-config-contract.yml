@@ -35,6 +35,7 @@ jobs:
           repository: ores-otel/ores-otel-interfaces
           ref: b544872253ee0527329fa80caee17d171baa6524
           path: .contract/ores-otel-interfaces
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
           persist-credentials: false
 
       - name: Parse TOML into the cross-runtime contract object
