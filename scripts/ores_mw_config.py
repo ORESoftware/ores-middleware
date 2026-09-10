@@ -166,7 +166,7 @@ def require_repo_local_manifest(manifest_path: Path, repo_root: Path) -> None:
 
 def prepare_output(repo_root: Path, out_dir: Path) -> Path:
     root = repo_root.resolve(strict=True)
-    candidate = out_dir if out_dir.is_absolute() else repo_root / out_dir
+    candidate = out_dir if out_dir.is_absolute() else root / out_dir
     lexical = Path(os.path.abspath(candidate))
     try: relative = lexical.relative_to(root)
     except ValueError as exc: raise ManifestError("output-outside-repository", str(out_dir)) from exc
@@ -189,24 +189,28 @@ def prepare_output(repo_root: Path, out_dir: Path) -> Path:
     return current
 
 def clear_generated_output(out_dir: Path) -> None:
+    files: list[Path] = []
+    target_dirs: list[Path] = []
     for child in list(out_dir.iterdir()):
         try: st = child.lstat()
         except OSError as exc: raise ManifestError("output-entry-unavailable", child.name) from exc
         need(not statmod.S_ISLNK(st.st_mode), "output-entry-symlink-not-allowed", child.name)
         if child.name in GENERATED_ROOT_FILES:
             need(statmod.S_ISREG(st.st_mode) and st.st_nlink == 1, "output-generated-file-required", child.name)
-            child.unlink(); continue
+            files.append(child); continue
         if child.name == "targets":
             need(statmod.S_ISDIR(st.st_mode), "output-targets-directory-required", child.name)
-            for target_file in list(child.iterdir()):
+            target_files = list(child.iterdir())
+            for target_file in target_files:
                 try: target_st = target_file.lstat()
                 except OSError as exc: raise ManifestError("output-entry-unavailable", target_file.name) from exc
                 need(not statmod.S_ISLNK(target_st.st_mode), "output-entry-symlink-not-allowed", target_file.name)
                 need(statmod.S_ISREG(target_st.st_mode) and target_st.st_nlink == 1, "output-generated-file-required", target_file.name)
                 need(target_file.suffix == ".json" and TARGET_NAME.fullmatch(target_file.stem) is not None, "output-directory-not-dedicated", target_file.name)
-                target_file.unlink()
-            child.rmdir(); continue
+            files.extend(target_files); target_dirs.append(child); continue
         raise ManifestError("output-directory-not-dedicated", child.name)
+    for generated_file in files: generated_file.unlink()
+    for target_dir in target_dirs: target_dir.rmdir()
 
 def write_generated_file(out_dir: Path, relative: str, data: bytes) -> None:
     dst = out_dir / relative
