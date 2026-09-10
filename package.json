@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit && tsp compile contracts/ores-mw-config/typespec --no-emit",
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
     "contracts:polyglot-generate": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_codegen -- --output-root target/schema-convergence --report target/schema-convergence/receipt.json",
     "contracts:generated-check": "node scripts/validate-generated-polyglot.mjs",
@@ -29,7 +29,7 @@
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "ores-mw:compile": "python3 scripts/ores_mw_config.py compile --out-dir target/ores-mw",
     "ores-mw:validate": "node scripts/validate-ores-mw-config.mjs",
-    "ores-mw:check": "python3 -m unittest tests/test_ores_mw_config.py -v && python3 scripts/ores_mw_config.py check && npm run ores-mw:compile && npm run ores-mw:validate",
+    "ores-mw:check": "python3 -m unittest tests/test_ores_mw_config.py -v && python3 scripts/ores_mw_config.py check && tsp compile contracts/ores-mw-config/typespec --no-emit && npm run ores-mw:compile && npm run ores-mw:validate",
     "ores-mw:tjsv": "node scripts/check-tjsv-ores-mw.mjs",
     "ores-mw:tjsv:test": "node --test tests/tjsv-ores-mw-config.test.mjs",
     "verify": "npm run contracts:compile && npm run contracts:check && npm run ores-mw:check && npm run zpkg:check && node scripts/check-source-layout.mjs",
