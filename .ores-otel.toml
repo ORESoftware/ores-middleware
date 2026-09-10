@@ -1,0 +1,25 @@
+# Cross-runtime telemetry policy for the middleware library itself.
+# Contract authority: ores-otel/ores-otel-interfaces OresOtelConfigV1.
+# Credentials and exporter authorization values must remain in runtime env/secrets.
+version = 1
+
+[common]
+enabled = true
+service_name = "ores-middleware"
+
+[common.logging]
+enabled = true
+level = "info"
+console = true
+auto_send = false
+
+[common.tracing]
+enabled = true
+sample_ratio = 1.0
+propagators = ["tracecontext", "baggage"]
+
+[common.metrics]
+enabled = true
+
+[common.exporter]
+protocol = "none"
