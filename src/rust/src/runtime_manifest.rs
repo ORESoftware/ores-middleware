@@ -70,12 +70,6 @@ impl TargetBuilder {
             "enabled" => set_once(&mut self.enabled, parse_bool(value)?),
             "middleware" => set_once(&mut self.middleware, parse_string(value)?),
             "stack_config" => set_once(&mut self.stack_config, parse_string(value)?),
-            "roots" | "propagate_headers" => {
-                if !value.starts_with('[') || !value.ends_with(']') {
-                    return Err(RuntimeManifestError::InvalidDocument);
-                }
-                Ok(())
-            }
             _ => Err(RuntimeManifestError::InvalidDocument),
         }
     }
@@ -93,10 +87,12 @@ impl TargetBuilder {
         if !matches!(middleware.as_str(), "stack" | "propagation-only" | "disabled") {
             return Err(RuntimeManifestError::InvalidTarget);
         }
-        if let Some(path) = self.stack_config.as_deref() {
-            if !safe_stack_path(path) {
-                return Err(RuntimeManifestError::InvalidTarget);
-            }
+        if self
+            .stack_config
+            .as_deref()
+            .is_some_and(|path| !safe_stack_path(path))
+        {
+            return Err(RuntimeManifestError::InvalidTarget);
         }
         Ok(Target {
             name,
@@ -144,10 +140,15 @@ pub fn admit_server_stack(
     let mut default_target = None;
     let mut targets = Vec::new();
     let mut current = None;
+    let mut pending_array_depth = 0_usize;
 
     for raw in source.lines() {
         let line = strip_comment(raw)?.trim();
         if line.is_empty() {
+            continue;
+        }
+        if pending_array_depth > 0 {
+            pending_array_depth = advance_array_depth(line, pending_array_depth)?;
             continue;
         }
         if line == "[[targets]]" {
@@ -181,12 +182,18 @@ pub fn admit_server_stack(
                 }
                 _ => Err(RuntimeManifestError::InvalidDocument),
             }?,
+            Section::Target if matches!(key, "roots" | "propagate_headers") => {
+                pending_array_depth = start_array(value)?;
+            }
             Section::Target => current
                 .as_mut()
                 .ok_or(RuntimeManifestError::InvalidDocument)?
                 .assign(key, value)?,
             Section::Other => {}
         }
+    }
+    if pending_array_depth != 0 {
+        return Err(RuntimeManifestError::InvalidDocument);
     }
     finish_target(&mut current, &mut targets)?;
 
@@ -296,6 +303,35 @@ fn strip_comment(line: &str) -> Result<&str, RuntimeManifestError> {
     }
 }
 
+fn start_array(value: &str) -> Result<usize, RuntimeManifestError> {
+    if !value.starts_with('[') {
+        return Err(RuntimeManifestError::InvalidDocument);
+    }
+    advance_array_depth(value, 0)
+}
+
+fn advance_array_depth(line: &str, initial: usize) -> Result<usize, RuntimeManifestError> {
+    let mut depth = initial;
+    let mut quoted = false;
+    for byte in line.bytes() {
+        match byte {
+            b'"' => quoted = !quoted,
+            b'\\' if quoted => return Err(RuntimeManifestError::InvalidDocument),
+            b'[' if !quoted => depth = depth.saturating_add(1),
+            b']' if !quoted => {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or(RuntimeManifestError::InvalidDocument)?;
+            }
+            _ => {}
+        }
+    }
+    if quoted {
+        return Err(RuntimeManifestError::InvalidDocument);
+    }
+    Ok(depth)
+}
+
 fn valid_target_name(value: &str) -> bool {
     let Some(first) = value.bytes().next() else {
         return false;
@@ -345,6 +381,23 @@ stack_config = "config/middleware.json"
         assert_eq!(
             admit_server_stack(GOOD, None, "config/other.json"),
             Err(RuntimeManifestError::StackConfigMismatch)
+        );
+    }
+
+    #[test]
+    fn multiline_arrays_are_source_format_equivalent() {
+        let multiline = GOOD.replace(
+            "roots = [\"src\"]",
+            "roots = [\n  \"src\",\n  \"server\",\n]",
+        );
+        assert_eq!(
+            admit_server_stack(&multiline, None, "config/middleware.json"),
+            Ok(())
+        );
+        let unterminated = GOOD.replace("roots = [\"src\"]", "roots = [\n  \"src\",");
+        assert_eq!(
+            admit_server_stack(&unterminated, None, "config/middleware.json"),
+            Err(RuntimeManifestError::InvalidDocument)
         );
     }
 
