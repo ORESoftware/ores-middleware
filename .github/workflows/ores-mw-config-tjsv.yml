@@ -84,6 +84,7 @@ jobs:
             scripts/check-tjsv-ores-mw.mjs \
             scripts/validate-ores-mw-config.mjs \
             tests/test_ores_mw_config.py \
+            tests/test_ores_mw_output_hardening.py \
             tests/tjsv-ores-mw-config.test.mjs \
             docs/ores-mw-config.md \
             package.json package-lock.json
