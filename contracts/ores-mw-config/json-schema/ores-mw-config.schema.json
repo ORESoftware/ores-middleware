@@ -11,12 +11,20 @@
       "required": ["name", "role", "roots", "enabled", "middleware"],
       "properties": {
         "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["server", "client"] },
+        "role": {
+          "anyOf": [
+            { "type": "string", "const": "server" },
+            { "type": "string", "const": "client" }
+          ]
+        },
         "roots": { "type": "array", "items": { "type": "string" } },
         "enabled": { "type": "boolean" },
         "middleware": {
-          "type": "string",
-          "enum": ["stack", "propagation-only", "disabled"]
+          "anyOf": [
+            { "type": "string", "const": "stack" },
+            { "type": "string", "const": "propagation-only" },
+            { "type": "string", "const": "disabled" }
+          ]
         },
         "stackConfig": { "type": "string" },
         "propagateHeaders": {
@@ -30,10 +38,13 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "repositoryMode", "allowOverlappingRoots", "targets"],
       "properties": {
-        "schemaVersion": { "const": 1 },
+        "schemaVersion": { "type": "number", "const": 1 },
         "repositoryMode": {
-          "type": "string",
-          "enum": ["server-only", "client-only", "hybrid"]
+          "anyOf": [
+            { "type": "string", "const": "server-only" },
+            { "type": "string", "const": "client-only" },
+            { "type": "string", "const": "hybrid" }
+          ]
         },
         "allowOverlappingRoots": { "type": "boolean" },
         "defaultTarget": { "type": "string" },
