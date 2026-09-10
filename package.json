@@ -1,12 +1,53 @@
 {
-  "name": "@oresoftware/ores-middleware-workspace",
+  "name": "@oresoftware/ores-middleware",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./src/ts/dist/index.js",
+  "types": "./src/ts/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/ts/dist/index.d.ts",
+      "import": "./src/ts/dist/index.js"
+    },
+    "./adapters": {
+      "types": "./src/ts/dist/adapters.d.ts",
+      "import": "./src/ts/dist/adapters.js"
+    },
+    "./nextjs": {
+      "types": "./src/ts/dist/nextjs.d.ts",
+      "import": "./src/ts/dist/nextjs.js"
+    },
+    "./proxy-auth": {
+      "types": "./src/ts/dist/proxy-auth.d.ts",
+      "import": "./src/ts/dist/proxy-auth.js"
+    },
+    "./context": {
+      "types": "./src/ts/dist/context.d.ts",
+      "import": "./src/ts/dist/context.js"
+    },
+    "./docs-serving": {
+      "types": "./src/ts/dist/docs-serving.d.ts",
+      "import": "./src/ts/dist/docs-serving.js"
+    },
+    "./operation": {
+      "types": "./src/ts/dist/operation.d.ts",
+      "import": "./src/ts/dist/operation.js"
+    },
+    "./request-contract": {
+      "types": "./src/ts/dist/request-contract.d.ts",
+      "import": "./src/ts/dist/request-contract.js"
+    },
+    "./otel": {
+      "types": "./src/ts/dist/otel.d.ts",
+      "import": "./src/ts/dist/otel.js"
+    }
+  },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
+    "prepare": "npm --prefix src/ts ci --include=dev && npm --prefix src/ts run build",
     "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
     "contracts:polyglot-generate": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_codegen -- --output-root target/schema-convergence --report target/schema-convergence/receipt.json",
