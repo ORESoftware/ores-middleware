@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ores-otel/ores-otel-interfaces
-          ref: b544872253ee0527329fa80caee17d171baa6524
+          ref: b544872d13323de7be19a9d5879c419149679f7a
           path: .contract/ores-otel-interfaces
           token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
           persist-credentials: false
