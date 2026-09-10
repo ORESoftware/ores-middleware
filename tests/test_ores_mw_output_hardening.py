@@ -65,9 +65,15 @@ class OutputHardeningTests(unittest.TestCase):
             out.mkdir(parents=True)
             sentinel = out / "keep-me.txt"
             sentinel.write_text("not generated", encoding="utf-8")
+            prior_manifest = out / "manifest.json"
+            prior_receipt = out / "receipt.json"
+            prior_manifest.write_text('{"old":true}', encoding="utf-8")
+            prior_receipt.write_text('{"status":"passed"}', encoding="utf-8")
             with self.assertRaisesRegex(ManifestError, "output-directory-not-dedicated"):
                 compile_manifest(manifest, root, out)
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "not generated")
+            self.assertEqual(prior_manifest.read_text(encoding="utf-8"), '{"old":true}')
+            self.assertEqual(prior_receipt.read_text(encoding="utf-8"), '{"status":"passed"}')
 
     def test_compile_rejects_symlinked_generated_entry(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
