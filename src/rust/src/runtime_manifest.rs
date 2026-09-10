@@ -456,7 +456,10 @@ propagate_headers = ["traceparent"]
 
     #[test]
     fn malformed_or_ambiguous_selection_is_rejected() {
-        let duplicate = format!("{GOOD}\n{}", GOOD.split("[[targets]]").nth(1).unwrap());
+        let duplicate = format!(
+            "{GOOD}\n[[targets]]{}",
+            GOOD.split("[[targets]]").nth(1).unwrap()
+        );
         assert_eq!(
             admit_server_stack(&duplicate, None, "config/middleware.json"),
             Err(RuntimeManifestError::DuplicateTarget)
