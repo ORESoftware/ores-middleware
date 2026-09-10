@@ -13,6 +13,14 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
     },
+    "./koa": {
+      "types": "./dist/koa.d.ts",
+      "import": "./dist/koa.js"
+    },
+    "./fastify": {
+      "types": "./dist/fastify.d.ts",
+      "import": "./dist/fastify.js"
+    },
     "./nextjs": {
       "types": "./dist/nextjs.d.ts",
       "import": "./dist/nextjs.js"
