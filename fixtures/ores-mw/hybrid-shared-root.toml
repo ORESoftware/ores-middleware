@@ -1,0 +1,19 @@
+schema_version = 1
+repository_mode = "hybrid"
+allow_overlapping_roots = true
+
+# Path-based inference is intentionally ambiguous here. Callers must resolve
+# with --target api or --target browser rather than risking server config in a client.
+[[targets]]
+name = "api"
+role = "server"
+roots = ["."]
+middleware = "stack"
+stack_config = "config/middleware.server.json"
+
+[[targets]]
+name = "browser"
+role = "client"
+roots = ["."]
+middleware = "propagation-only"
+propagate_headers = ["traceparent", "x-request-id"]

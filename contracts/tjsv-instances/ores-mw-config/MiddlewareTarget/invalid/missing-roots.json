@@ -1,0 +1,1 @@
+{"name":"api","role":"server","enabled":true,"middleware":"stack","stackConfig":"config/middleware.json"}

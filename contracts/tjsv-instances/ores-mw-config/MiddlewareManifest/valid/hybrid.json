@@ -1,0 +1,1 @@
+{"schemaVersion":1,"repositoryMode":"hybrid","allowOverlappingRoots":false,"targets":[{"name":"api","role":"server","roots":["server"],"enabled":true,"middleware":"disabled"},{"name":"browser","role":"client","roots":["web"],"enabled":true,"middleware":"propagation-only","propagateHeaders":["traceparent"]}]}

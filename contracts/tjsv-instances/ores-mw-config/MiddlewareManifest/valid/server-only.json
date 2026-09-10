@@ -1,0 +1,1 @@
+{"schemaVersion":1,"repositoryMode":"server-only","allowOverlappingRoots":false,"defaultTarget":"api","targets":[{"name":"api","role":"server","roots":["server"],"enabled":true,"middleware":"stack","stackConfig":"config/middleware.json"}]}
