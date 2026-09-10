@@ -348,7 +348,7 @@ export function descriptor() {
     language: "ts",
     runtime: "node-deno-bun",
     packageName: "@oresoftware/ores-middleware",
-    frameworkAdapters: ["express", "deno", "bun", "nestjs", "nextjs", "nuxt", "hapi", "hono", "node-http"],
+    frameworkAdapters: ["express", "koa", "fastify", "deno", "bun", "nestjs", "nextjs", "nuxt", "hapi", "hono", "node-http"],
     capabilities: [...capabilities],
     operationSymbols: { descriptor: "descriptor", defaultConfig: "defaultConfig", validateConfig: "validateConfig", createMiddleware: "createMiddleware", runWithContext: "runWithContext", currentContext: "currentContext", capabilities: "capabilities" }
   };
