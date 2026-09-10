@@ -29,7 +29,7 @@
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
     "ores-mw:compile": "python3 scripts/ores_mw_config.py compile --out-dir target/ores-mw",
     "ores-mw:validate": "node scripts/validate-ores-mw-config.mjs",
-    "ores-mw:check": "python3 -m unittest tests/test_ores_mw_config.py -v && python3 scripts/ores_mw_config.py check && tsp compile contracts/ores-mw-config/typespec --no-emit && npm run ores-mw:compile && npm run ores-mw:validate",
+    "ores-mw:check": "python3 -m unittest tests/test_ores_mw_config.py tests/test_ores_mw_output_hardening.py -v && python3 scripts/ores_mw_config.py check && tsp compile contracts/ores-mw-config/typespec --no-emit && npm run ores-mw:compile && npm run ores-mw:validate",
     "ores-mw:tjsv": "node scripts/check-tjsv-ores-mw.mjs",
     "ores-mw:tjsv:test": "node --test tests/tjsv-ores-mw-config.test.mjs",
     "verify": "npm run contracts:compile && npm run contracts:check && npm run ores-mw:check && npm run zpkg:check && node scripts/check-source-layout.mjs",
