@@ -20,7 +20,7 @@ use serde_json::json;
 use tower_http::compression::CompressionLayer;
 
 use crate::{
-    BootstrapError, MiddlewareError, MiddlewareStack,
+    BootstrapError, MiddlewareError, MiddlewareStack, admit_server_stack,
     integrations::{RequestMetadata, TransportSecurity},
     operation::{
         OperationDescriptor, OperationFailureKind, OperationOutcome, OperationScope,
@@ -42,6 +42,30 @@ pub fn install_from_env(
 ) -> Result<Router, BootstrapError> {
     let stack = Arc::new(stack_from_env(service_name)?);
     Ok(install(router, stack))
+}
+
+/// Install from the existing environment contract only after the executable's embedded
+/// `.ores-mw.toml` selects the expected enabled server stack target.
+///
+/// This transition API makes the repository manifest runtime-active without replacing
+/// `.cli-flags.toml` or the existing environment bootstrap. The full middleware stack JSON remains
+/// governed independently; callers pass its repository-relative path so manifest/path drift fails
+/// before a stack is installed.
+pub fn install_from_env_with_manifest(
+    router: Router,
+    service_name: impl Into<String>,
+    manifest_source: &str,
+    target_name: Option<&str>,
+    expected_stack_config: &str,
+) -> Result<Router, BootstrapError> {
+    admit_server_stack(manifest_source, target_name, expected_stack_config).map_err(|error| {
+        BootstrapError {
+            variable: None,
+            code: error.code(),
+            message: ".ores-mw.toml runtime target admission failed".into(),
+        }
+    })?;
+    install_from_env(router, service_name)
 }
 
 pub fn install_from_env_with_ores_logger(
@@ -314,3 +338,36 @@ fn problem(error: MiddlewareError) -> Response {
 }
 
 pub type AxumBody = Body;
+
+#[cfg(test)]
+mod runtime_manifest_tests {
+    use super::*;
+
+    const MANIFEST: &str = r#"
+schema_version = 1
+repository_mode = "server-only"
+default_target = "api"
+
+[[targets]]
+name = "api"
+role = "server"
+roots = ["src"]
+middleware = "stack"
+stack_config = "config/middleware.json"
+"#;
+
+    #[test]
+    fn manifest_drift_blocks_install_before_environment_bootstrap() {
+        let error = install_from_env_with_manifest(
+            Router::new(),
+            "fixture",
+            MANIFEST,
+            None,
+            "config/other.json",
+        )
+        .expect_err("stack path drift must fail closed");
+        assert_eq!(error.code, "runtime_stack_config_mismatch");
+        assert!(error.variable.is_none());
+        assert!(!error.message.contains("config/other.json"));
+    }
+}
