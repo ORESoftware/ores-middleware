@@ -143,29 +143,44 @@ pub fn admit_server_stack(
     let mut pending_array_depth = 0_usize;
 
     for raw in source.lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if pending_array_depth > 0 {
+            let line = strip_comment(raw)?.trim();
+            if !line.is_empty() {
+                pending_array_depth = advance_array_depth(line, pending_array_depth)?;
+            }
+            continue;
+        }
+
+        if trimmed.starts_with('[') {
+            let header = strip_comment(raw)?.trim();
+            if header == "[[targets]]" {
+                finish_target(&mut current, &mut targets)?;
+                if targets.len() >= MAX_TARGETS {
+                    return Err(RuntimeManifestError::InvalidDocument);
+                }
+                current = Some(TargetBuilder::default());
+                section = Section::Target;
+                continue;
+            }
+            if header.starts_with('[') && header.ends_with(']') {
+                finish_target(&mut current, &mut targets)?;
+                section = Section::Other;
+                continue;
+            }
+        }
+
+        if section == Section::Other {
+            continue;
+        }
+
         let line = strip_comment(raw)?.trim();
         if line.is_empty() {
             continue;
         }
-        if pending_array_depth > 0 {
-            pending_array_depth = advance_array_depth(line, pending_array_depth)?;
-            continue;
-        }
-        if line == "[[targets]]" {
-            finish_target(&mut current, &mut targets)?;
-            if targets.len() >= MAX_TARGETS {
-                return Err(RuntimeManifestError::InvalidDocument);
-            }
-            current = Some(TargetBuilder::default());
-            section = Section::Target;
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            finish_target(&mut current, &mut targets)?;
-            section = Section::Other;
-            continue;
-        }
-
         let (key, value) = line
             .split_once('=')
             .ok_or(RuntimeManifestError::InvalidDocument)?;
@@ -189,7 +204,7 @@ pub fn admit_server_stack(
                 .as_mut()
                 .ok_or(RuntimeManifestError::InvalidDocument)?
                 .assign(key, value)?,
-            Section::Other => {}
+            Section::Other => unreachable!("other sections are skipped before key parsing"),
         }
     }
     if pending_array_depth != 0 {
@@ -398,6 +413,34 @@ stack_config = "config/middleware.json"
         assert_eq!(
             admit_server_stack(&unterminated, None, "config/middleware.json"),
             Err(RuntimeManifestError::InvalidDocument)
+        );
+    }
+
+    #[test]
+    fn flags_and_env_metadata_are_opaque_to_runtime_target_selection() {
+        let enriched = GOOD.replace(
+            "\n[[targets]]",
+            r#"
+
+[flags2env]
+contract = ".cli-flags.toml"
+require_audit = true
+precedence = "argv-over-env"
+
+[[env]]
+name = "display_path"
+key = "DISPLAY_PATH"
+kind = "string"
+required = false
+secret = false
+default = "C:\\runtime\\path # literal"
+description = "metadata with # and \\ escapes is validated by the peer compiler"
+
+[[targets]]"#,
+        );
+        assert_eq!(
+            admit_server_stack(&enriched, None, "config/middleware.json"),
+            Ok(())
         );
     }
 
