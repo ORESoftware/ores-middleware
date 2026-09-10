@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.oresoftware.com/middleware/ores-mw-config/v1.json",
   "title": "ORES middleware TOML normalized orchestration contract",
-  "description": "Independent JSON Schema/OpenAPI-lane authority for the normalized .ores-mw.toml shape; semantic path, overlap, and target-role invariants are additionally enforced by scripts/ores_mw_config.py.",
+  "description": "Independent JSON Schema/OpenAPI-lane authority for the normalized .ores-mw.toml shape; semantic path, overlap, flags-2-env, environment-binding, and target-role invariants are additionally enforced by scripts/ores_mw_config.py.",
   "$ref": "#/$defs/MiddlewareManifest",
   "$defs": {
     "MiddlewareTarget": {
@@ -48,6 +48,40 @@
         },
         "allowOverlappingRoots": { "type": "boolean" },
         "defaultTarget": { "type": "string" },
+        "flags2env": {
+          "type": "object",
+          "required": ["contract", "requireAudit", "precedence"],
+          "properties": {
+            "contract": { "type": "string" },
+            "requireAudit": { "type": "boolean" },
+            "precedence": { "type": "string", "const": "argv-over-env" }
+          }
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "key", "kind", "required", "secret"],
+            "properties": {
+              "name": { "type": "string" },
+              "key": { "type": "string" },
+              "kind": {
+                "anyOf": [
+                  { "type": "string", "const": "string" },
+                  { "type": "string", "const": "bool" },
+                  { "type": "string", "const": "integer" },
+                  { "type": "string", "const": "double" },
+                  { "type": "string", "const": "json" },
+                  { "type": "string", "const": "url" }
+                ]
+              },
+              "required": { "type": "boolean" },
+              "secret": { "type": "boolean" },
+              "defaultValue": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
         "targets": {
           "type": "array",
           "items": { "$ref": "#/$defs/MiddlewareTarget" }
