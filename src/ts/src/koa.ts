@@ -20,9 +20,16 @@ function nodeHeadersToWeb(headersLike: Record<string, unknown>): Headers {
   return headers;
 }
 
+function copyBytes(body: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(body.byteLength);
+  new Uint8Array(copy).set(body);
+  return copy;
+}
+
 function bodyToWeb(body: unknown, headers: Headers): BodyInit | undefined {
   if (body === undefined || body === null) return undefined;
-  if (typeof body === "string" || body instanceof Uint8Array) return body;
+  if (typeof body === "string") return body;
+  if (body instanceof Uint8Array) return copyBytes(body);
   if (body instanceof ArrayBuffer || body instanceof Blob || body instanceof URLSearchParams) return body;
   if (!headers.has("content-type")) headers.set("content-type", "application/json; charset=utf-8");
   return JSON.stringify(body);
