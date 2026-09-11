@@ -1,0 +1,6 @@
+{
+  "contract": ".cli-flags.toml",
+  "requireAudit": true,
+  "precedence": "argv-over-env",
+  "unexpected": true
+}
