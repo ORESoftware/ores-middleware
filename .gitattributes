@@ -1,0 +1,4 @@
+# Keep Go source and module manifests byte-stable across Linux, macOS, and Windows.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
