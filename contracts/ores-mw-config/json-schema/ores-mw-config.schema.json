@@ -7,7 +7,7 @@
   "$defs": {
     "MiddlewareTarget": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": ["name", "role", "roots", "enabled", "middleware"],
       "properties": {
         "name": { "type": "string" },
@@ -35,7 +35,7 @@
     },
     "MiddlewareManifest": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": ["schemaVersion", "repositoryMode", "allowOverlappingRoots", "targets"],
       "properties": {
         "schemaVersion": { "type": "number", "const": 1 },
@@ -50,6 +50,7 @@
         "defaultTarget": { "type": "string" },
         "flags2env": {
           "type": "object",
+          "unevaluatedProperties": false,
           "required": ["contract", "requireAudit", "precedence"],
           "properties": {
             "contract": { "type": "string" },
@@ -61,6 +62,7 @@
           "type": "array",
           "items": {
             "type": "object",
+            "unevaluatedProperties": false,
             "required": ["name", "key", "kind", "required", "secret"],
             "properties": {
               "name": { "type": "string" },
