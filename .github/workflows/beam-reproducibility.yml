@@ -1,0 +1,135 @@
+name: beam-reproducibility
+
+on:
+  pull_request:
+    paths:
+      - src/erlang/**
+      - src/gleam/**
+      - .github/workflows/beam-reproducibility.yml
+  push:
+    branches: [main, dev]
+    paths:
+      - src/erlang/**
+      - src/gleam/**
+      - .github/workflows/beam-reproducibility.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beam-reproducibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  erlang:
+    name: erlang-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Install pinned OTP and rebar3
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          rebar3-version: "3.24.0"
+      - name: Compile with warnings denied and run EUnit
+        shell: bash
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          rebar3 eunit
+      - name: Require pure Erlang runtime descriptor
+        shell: bash
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          descriptor="$(escript escript/contractcheck.escript)"
+          printf '%s\n' "$descriptor" | grep -Eq '"language"[[:space:]]*:[[:space:]]*"erlang"'
+          printf '%s\n' "$descriptor" | grep -Eq '"contractVersion"[[:space:]]*:[[:space:]]*"1\.0\.0"'
+      - name: Prove Erlang lock and source immutability
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code -- src/erlang
+
+  gleam:
+    name: gleam-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Install pinned OTP, Gleam, and rebar3
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          gleam-version: "1.18.1"
+          rebar3-version: "3.24.0"
+      - name: Resolve Gleam dependencies without manifest drift
+        shell: bash
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          gleam deps download
+          git diff --exit-code -- gleam.toml manifest.toml
+      - name: Require canonical Gleam formatting
+        shell: bash
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          gleam format --check src test
+      - name: Run native Gleam tests
+        shell: bash
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          gleam test
+      - name: Require pure Gleam runtime descriptor
+        shell: bash
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          descriptor="$(gleam run -m ores_middleware_contractcheck)"
+          printf '%s\n' "$descriptor" | grep -Eq '"language"[[:space:]]*:[[:space:]]*"gleam"'
+          printf '%s\n' "$descriptor" | grep -Eq '"contractVersion"[[:space:]]*:[[:space:]]*"1\.0\.0"'
+      - name: Prove Gleam manifest and source immutability
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code -- src/gleam
