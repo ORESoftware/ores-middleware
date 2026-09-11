@@ -1,0 +1,87 @@
+name: ts-reproducibility
+
+on:
+  pull_request:
+    paths:
+      - src/ts/**
+      - .github/workflows/ts-reproducibility.yml
+  push:
+    branches: [main, dev]
+    paths:
+      - src/ts/**
+      - .github/workflows/ts-reproducibility.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ts-reproducibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: typescript-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Install exact TypeScript dependency closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --no-audit --no-fund
+          git diff --exit-code -- src/ts/package.json src/ts/package-lock.json
+      - name: Compile TypeScript package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix src/ts run build
+      - name: Run native TypeScript tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix src/ts test
+      - name: Require pure TypeScript runtime descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          descriptor="$(npm --prefix src/ts run --silent descriptor)"
+          printf '%s\n' "$descriptor" | grep -Eq '"language"[[:space:]]*:[[:space:]]*"typescript"'
+          printf '%s\n' "$descriptor" | grep -Eq '"contractVersion"[[:space:]]*:[[:space:]]*"1\.0\.0"'
+      - name: Audit publishable package boundary
+        shell: bash
+        working-directory: src/ts
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > package-dry-run.json
+          node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync("package-dry-run.json","utf8")); if (!Array.isArray(x)||x.length!==1||!Array.isArray(x[0].files)||x[0].files.length===0) process.exit(1);'
+          rm package-dry-run.json
+      - name: Prove validation did not rewrite tracked TypeScript source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code -- src/ts
