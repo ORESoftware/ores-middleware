@@ -1,0 +1,7 @@
+{
+  "name": "api_url",
+  "key": "API_URL",
+  "kind": "url",
+  "required": "true",
+  "secret": false
+}

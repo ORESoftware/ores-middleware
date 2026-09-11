@@ -1,0 +1,5 @@
+{
+  "contract": 7,
+  "requireAudit": true,
+  "precedence": "argv-over-env"
+}

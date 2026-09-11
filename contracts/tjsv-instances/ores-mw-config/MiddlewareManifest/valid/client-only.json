@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "repositoryMode": "client-only",
+  "allowOverlappingRoots": false,
+  "defaultTarget": "web-client",
+  "targets": [
+    {
+      "name": "web-client",
+      "role": "client",
+      "roots": ["web"],
+      "enabled": true,
+      "middleware": "propagation-only",
+      "propagateHeaders": ["traceparent", "tracestate"]
+    }
+  ]
+}
