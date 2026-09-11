@@ -237,14 +237,9 @@ pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolati
         .into_iter()
         .filter_map(|rule| require_before(stages, rule.first, rule.second, rule.code));
 
-    let reviewed_order = DEFAULT_MIDDLEWARE_ORDER.windows(2).filter_map(|pair| {
-        require_before(
-            stages,
-            pair[0],
-            pair[1],
-            "reviewed-stage-order",
-        )
-    });
+    let reviewed_order = DEFAULT_MIDDLEWARE_ORDER
+        .windows(2)
+        .filter_map(|pair| require_before(stages, pair[0], pair[1], "reviewed-stage-order"));
 
     duplicates
         .chain(missing)
