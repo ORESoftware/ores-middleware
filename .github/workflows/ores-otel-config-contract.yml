@@ -1,0 +1,81 @@
+name: ORES OTEL config contract
+
+on:
+  pull_request:
+    paths:
+      - '.ores-otel.toml'
+      - '.github/workflows/ores-otel-config-contract.yml'
+      - 'validation/evidence/ores-otel-config-v1/**'
+  push:
+    branches: [main]
+    paths:
+      - '.ores-otel.toml'
+      - '.github/workflows/ores-otel-config-contract.yml'
+      - 'validation/evidence/ores-otel-config-v1/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-otel-config-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact consumer head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact consumer head
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Verify immutable telemetry authority evidence
+        env:
+          AUTHORITY_REPOSITORY: ores-otel/ores-otel-interfaces
+          AUTHORITY_REVISION: b544872d13323de7be19a9d5879c419149679f7a
+          TYPESPEC_BLOB: f6a21d7c29ddd62a4d2e7e8743f88e55eb77a0d8
+          JSON_SCHEMA_BLOB: adbc84d51ec3adace217582dbcbcba1b7f4983a7
+        run: |
+          set -euo pipefail
+          test "$AUTHORITY_REPOSITORY" = "ores-otel/ores-otel-interfaces"
+          test "$AUTHORITY_REVISION" = "b544872d13323de7be19a9d5879c419149679f7a"
+          test "$(git hash-object validation/evidence/ores-otel-config-v1/main.tsp)" = "$TYPESPEC_BLOB"
+          test "$(git hash-object validation/evidence/ores-otel-config-v1/authored.schema.json)" = "$JSON_SCHEMA_BLOB"
+
+      - name: Parse TOML into the cross-runtime contract object
+        run: |
+          mkdir -p .contract/instances/OresOtelConfigV1/valid
+          python3 - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
+          with Path('.ores-otel.toml').open('rb') as f:
+              value = tomllib.load(f)
+          out = Path('.contract/instances/OresOtelConfigV1/valid/repository.json')
+          out.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          PY
+
+      - name: Enforce both authored authorities with TJSV
+        uses: ORESoftware/typespec-json-schema-validator@4a5d049218adc2740d4cf78f612caf7f38f6f64c
+        with:
+          typespec: validation/evidence/ores-otel-config-v1/main.tsp
+          schema: validation/evidence/ores-otel-config-v1/authored.schema.json
+          instances: .contract/instances
+          report: .contract/tjsv-report.json
+          contract_ir: .contract/tjsv-contract-ir.json
+          output_dir: .contract/generated
+          quiet: 'false'
+
+      - name: Prove admitted sources stayed read-only
+        run: |
+          git diff --exit-code -- .ores-otel.toml \
+            validation/evidence/ores-otel-config-v1/main.tsp \
+            validation/evidence/ores-otel-config-v1/authored.schema.json
