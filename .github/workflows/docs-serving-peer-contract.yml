@@ -25,6 +25,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           show-progress: false
+      - name: Syntax-check ores-cli audit entrypoint
+        shell: bash
+        run: bash -n scripts/oresc-audit.sh
       - name: Install Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:

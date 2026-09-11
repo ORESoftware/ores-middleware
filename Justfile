@@ -8,6 +8,9 @@ contracts:
     python3 -m unittest scripts/test_schema_convergence.py -v
     python3 scripts/check_zpkg.py
 
+ores-lint:
+    bash scripts/oresc-audit.sh
+
 rust:
     cargo test --manifest-path tools/contract-parity/Cargo.toml
     cargo test --manifest-path src/rust/Cargo.toml --all-features
