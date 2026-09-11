@@ -1,0 +1,106 @@
+name: erlang-reproducibility
+
+on:
+  pull_request:
+    paths:
+      - "src/erlang/**"
+      - "tools/middleware-adversarial-runner/**"
+      - ".github/workflows/erlang-reproducibility.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "src/erlang/**"
+      - "tools/middleware-adversarial-runner/**"
+      - ".github/workflows/erlang-reproducibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: erlang-reproducibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  erlang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          rebar3-version: "3.24.0"
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+
+      - name: Resolve and compile with zero lock drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/erlang
+          rebar3 compile
+          git diff --exit-code -- rebar.config rebar.lock
+
+      - name: Repeat native Erlang/Cowboy EUnit suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/erlang
+          for iteration in 1 2 3 4 5; do
+            echo "Erlang reproducibility iteration $iteration"
+            rebar3 eunit
+          done
+
+      - name: Validate declared runtime adapter surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .language == "erlang" and
+            .runtime == "erlang-otp" and
+            .packageName == "ores_middleware" and
+            (.frameworkAdapters | index("cowboy")) != null and
+            (.frameworkAdapters | index("otp")) != null and
+            .operationSymbols.descriptor == "ores_middleware:descriptor/0" and
+            .operationSymbols.currentContext == "ores_middleware:current_context/0"
+          ' src/erlang/adapter.manifest.json
+
+      - name: Run compiled randomized adversarial Erlang suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --quiet \
+            --manifest-path tools/middleware-adversarial-runner/Cargo.toml \
+            --package middleware-adversarial-runner \
+            -- \
+            --language erlang \
+            --iterations 10 \
+            --output-dir target/reproducibility/erlang/logs \
+            --receipt target/reproducibility/erlang/receipt.json
+          jq -e '.passed == true and (.runs | length) == 10 and all(.runs[]; .passed == true and .exit_code == 0)' target/reproducibility/erlang/receipt.json
+
+      - name: Prove validation did not rewrite tracked Erlang source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code -- src/erlang
