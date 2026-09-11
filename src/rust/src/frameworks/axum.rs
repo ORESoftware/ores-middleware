@@ -247,8 +247,7 @@ fn apply_finish_headers(
             // Preserve both policies instead of replacing the handler policy with the middleware
             // default: user agents enforce multiple CSP fields cumulatively, so appending cannot
             // weaken the middleware baseline while retaining route-level restrictions.
-            if name.as_str() == "content-security-policy"
-                && response.headers().contains_key(&name)
+            if name.as_str() == "content-security-policy" && response.headers().contains_key(&name)
             {
                 response.headers_mut().append(name, value);
             } else {
@@ -403,8 +402,10 @@ mod response_header_precedence_tests {
 
         apply_finish_headers(
             &mut response,
-            [("content-security-policy".to_owned(),
-              "default-src 'self'; frame-ancestors 'none'".to_owned())],
+            [(
+                "content-security-policy".to_owned(),
+                "default-src 'self'; frame-ancestors 'none'".to_owned(),
+            )],
         );
 
         let policies = response
@@ -423,8 +424,10 @@ mod response_header_precedence_tests {
         let mut response = Response::new(Body::empty());
         apply_finish_headers(
             &mut response,
-            [("content-security-policy".to_owned(),
-              "default-src 'self'; frame-ancestors 'none'".to_owned())],
+            [(
+                "content-security-policy".to_owned(),
+                "default-src 'self'; frame-ancestors 'none'".to_owned(),
+            )],
         );
 
         assert_eq!(

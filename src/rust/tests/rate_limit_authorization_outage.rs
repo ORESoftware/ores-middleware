@@ -1,14 +1,8 @@
-use std::{
-    collections::BTreeMap,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use ores_middleware::{
-    default_config, IntegrationError, MiddlewareStack, RateLimitDecision,
-    RateLimitFailureMode, RateLimitLayer, RateLimitRequest, RateLimiter,
-    RequestMetadata,
+    IntegrationError, MiddlewareStack, RateLimitDecision, RateLimitFailureMode, RateLimitLayer,
+    RateLimitRequest, RateLimiter, RequestMetadata, default_config,
 };
 
 struct FailingLimiter;
@@ -26,13 +20,8 @@ impl RateLimiter for FailingLimiter {
     fn evaluate<'a>(
         &'a self,
         _request: &'a RateLimitRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<RateLimitDecision, IntegrationError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<RateLimitDecision, IntegrationError>> + Send + 'a>>
+    {
         Box::pin(async {
             Err(IntegrationError {
                 code: "redis_unavailable",
@@ -66,10 +55,7 @@ fn authorization_config(failure_mode: RateLimitFailureMode) -> ores_middleware::
 async fn every_authorization_outage_mode_is_fail_closed() {
     // Fail-open is rejected at construction, before a request can reach the
     // evaluator. This is the preferred configuration-level safety boundary.
-    assert!(MiddlewareStack::new(authorization_config(
-        RateLimitFailureMode::FailOpen,
-    ))
-    .is_err());
+    assert!(MiddlewareStack::new(authorization_config(RateLimitFailureMode::FailOpen,)).is_err());
 
     // Even the two configuration-valid outage modes must deny when the primary
     // backend is unavailable. In particular, local-only may not convert a

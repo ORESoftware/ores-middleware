@@ -1,15 +1,10 @@
-use std::{
-    any::type_name,
-    future::Future,
-    panic::AssertUnwindSafe,
-    time::Duration,
-};
+use std::{any::type_name, future::Future, panic::AssertUnwindSafe, time::Duration};
 
 use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 use tracing::Instrument;
 
-use crate::{run_with_context, run_with_ores_log_context, RequestContext};
+use crate::{RequestContext, run_with_context, run_with_ores_log_context};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -303,16 +298,9 @@ async fn report_terminal_failure<T>(
     let request_id = context.request_id.clone();
     let trace_id = context.trace_id.clone();
     let span = operation_span(&context, &descriptor);
-    let report = async move {
-        operation_failure(
-            &descriptor,
-            &request_id,
-            &trace_id,
-            kind,
-            error_type,
-        )
-    }
-    .instrument(span);
+    let report =
+        async move { operation_failure(&descriptor, &request_id, &trace_id, kind, error_type) }
+            .instrument(span);
 
     run_with_context(
         context,
@@ -388,9 +376,9 @@ fn bounded_error_type<E>() -> &'static str {
 fn safe_token(value: &str, max_len: usize) -> bool {
     !value.is_empty()
         && value.len() <= max_len
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
-        })
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':'))
 }
 
 #[cfg(test)]

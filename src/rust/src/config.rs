@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    CAPABILITIES, CONTRACT_VERSION,
     net::valid_cidr,
     rate_limit::{
         RateLimitAlgorithm, RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitLayer,
         RateLimitSignal,
     },
-    CAPABILITIES, CONTRACT_VERSION,
 };
 
 const MAX_LOCAL_RATE_LIMIT_ENTRIES: usize = 10_000;
@@ -490,9 +490,7 @@ pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
             security_headers: SecurityHeaderPolicy {
                 enabled: true,
                 hsts_max_age_seconds: 31_536_000,
-                content_security_policy: Some(
-                    "default-src 'self'; frame-ancestors 'none'".into(),
-                ),
+                content_security_policy: Some("default-src 'self'; frame-ancestors 'none'".into()),
                 frame_options: "DENY".into(),
             },
             idempotency: IdempotencyPolicy {
@@ -556,8 +554,7 @@ mod tests {
                 .any(|issue| issue.code == "production_requires_external_hmac")
         );
 
-        config.settings.rate_limit.key_derivation =
-            RateLimitKeyDerivationMode::ExternalHmacSha256;
+        config.settings.rate_limit.key_derivation = RateLimitKeyDerivationMode::ExternalHmacSha256;
         assert!(
             !validate_config(&config)
                 .iter()

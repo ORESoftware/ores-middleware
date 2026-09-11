@@ -1,6 +1,4 @@
-use ores_middleware::{
-    RateLimitDecisionKind, RateLimitFailureMode, RateLimitLayer,
-};
+use ores_middleware::{RateLimitDecisionKind, RateLimitFailureMode, RateLimitLayer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BackendOutcome {

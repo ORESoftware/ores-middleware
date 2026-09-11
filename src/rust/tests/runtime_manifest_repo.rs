@@ -27,8 +27,14 @@ fn repository_manifest_rejects_runtime_stack_path_drift() {
 #[test]
 fn repository_manifest_rejects_client_selection_for_server_installation() {
     let client = REPOSITORY_MANIFEST
-        .replace("repository_mode = \"server-only\"", "repository_mode = \"hybrid\"")
-        .replace("default_target = \"portable-adapters\"", "default_target = \"browser\"")
+        .replace(
+            "repository_mode = \"server-only\"",
+            "repository_mode = \"hybrid\"",
+        )
+        .replace(
+            "default_target = \"portable-adapters\"",
+            "default_target = \"browser\"",
+        )
         + r#"
 
 [[targets]]
@@ -39,11 +45,7 @@ middleware = "propagation-only"
 propagate_headers = ["traceparent"]
 "#;
     assert_eq!(
-        admit_server_stack(
-            &client,
-            None,
-            "contracts/fixtures/stack.minimal.json",
-        ),
+        admit_server_stack(&client, None, "contracts/fixtures/stack.minimal.json",),
         Err(RuntimeManifestError::ClientTarget)
     );
 }

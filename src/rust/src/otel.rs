@@ -14,10 +14,7 @@ pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
             "request.id".into(),
             Value::String(context.request_id.clone()),
         ),
-        (
-            "trace.id".into(),
-            Value::String(context.trace_id.clone()),
-        ),
+        ("trace.id".into(), Value::String(context.trace_id.clone())),
         (
             "request.started_at_unix_ms".into(),
             Value::from(context.started_at_unix_ms),
@@ -33,18 +30,13 @@ pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
         fields.insert("request.locale".into(), Value::String(locale.clone()));
     }
     if let Some(deadline) = context.deadline_unix_ms {
-        fields.insert(
-            "request.deadline_unix_ms".into(),
-            Value::from(deadline),
-        );
+        fields.insert("request.deadline_unix_ms".into(), Value::from(deadline));
     }
 
     let logged_in_user = context
         .user_id
         .as_ref()
-        .map(|user_id| {
-            JsonObject::from_iter([("id".into(), Value::String(user_id.clone()))])
-        })
+        .map(|user_id| JsonObject::from_iter([("id".into(), Value::String(user_id.clone()))]))
         .unwrap_or_default();
     let baggage = context
         .baggage
@@ -186,13 +178,19 @@ mod tests {
             assert_eq!(record.fields["request.id"], "request-42");
             assert_eq!(record.fields["tenant.id"], "tenant-7");
             assert_eq!(
-                record.logged_in_user.as_ref().and_then(|user| user.get("id")),
+                record
+                    .logged_in_user
+                    .as_ref()
+                    .and_then(|user| user.get("id")),
                 Some(&Value::String("user-42".into()))
             );
             let baggage = record.fields["otel.baggage"]
                 .as_object()
                 .expect("otel baggage object");
-            assert_eq!(baggage.get("otel.vendor"), Some(&Value::String("allowed".into())));
+            assert_eq!(
+                baggage.get("otel.vendor"),
+                Some(&Value::String("allowed".into()))
+            );
             assert!(!baggage.contains_key("authorization"));
         }
         assert_eq!(current_log_context(), LogContext::default());

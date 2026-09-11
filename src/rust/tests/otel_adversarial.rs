@@ -3,33 +3,26 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
 
 use axum::{
+    Router,
     body::Body,
     extract::{Extension, Request},
-    http::{header::ACCEPT, HeaderValue, StatusCode},
+    http::{HeaderValue, StatusCode, header::ACCEPT},
     routing::get,
-    Router,
-};
-use ores_middleware::{
-    default_config,
-    frameworks::axum::install_with_ores_logger,
-    AuthDecision,
-    AuthVerifier,
-    IntegrationError,
-    MiddlewareStack,
-    RequestContext,
-    RequestLogger,
-    RequestMetadata,
 };
 use ores_middleware::otel::{
-    current_log_context, JsonObject, Logger, LoggerError, MemoryTransport, Options, Transport,
-    Value,
+    JsonObject, Logger, LoggerError, MemoryTransport, Options, Transport, Value,
+    current_log_context,
+};
+use ores_middleware::{
+    AuthDecision, AuthVerifier, IntegrationError, MiddlewareStack, RequestContext, RequestLogger,
+    RequestMetadata, default_config, frameworks::axum::install_with_ores_logger,
 };
 use tower::ServiceExt;
 
@@ -41,7 +34,11 @@ impl AuthVerifier for HeaderAuth {
         request: &'a RequestMetadata,
     ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
         Box::pin(async move {
-            let slot = request.headers.get("x-test-slot").cloned().unwrap_or_default();
+            let slot = request
+                .headers
+                .get("x-test-slot")
+                .cloned()
+                .unwrap_or_default();
             Ok(AuthDecision {
                 user_id: Some(format!("user-{slot}")),
                 tenant_id: Some(format!("tenant-{slot}")),
@@ -124,12 +121,8 @@ async fn correlated_handler(
     }
 
     let active = current_log_context();
-    if active.fields.get("request.id")
-        != Some(&Value::String(format!("request-{slot}")))
-        || active
-            .logged_in_user
-            .get("id")
-            != Some(&Value::String(format!("user-{slot}")))
+    if active.fields.get("request.id") != Some(&Value::String(format!("request-{slot}")))
+        || active.logged_in_user.get("id") != Some(&Value::String(format!("user-{slot}")))
         || active.baggage.get("otel.slot") != Some(&slot.to_string())
         || active.baggage.contains_key("authorization")
     {
@@ -221,10 +214,12 @@ async fn parallel_axum_requests_never_cross_contaminate_log_context() {
                 Some(&Value::String(slot.to_string()))
             );
             assert!(!baggage.contains_key("authorization"));
-            assert!(!record
-                .to_json()
-                .expect("record json")
-                .contains("must-not-propagate"));
+            assert!(
+                !record
+                    .to_json()
+                    .expect("record json")
+                    .contains("must-not-propagate")
+            );
         }
     }
 }
@@ -272,12 +267,16 @@ async fn timeout_emits_timeout_and_never_completion() {
         .expect("timeout response");
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
     let records = transport.records();
-    assert!(records
-        .iter()
-        .any(|record| record.message == "request handler timed out"));
-    assert!(!records
-        .iter()
-        .any(|record| record.message == "request handler completed"));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.message == "request handler timed out")
+    );
+    assert!(
+        !records
+            .iter()
+            .any(|record| record.message == "request handler completed")
+    );
 }
 
 async fn panic_handler() -> StatusCode {
@@ -300,12 +299,16 @@ async fn panic_emits_panic_and_never_completion() {
         .expect("panic recovery response");
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let records = transport.records();
-    assert!(records
-        .iter()
-        .any(|record| record.message == "request handler panicked"));
-    assert!(!records
-        .iter()
-        .any(|record| record.message == "request handler completed"));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.message == "request handler panicked")
+    );
+    assert!(
+        !records
+            .iter()
+            .any(|record| record.message == "request handler completed")
+    );
 }
 
 #[test]

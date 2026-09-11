@@ -84,7 +84,10 @@ impl TargetBuilder {
             return Err(RuntimeManifestError::InvalidTarget);
         }
         let middleware = self.middleware.ok_or(RuntimeManifestError::InvalidTarget)?;
-        if !matches!(middleware.as_str(), "stack" | "propagation-only" | "disabled") {
+        if !matches!(
+            middleware.as_str(),
+            "stack" | "propagation-only" | "disabled"
+        ) {
             return Err(RuntimeManifestError::InvalidTarget);
         }
         if self

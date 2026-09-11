@@ -21,47 +21,46 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub use bootstrap::{config_from_env, stack_from_env, BootstrapError};
+pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
 pub use config::{
-    default_config, validate_config, MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment,
-    ValidationIssue,
+    MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
+    validate_config,
 };
 pub use context::{
-    current_context, current_logged_in_user_id, current_request_id, current_tenant_id,
-    current_trace_id, current_user_id, run_with_context, ContextRegistry, RequestContext,
+    ContextRegistry, RequestContext, current_context, current_logged_in_user_id,
+    current_request_id, current_tenant_id, current_trace_id, current_user_id, run_with_context,
 };
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
 };
 pub use middleware_order::{
-    rate_limit_posture, validate_middleware_order, MiddlewareStage, OperationClass,
-    OrderViolation, RateLimitConsistency, RateLimitPosture, DEFAULT_MIDDLEWARE_ORDER,
+    DEFAULT_MIDDLEWARE_ORDER, MiddlewareStage, OperationClass, OrderViolation,
+    RateLimitConsistency, RateLimitPosture, rate_limit_posture, validate_middleware_order,
 };
 pub use operation::{
-    run_operation_boundary, run_operation_boundary_with_cancellation,
-    run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
     OperationDescriptor, OperationFailure, OperationFailureKind, OperationOutcome, OperationScope,
-    OperationTransport,
+    OperationTransport, run_operation_boundary, run_operation_boundary_with_cancellation,
+    run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
 };
-pub use otel::{run_with_ores_log_context, to_ores_log_context, RequestLogger};
+pub use otel::{RequestLogger, run_with_ores_log_context, to_ores_log_context};
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use rate_limit::{
-    derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver,
-    RateLimitAlgorithm, RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource,
-    RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer,
-    RateLimitPrincipal, RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver,
+    DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm, RateLimitDecision,
+    RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
+    RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer, RateLimitPrincipal,
+    RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
 };
 pub use rate_limit_v2::{
-    RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError,
-    RateLimitPolicyV2, RateLimitPolicyViolation,
+    RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError, RateLimitPolicyV2,
+    RateLimitPolicyViolation,
 };
-pub use runtime_manifest::{admit_server_stack, RuntimeManifestError};
+pub use runtime_manifest::{RuntimeManifestError, admit_server_stack};
 pub use shared_auth::{
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
     SUPABASE_AUTH_DATABASE_URL_ENV, SharedAuthDataPlane, SharedAuthDatabaseEnvKeys,
-    SharedAuthDecisionMode, SharedAuthReadyStack, SharedAuthRuntimeTopology,
-    SharedAuthServerRole, SupabaseTopology,
+    SharedAuthDecisionMode, SharedAuthReadyStack, SharedAuthRuntimeTopology, SharedAuthServerRole,
+    SupabaseTopology,
 };
 
 pub const CONTRACT_VERSION: &str = "1.0.0";

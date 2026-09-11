@@ -1,13 +1,13 @@
 use std::{env, fmt, str::FromStr};
 
 use crate::{
+    IntegrationError, MiddlewareConfig, MiddlewareStack, RuntimeEnvironment, ValidationIssue,
     default_config,
     rate_limit::{
         RateLimitAlgorithm, RateLimitFailureMode, RateLimitKeyDerivationMode, RateLimitLayer,
         RateLimitSignal,
     },
-    validate_config, IntegrationError, MiddlewareConfig, MiddlewareStack,
-    RuntimeEnvironment, ValidationIssue,
+    validate_config,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,9 +69,7 @@ pub fn config_from_env(
     config_from_lookup(service_name.into(), |name| env::var(name).ok())
 }
 
-pub fn stack_from_env(
-    service_name: impl Into<String>,
-) -> Result<MiddlewareStack, BootstrapError> {
+pub fn stack_from_env(service_name: impl Into<String>) -> Result<MiddlewareStack, BootstrapError> {
     let config = config_from_env(service_name)?;
     let external_hmac = config.settings.rate_limit.enabled
         && matches!(
@@ -105,15 +103,11 @@ where
 {
     let mut config = default_config(service_name);
 
-    let environment_value = first_value(
-        &lookup,
-        &["ORES_MIDDLEWARE_ENV", "APP_ENV", "RUST_ENV"],
-    )
-    .unwrap_or_else(|| "development".to_owned());
+    let environment_value = first_value(&lookup, &["ORES_MIDDLEWARE_ENV", "APP_ENV", "RUST_ENV"])
+        .unwrap_or_else(|| "development".to_owned());
     config.environment = parse_environment(&environment_value)?;
     if matches!(config.environment, RuntimeEnvironment::Production) {
-        config.settings.rate_limit.key_derivation =
-            RateLimitKeyDerivationMode::ExternalHmacSha256;
+        config.settings.rate_limit.key_derivation = RateLimitKeyDerivationMode::ExternalHmacSha256;
         config.settings.rate_limit.failure_mode = RateLimitFailureMode::FailClosed;
     }
 
@@ -151,11 +145,9 @@ where
         Some("trusted-proxy") | Some("trusted_proxy") | Some("proxy") => {
             config.settings.tls.mode = "trusted-proxy".into();
             config.settings.tls.require_https = true;
-            config.settings.tls.trusted_proxy_cidrs = lookup(
-                "ORES_MIDDLEWARE_TRUSTED_PROXY_CIDRS",
-            )
-            .map(|value| split_csv(&value))
-            .unwrap_or_default();
+            config.settings.tls.trusted_proxy_cidrs = lookup("ORES_MIDDLEWARE_TRUSTED_PROXY_CIDRS")
+                .map(|value| split_csv(&value))
+                .unwrap_or_default();
             if config.settings.tls.trusted_proxy_cidrs.is_empty() {
                 return Err(BootstrapError::variable(
                     "ORES_MIDDLEWARE_TRUSTED_PROXY_CIDRS",
@@ -177,8 +169,7 @@ where
         config.settings.timeout_ms = parse_number(&value, "ORES_MIDDLEWARE_TIMEOUT_MS")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_MAX_BODY_BYTES") {
-        config.settings.max_body_bytes =
-            parse_number(&value, "ORES_MIDDLEWARE_MAX_BODY_BYTES")?;
+        config.settings.max_body_bytes = parse_number(&value, "ORES_MIDDLEWARE_MAX_BODY_BYTES")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_ENABLED") {
         config.settings.rate_limit.enabled =
@@ -189,10 +180,8 @@ where
             parse_number(&value, "ORES_MIDDLEWARE_RATE_LIMIT_CAPACITY")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_REFILL_PER_SECOND") {
-        config.settings.rate_limit.refill_per_second = parse_float(
-            &value,
-            "ORES_MIDDLEWARE_RATE_LIMIT_REFILL_PER_SECOND",
-        )?;
+        config.settings.rate_limit.refill_per_second =
+            parse_float(&value, "ORES_MIDDLEWARE_RATE_LIMIT_REFILL_PER_SECOND")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_POLICY_ID") {
         config.settings.rate_limit.policy_id =
@@ -207,26 +196,20 @@ where
             parse_rate_limit_layer(&value, "ORES_MIDDLEWARE_RATE_LIMIT_LAYER")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE") {
-        config.settings.rate_limit.failure_mode = parse_rate_limit_failure_mode(
-            &value,
-            "ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE",
-        )?;
+        config.settings.rate_limit.failure_mode =
+            parse_rate_limit_failure_mode(&value, "ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_WINDOW_MS") {
         config.settings.rate_limit.window_ms =
             parse_number(&value, "ORES_MIDDLEWARE_RATE_LIMIT_WINDOW_MS")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES") {
-        config.settings.rate_limit.local_cache_max_entries = parse_number(
-            &value,
-            "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES",
-        )?;
+        config.settings.rate_limit.local_cache_max_entries =
+            parse_number(&value, "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS") {
-        config.settings.rate_limit.local_cache_ttl_ms = parse_number(
-            &value,
-            "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS",
-        )?;
+        config.settings.rate_limit.local_cache_ttl_ms =
+            parse_number(&value, "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_NAMESPACE") {
         config.settings.rate_limit.key_namespace =
@@ -237,26 +220,20 @@ where
             parse_non_empty(&value, "ORES_MIDDLEWARE_RATE_LIMIT_KEY_VERSION")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION") {
-        config.settings.rate_limit.key_derivation = parse_rate_limit_key_derivation(
-            &value,
-            "ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION",
-        )?;
+        config.settings.rate_limit.key_derivation =
+            parse_rate_limit_key_derivation(&value, "ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY") {
         config.settings.rate_limit.key_by =
             parse_rate_limit_signals(&value, "ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_CONTEXT_REGISTRY_MAX_ENTRIES") {
-        config.settings.context_registry_max_entries = parse_number(
-            &value,
-            "ORES_MIDDLEWARE_CONTEXT_REGISTRY_MAX_ENTRIES",
-        )?;
+        config.settings.context_registry_max_entries =
+            parse_number(&value, "ORES_MIDDLEWARE_CONTEXT_REGISTRY_MAX_ENTRIES")?;
     }
     if let Some(value) = lookup("ORES_MIDDLEWARE_CONTEXT_REGISTRY_TTL_MS") {
-        config.settings.context_registry_ttl_ms = parse_number(
-            &value,
-            "ORES_MIDDLEWARE_CONTEXT_REGISTRY_TTL_MS",
-        )?;
+        config.settings.context_registry_ttl_ms =
+            parse_number(&value, "ORES_MIDDLEWARE_CONTEXT_REGISTRY_TTL_MS")?;
     }
 
     let issues = validate_config(&config);
@@ -340,9 +317,7 @@ fn parse_rate_limit_algorithm(
     variable: &str,
 ) -> Result<RateLimitAlgorithm, BootstrapError> {
     match normalized_owned(value).as_str() {
-        "token-bucket" | "token_bucket" | "tokenbucket" => {
-            Ok(RateLimitAlgorithm::TokenBucket)
-        }
+        "token-bucket" | "token_bucket" | "tokenbucket" => Ok(RateLimitAlgorithm::TokenBucket),
         "sliding-window-counter" | "sliding_window_counter" => {
             Ok(RateLimitAlgorithm::SlidingWindowCounter)
         }
@@ -352,15 +327,10 @@ fn parse_rate_limit_algorithm(
     }
 }
 
-fn parse_rate_limit_layer(
-    value: &str,
-    variable: &str,
-) -> Result<RateLimitLayer, BootstrapError> {
+fn parse_rate_limit_layer(value: &str, variable: &str) -> Result<RateLimitLayer, BootstrapError> {
     match normalized_owned(value).as_str() {
         "cloudflare-edge" | "cloudflare" | "edge" => Ok(RateLimitLayer::CloudflareEdge),
-        "kubernetes-ingress" | "k8s-ingress" | "ingress" => {
-            Ok(RateLimitLayer::KubernetesIngress)
-        }
+        "kubernetes-ingress" | "k8s-ingress" | "ingress" => Ok(RateLimitLayer::KubernetesIngress),
         "service-mesh" | "mesh" | "sidecar" => Ok(RateLimitLayer::ServiceMesh),
         "application" | "app" => Ok(RateLimitLayer::Application),
         "authorization" | "auth" => Ok(RateLimitLayer::Authorization),
@@ -375,9 +345,7 @@ fn parse_rate_limit_failure_mode(
     match normalized_owned(value).as_str() {
         "fail-open" | "fail_open" => Ok(RateLimitFailureMode::FailOpen),
         "fail-closed" | "fail_closed" => Ok(RateLimitFailureMode::FailClosed),
-        "local-only" | "local_only" | "local-fallback" => {
-            Ok(RateLimitFailureMode::LocalOnly)
-        }
+        "local-only" | "local_only" | "local-fallback" => Ok(RateLimitFailureMode::LocalOnly),
         other => Err(invalid_rate_limit_value(variable, other)),
     }
 }
@@ -390,9 +358,7 @@ fn parse_rate_limit_key_derivation(
         "ephemeral-hmac-sha256" | "ephemeral" => {
             Ok(RateLimitKeyDerivationMode::EphemeralHmacSha256)
         }
-        "external-hmac-sha256" | "external" => {
-            Ok(RateLimitKeyDerivationMode::ExternalHmacSha256)
-        }
+        "external-hmac-sha256" | "external" => Ok(RateLimitKeyDerivationMode::ExternalHmacSha256),
         other => Err(invalid_rate_limit_value(variable, other)),
     }
 }
@@ -415,10 +381,7 @@ fn parse_rate_limit_signals(
         .collect()
 }
 
-fn parse_rate_limit_signal(
-    value: &str,
-    variable: &str,
-) -> Result<RateLimitSignal, BootstrapError> {
+fn parse_rate_limit_signal(value: &str, variable: &str) -> Result<RateLimitSignal, BootstrapError> {
     match normalized_owned(value).as_str() {
         "ip" => Ok(RateLimitSignal::Ip),
         "ip-prefix" | "ip_prefix" => Ok(RateLimitSignal::IpPrefix),
@@ -528,7 +491,10 @@ mod tests {
     #[test]
     fn parses_layered_rate_limit_policy() {
         let config = from(&[
-            ("ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM", "sliding-window-counter"),
+            (
+                "ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM",
+                "sliding-window-counter",
+            ),
             ("ORES_MIDDLEWARE_RATE_LIMIT_LAYER", "service-mesh"),
             ("ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE", "fail-closed"),
             (
