@@ -69,12 +69,12 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
 
-      - name: Install checksum-verified Zed 0.2.3
+      - name: Install checksum-verified Zed 0.3.0
         shell: bash
         run: |
           set -euo pipefail
-          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.2.3/zed-x86_64-unknown-linux-gnu.tar.gz'
-          readonly expected='b8f81a8e4943cbaeb47153386819a911dcf02666a8709c5bd013e4f35b1ba1b9'
+          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.3.0/zed-x86_64-unknown-linux-gnu.tar.gz'
+          readonly expected='f87576bc289e43ed647902527e7be70566445d2f1fd11249f067ab35547d4b8a'
           mkdir -p "$RUNNER_TEMP/zed-dist"
           curl --fail --location --proto '=https' --tlsv1.2 \
             --retry 5 --retry-all-errors \
