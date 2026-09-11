@@ -1,4 +1,5 @@
 name: rust-reproducibility
+# Rust source below this gate is normalized with the same pinned rustfmt 1.95.0 toolchain.
 
 on:
   pull_request:
