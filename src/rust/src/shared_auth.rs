@@ -5,17 +5,11 @@
 //! The protected boundary requires two explicit provider verifiers and applies
 //! the configured paired-provider policy before producing an `AuthDecision`.
 
-use std::{
-    collections::BTreeMap,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::{
-    config::IntegrationMode, validate_config, ActiveRequest, AuthDecision, AuthVerifier,
-    IntegrationError, MiddlewareConfig, MiddlewareError, MiddlewareStack, RequestMetadata,
-    ValidationIssue,
+    ActiveRequest, AuthDecision, AuthVerifier, IntegrationError, MiddlewareConfig, MiddlewareError,
+    MiddlewareStack, RequestMetadata, ValidationIssue, config::IntegrationMode, validate_config,
 };
 
 pub const SUPABASE_AUTH_DATABASE_URL_ENV: &str = "SUPABASE_AUTH_DATABASE_URL";
@@ -235,8 +229,7 @@ impl SharedAuthRuntimeTopology {
                 "Shared Auth audience must not be empty",
             ));
         }
-        if self.server_role.is_admin()
-            && self.decision_mode != SharedAuthDecisionMode::StrictPaired
+        if self.server_role.is_admin() && self.decision_mode != SharedAuthDecisionMode::StrictPaired
         {
             issues.push(ValidationIssue::new(
                 "/sharedAuthTopology/decisionMode",
@@ -362,9 +355,8 @@ pub trait SharedAuthProviderVerifier: Send + Sync {
         context: &'a SharedAuthProviderContext,
     ) -> Pin<
         Box<
-            dyn Future<
-                    Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>,
-                > + Send
+            dyn Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+                + Send
                 + 'a,
         >,
     >;
@@ -458,10 +450,7 @@ impl SharedAuthReadyStack {
         &self.topology
     }
 
-    pub async fn begin(
-        &self,
-        request: RequestMetadata,
-    ) -> Result<ActiveRequest, MiddlewareError> {
+    pub async fn begin(&self, request: RequestMetadata) -> Result<ActiveRequest, MiddlewareError> {
         self.inner.begin(request).await
     }
 
@@ -491,9 +480,7 @@ where
         request: &'a RequestMetadata,
     ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
         Box::pin(async move {
-            let supabase_context = self
-                .topology
-                .provider_context(SharedAuthProvider::Supabase);
+            let supabase_context = self.topology.provider_context(SharedAuthProvider::Supabase);
             let neon_context = self.topology.provider_context(SharedAuthProvider::Neon);
 
             let supabase = checked_provider_outcome(
@@ -595,21 +582,18 @@ fn decide_auth(
                 CheckedProviderOutcome::Verified(supabase),
                 CheckedProviderOutcome::Verified(neon),
             ) => reconcile_verified_pair(topology, *supabase, *neon),
-            (
-                CheckedProviderOutcome::Verified(principal),
-                CheckedProviderOutcome::Unavailable,
-            ) => single_provider_decision(topology, *principal, SharedAuthProvider::Neon),
-            (
-                CheckedProviderOutcome::Unavailable,
-                CheckedProviderOutcome::Verified(principal),
-            ) => single_provider_decision(topology, *principal, SharedAuthProvider::Supabase),
-            (
-                CheckedProviderOutcome::Unavailable,
-                CheckedProviderOutcome::Unavailable,
-            ) => Err(IntegrationError {
-                code: "shared_auth_all_providers_unavailable",
-                message: "no Shared Auth provider could establish a verified principal".into(),
-            }),
+            (CheckedProviderOutcome::Verified(principal), CheckedProviderOutcome::Unavailable) => {
+                single_provider_decision(topology, *principal, SharedAuthProvider::Neon)
+            }
+            (CheckedProviderOutcome::Unavailable, CheckedProviderOutcome::Verified(principal)) => {
+                single_provider_decision(topology, *principal, SharedAuthProvider::Supabase)
+            }
+            (CheckedProviderOutcome::Unavailable, CheckedProviderOutcome::Unavailable) => {
+                Err(IntegrationError {
+                    code: "shared_auth_all_providers_unavailable",
+                    message: "no Shared Auth provider could establish a verified principal".into(),
+                })
+            }
         },
     }
 }
@@ -695,7 +679,7 @@ fn valid_https_issuer(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, RuntimeEnvironment};
+    use crate::{RuntimeEnvironment, default_config};
 
     #[derive(Clone)]
     struct StaticProviderVerifier {
@@ -734,12 +718,8 @@ mod tests {
             _context: &'a SharedAuthProviderContext,
         ) -> Pin<
             Box<
-                dyn Future<
-                        Output = Result<
-                            SharedAuthVerifiedPrincipal,
-                            SharedAuthProviderFailure,
-                        >,
-                    > + Send
+                dyn Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+                    + Send
                     + 'a,
             >,
         > {
@@ -840,10 +820,7 @@ mod tests {
                 "oresoftware",
                 "https://supabase.example.invalid/auth/v1",
             ),
-            SharedAuthProviderTopology::new(
-                "messaging-intel",
-                "https://neon.example.invalid/auth",
-            ),
+            SharedAuthProviderTopology::new("messaging-intel", "https://neon.example.invalid/auth"),
             SharedAuthServerRole::ApiServer,
             "msgint",
             SharedAuthDecisionMode::AvailabilityFirst,
