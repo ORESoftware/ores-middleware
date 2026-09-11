@@ -5,12 +5,14 @@ on:
     paths:
       - '.ores-otel.toml'
       - '.github/workflows/ores-otel-config-contract.yml'
+      - 'scripts/test_ores_otel_runtime_config.py'
       - 'validation/evidence/ores-otel-config-v1/**'
   push:
     branches: [main]
     paths:
       - '.ores-otel.toml'
       - '.github/workflows/ores-otel-config-contract.yml'
+      - 'scripts/test_ores_otel_runtime_config.py'
       - 'validation/evidence/ores-otel-config-v1/**'
   workflow_dispatch:
 
@@ -73,6 +75,12 @@ jobs:
           contract_ir: .contract/tjsv-contract-ir.json
           output_dir: .contract/generated
           quiet: 'false'
+
+      - name: Resolve and consume effective server telemetry config
+        env:
+          EXPECTED_OTEL_SERVICE_NAME: ores-middleware
+          OTEL_EXPORTER_OTLP_ENDPOINT: https://collector.invalid/ores-otel-runtime-config-test
+        run: python3 scripts/test_ores_otel_runtime_config.py
 
       - name: Prove admitted sources stayed read-only
         run: |
