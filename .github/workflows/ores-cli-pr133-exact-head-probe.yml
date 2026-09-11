@@ -1,0 +1,133 @@
+name: Ores CLI PR133 exact-head probe
+
+on:
+  push:
+    branches:
+      - DEN-390-ores-cli-pr133-exact-head-probe
+  pull_request:
+    paths:
+      - .github/workflows/ores-cli-pr133-exact-head-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-cli-pr133-exact-head-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORES_CLI_SHA: 0fec862d2bc29be7bd0cc884bdd51bf3920544c1
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - name: Require private-source read credential
+        env:
+          FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN" || {
+            echo 'FLEET_GITHUB_READ_TOKEN is unavailable to this repository' >&2
+            exit 1
+          }
+
+      - name: Check out exact ores-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-cli
+          ref: ${{ env.ORES_CLI_SHA }}
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: ores-cli
+
+      - name: Verify immutable candidate and change hygiene
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ORES_CLI_SHA"
+          git diff --check
+          status=0
+          git grep -n -I -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':(exclude)Cargo.lock' || status=$?
+          test "$status" -eq 1
+          for path in \
+            src/audit/workflow_permissions.rs \
+            src/audit/docker_base_pins.rs \
+            src/audit/cargo_git_pins.rs \
+            src/audit/cli_secret_flag_hygiene.rs \
+            src/audit/flags2env_source_hygiene.rs \
+            src/audit/flags2env_submodule_source_hygiene.rs; do
+            test -f "$path"
+          done
+          test "$(git hash-object src/audit/workflow_permissions.rs)" = d57639058b70ec58346dae88c7952eb0a4dcf5ab
+          test "$(git hash-object src/audit/docker_base_pins.rs)" = 1facf8469824ba5170d4b421969639394bdf9629
+          test "$(git hash-object src/audit/cargo_git_pins.rs)" = 0a64afbc770bec944c95a8c188e252ee083de120
+          test "$(git hash-object src/audit/cli_secret_flag_hygiene.rs)" = c9a0297f4f799a6b2ae4473c83a616aefa4be395
+          test "$(git hash-object src/audit/flags2env_source_hygiene.rs)" = 558934d54956cc91609552fde02b61b030737c49
+          test "$(git hash-object src/audit/flags2env_submodule_source_hygiene.rs)" = 0e67dbe518fd7f2f1c68a2e21624ef82adf118f5
+
+      - name: Verify shell integration assets
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          bash -n post-install.sh
+          bash -n reconcile-selected-orgs.sh
+          bash -n tests/post_install.sh
+          bash -n tests/reconcile_selected_orgs.sh
+          bash tests/post_install.sh
+          bash tests/reconcile_selected_orgs.sh
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Verify committed dependency graph
+        working-directory: ores-cli
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check formatting
+        working-directory: ores-cli
+        run: cargo fmt --all --check
+
+      - name: Compile all targets
+        working-directory: ores-cli
+        run: cargo check --all-targets --all-features --locked
+
+      - name: Run focused source-governance regressions
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo test --locked workflow_permissions::tests::
+          cargo test --locked docker_base_pins::tests::
+          cargo test --locked cargo_git_pins::tests::
+          cargo test --locked cli_secret_flag_hygiene::tests::
+          cargo test --locked flags2env_source_hygiene::tests::
+          cargo test --locked flags2env_submodule_source_hygiene::tests::
+
+      - name: Run all Rust tests
+        working-directory: ores-cli
+        run: cargo test --all-targets --all-features --locked
+
+      - name: Reject Clippy warnings
+        working-directory: ores-cli
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run ores-cli repository self-audit
+        working-directory: ores-cli
+        run: cargo run --quiet --locked -- audit repo --path . --profile rust-cli
+
+      - name: Run ores-cli package self-audit
+        working-directory: ores-cli
+        run: cargo run --quiet --locked -- audit package --path .
+
+      - name: Prove validation left source clean
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
