@@ -63,8 +63,8 @@ defmodule OresMiddleware.Integrations do
 
   defp post_json(endpoint, body, headers) do
     request =
-      {String.to_charlist(endpoint),
-       [{~c"content-type", ~c"application/json"} | headers], ~c"application/json", body}
+      {String.to_charlist(endpoint), [{~c"content-type", ~c"application/json"} | headers],
+       ~c"application/json", body}
 
     case :httpc.request(
            :post,
