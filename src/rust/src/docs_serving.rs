@@ -110,16 +110,13 @@ impl DocsDecision {
     }
 
     fn reject(action: Action, status: u16, allow: bool) -> Self {
-        let mut headers = base_headers("application/json; charset=utf-8");
-        if allow {
-            headers.insert("Allow".into(), "GET, HEAD".into());
-        }
+        let allow_header = allow.then(|| ("Allow".into(), "GET, HEAD".into()));
         Self {
             action,
             status: Some(status),
             representation: None,
             head_only: false,
-            headers,
+            headers: with_headers(base_headers("application/json; charset=utf-8"), allow_header),
         }
     }
 }
@@ -129,6 +126,16 @@ struct MediaRange {
     media: String,
     quality: f32,
     index: usize,
+}
+
+fn with_headers<I>(
+    base: BTreeMap<String, String>,
+    additions: I,
+) -> BTreeMap<String, String>
+where
+    I: IntoIterator<Item = (String, String)>,
+{
+    base.into_iter().chain(additions).collect()
 }
 
 fn base_headers(content_type: &str) -> BTreeMap<String, String> {
@@ -150,18 +157,25 @@ fn representation_headers(
     representation: Representation,
     docs_digest: Option<&str>,
 ) -> BTreeMap<String, String> {
-    let mut headers = base_headers(representation.content_type());
-    if representation == Representation::Html {
-        headers.insert("X-Frame-Options".into(), "DENY".into());
-        headers.insert(
+    let frame_header = (representation == Representation::Html)
+        .then(|| ("X-Frame-Options".into(), "DENY".into()));
+    let csp_header = (representation == Representation::Html).then(|| {
+        (
             "Content-Security-Policy".into(),
             "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'none'; connect-src 'none'; script-src 'none'".into(),
-        );
-    }
-    if let Some(digest) = docs_digest.filter(|value| !value.trim().is_empty()) {
-        headers.insert(CONTRACT_DIGEST_HEADER.into(), digest.trim().into());
-    }
-    headers
+        )
+    });
+    let digest_header = docs_digest
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|digest| (CONTRACT_DIGEST_HEADER.into(), digest.into()));
+
+    base_headers(representation.content_type())
+        .into_iter()
+        .chain(frame_header)
+        .chain(csp_header)
+        .chain(digest_header)
+        .collect()
 }
 
 fn fixed_representation(path: &str) -> Option<Representation> {
@@ -183,6 +197,10 @@ fn parse_accept(value: Option<&str>) -> Vec<MediaRange> {
     let Some(value) = value.filter(|item| !item.trim().is_empty()) else {
         return Vec::new();
     };
+    // This mutable state is intentionally parser-local and never aliases caller
+    // data. Keeping one bounded accumulator avoids extra intermediate vectors
+    // while parsing and sorting Accept ranges; the immutable-value rule applies
+    // to the domain decisions returned from this parser boundary.
     let mut ranges = Vec::new();
     for (index, raw_part) in value.split(',').enumerate() {
         let mut pieces = raw_part.split(';');
@@ -367,6 +385,26 @@ mod tests {
 
     fn optional(value: &str) -> Option<&str> {
         (value != "-").then_some(value)
+    }
+
+    #[test]
+    fn decisions_own_independent_header_maps() {
+        let request = DocsRequest {
+            method: "GET",
+            path: "/docs/api",
+            accept: Some("text/html"),
+            format: None,
+            runtime_contract_digest: None,
+            docs_contract_digest: None,
+        };
+        let mut first = decide(request);
+        let second = decide(request);
+
+        first.headers.insert("X-Test".into(), "changed".into());
+
+        assert_eq!(first.headers.get("X-Test").map(String::as_str), Some("changed"));
+        assert!(!second.headers.contains_key("X-Test"));
+        assert_eq!(second.action, Action::Serve);
     }
 
     #[test]
