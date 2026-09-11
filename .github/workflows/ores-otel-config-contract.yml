@@ -5,11 +5,13 @@ on:
     paths:
       - '.ores-otel.toml'
       - '.github/workflows/ores-otel-config-contract.yml'
+      - 'validation/evidence/ores-otel-config-v1/**'
   push:
     branches: [main]
     paths:
       - '.ores-otel.toml'
       - '.github/workflows/ores-otel-config-contract.yml'
+      - 'validation/evidence/ores-otel-config-v1/**'
   workflow_dispatch:
 
 permissions:
@@ -35,17 +37,18 @@ jobs:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
-      - name: Check out merged telemetry contract authority
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: ores-otel/ores-otel-interfaces
-          ref: b544872d13323de7be19a9d5879c419149679f7a
-          path: .contract/ores-otel-interfaces
-          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
-          persist-credentials: false
-
-      - name: Verify telemetry authority revision
-        run: test "$(git -C .contract/ores-otel-interfaces rev-parse HEAD)" = "b544872d13323de7be19a9d5879c419149679f7a"
+      - name: Verify immutable telemetry authority evidence
+        env:
+          AUTHORITY_REPOSITORY: ores-otel/ores-otel-interfaces
+          AUTHORITY_REVISION: b544872d13323de7be19a9d5879c419149679f7a
+          TYPESPEC_BLOB: f6a21d7c29ddd62a4d2e7e8743f88e55eb77a0d8
+          JSON_SCHEMA_BLOB: adbc84d51ec3adace217582dbcbcba1b7f4983a7
+        run: |
+          set -euo pipefail
+          test "$AUTHORITY_REPOSITORY" = "ores-otel/ores-otel-interfaces"
+          test "$AUTHORITY_REVISION" = "b544872d13323de7be19a9d5879c419149679f7a"
+          test "$(git hash-object validation/evidence/ores-otel-config-v1/main.tsp)" = "$TYPESPEC_BLOB"
+          test "$(git hash-object validation/evidence/ores-otel-config-v1/authored.schema.json)" = "$JSON_SCHEMA_BLOB"
 
       - name: Parse TOML into the cross-runtime contract object
         run: |
@@ -63,10 +66,16 @@ jobs:
       - name: Enforce both authored authorities with TJSV
         uses: ORESoftware/typespec-json-schema-validator@4a5d049218adc2740d4cf78f612caf7f38f6f64c
         with:
-          typespec: .contract/ores-otel-interfaces/contracts/ores-otel-config.v1/main.tsp
-          schema: .contract/ores-otel-interfaces/contracts/ores-otel-config.v1/authored.schema.json
+          typespec: validation/evidence/ores-otel-config-v1/main.tsp
+          schema: validation/evidence/ores-otel-config-v1/authored.schema.json
           instances: .contract/instances
           report: .contract/tjsv-report.json
           contract_ir: .contract/tjsv-contract-ir.json
           output_dir: .contract/generated
           quiet: 'false'
+
+      - name: Prove admitted sources stayed read-only
+        run: |
+          git diff --exit-code -- .ores-otel.toml \
+            validation/evidence/ores-otel-config-v1/main.tsp \
+            validation/evidence/ores-otel-config-v1/authored.schema.json
