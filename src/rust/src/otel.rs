@@ -18,10 +18,7 @@ pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
             "request.id".into(),
             Value::String(context.request_id.clone()),
         )),
-        Some((
-            "trace.id".into(),
-            Value::String(context.trace_id.clone()),
-        )),
+        Some(("trace.id".into(), Value::String(context.trace_id.clone()))),
         Some((
             "request.started_at_unix_ms".into(),
             Value::from(context.started_at_unix_ms),
@@ -38,12 +35,9 @@ pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
             .locale
             .as_ref()
             .map(|locale| ("request.locale".into(), Value::String(locale.clone()))),
-        context.deadline_unix_ms.map(|deadline| {
-            (
-                "request.deadline_unix_ms".into(),
-                Value::from(deadline),
-            )
-        }),
+        context
+            .deadline_unix_ms
+            .map(|deadline| ("request.deadline_unix_ms".into(), Value::from(deadline))),
     ]
     .into_iter()
     .flatten()
@@ -176,7 +170,10 @@ mod tests {
             .insert("otel.vendor".into(), "changed".into());
 
         assert_eq!(source.tenant_id.as_deref(), Some("tenant-7"));
-        assert_eq!(source.baggage.get("otel.vendor").map(String::as_str), Some("allowed"));
+        assert_eq!(
+            source.baggage.get("otel.vendor").map(String::as_str),
+            Some("allowed")
+        );
     }
 
     #[tokio::test]
