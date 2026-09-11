@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           descriptor="$(npm --prefix src/ts run --silent descriptor)"
-          printf '%s\n' "$descriptor" | grep -Eq '"language"[[:space:]]*:[[:space:]]*"typescript"'
+          printf '%s\n' "$descriptor" | grep -Eq '"language"[[:space:]]*:[[:space:]]*"ts"'
           printf '%s\n' "$descriptor" | grep -Eq '"contractVersion"[[:space:]]*:[[:space:]]*"1\.0\.0"'
       - name: Audit publishable package boundary
         shell: bash
