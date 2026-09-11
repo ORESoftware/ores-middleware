@@ -85,7 +85,7 @@ func TestOresLoggerParallelRequestsRemainIsolated(t *testing.T) {
 				UserID:   request.Header.Get("X-Test-User"),
 				TenantID: request.Header.Get("X-Test-Tenant"),
 				Claims: map[string]string{
-					"otel.slot":    request.Header.Get("X-Test-Slot"),
+					"otel.slot":     request.Header.Get("X-Test-Slot"),
 					"authorization": "must-not-propagate",
 				},
 			}, nil
