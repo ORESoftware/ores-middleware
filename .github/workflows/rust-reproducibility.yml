@@ -54,7 +54,9 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
 
-      - name: Require whole-crate rustfmt reproducibility
+      - name: Classify whole-crate rustfmt reproducibility
+        id: rustfmt
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -117,3 +119,15 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git diff --exit-code -- Cargo.toml Cargo.lock src/rust
+
+      - name: Enforce reproducibility latch
+        if: ${{ always() }}
+        shell: bash
+        env:
+          RUSTFMT_OUTCOME: ${{ steps.rustfmt.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$RUSTFMT_OUTCOME" != "success" ]; then
+            echo "Rust source is not reproducible under pinned rustfmt 1.95.0" >&2
+            exit 1
+          fi
