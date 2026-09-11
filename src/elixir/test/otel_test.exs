@@ -41,7 +41,10 @@ defmodule OresMiddleware.OTelTest do
     %{logger: logger, context: context}
   end
 
-  test "request logger closures retain authenticated correlation", %{logger: logger, context: context} do
+  test "request logger closures retain authenticated correlation", %{
+    logger: logger,
+    context: context
+  } do
     request_logger = OTel.request_logger(logger, context)
 
     assert {:ok, record} = request_logger.warn.("slow dependency")

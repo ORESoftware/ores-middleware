@@ -1,0 +1,116 @@
+name: elixir-reproducibility
+# Elixir source below this gate is normalized with the same pinned 1.18.4 formatter.
+
+on:
+  pull_request:
+    paths:
+      - src/elixir/**
+      - .github/workflows/elixir-reproducibility.yml
+  push:
+    branches: [main, dev]
+    paths:
+      - src/elixir/**
+      - .github/workflows/elixir-reproducibility.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elixir-reproducibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  elixir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+
+      - name: Install pinned BEAM toolchain
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          elixir-version: "1.18.4"
+          rebar3-version: "3.24.0"
+
+      - name: Resolve dependencies without lock drift
+        working-directory: src/elixir
+        shell: bash
+        run: |
+          set -euo pipefail
+          mix local.hex --force
+          mix deps.get
+          git diff --exit-code -- mix.lock
+
+      - name: Compile with warnings denied
+        working-directory: src/elixir
+        shell: bash
+        run: |
+          set -euo pipefail
+          mix compile --warnings-as-errors
+
+      - name: Classify formatter reproducibility
+        id: format
+        continue-on-error: true
+        working-directory: src/elixir
+        shell: bash
+        run: |
+          set -euo pipefail
+          mix format --check-formatted "lib/**/*.ex" "test/**/*.exs" mix.exs
+
+      - name: Run native Elixir middleware tests
+        working-directory: src/elixir
+        shell: bash
+        run: |
+          set -euo pipefail
+          mix test --trace
+
+      - name: Require pure JSON runtime descriptor
+        working-directory: src/elixir
+        shell: bash
+        run: |
+          set -euo pipefail
+          descriptor="$(mix ores.contractcheck)"
+          printf '%s\n' "$descriptor" | jq -e '
+            .contractVersion == "1.0.0" and
+            .language == "elixir" and
+            (.frameworkAdapters | index("plug")) != null and
+            (.capabilities | index("request-context")) != null and
+            (.capabilities | index("structured-logging")) != null and
+            (.capabilities | index("auth")) != null
+          '
+
+      - name: Prove validation did not rewrite tracked Elixir source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code -- src/elixir
+
+      - name: Enforce formatter reproducibility latch
+        if: ${{ always() }}
+        shell: bash
+        env:
+          FORMAT_OUTCOME: ${{ steps.format.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$FORMAT_OUTCOME" != "success" ]; then
+            echo "Elixir source is not reproducible under pinned mix format" >&2
+            exit 1
+          fi

@@ -4,7 +4,6 @@ defmodule Mix.Tasks.Ores.Contractcheck do
   @shortdoc "Prints the runtime adapter descriptor"
   @impl true
   def run(_args) do
-    Mix.Task.run("app.start")
     IO.puts(OresMiddleware.descriptor_json())
   end
 end
