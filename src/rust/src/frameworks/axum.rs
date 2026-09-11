@@ -230,15 +230,32 @@ async fn dispatch(
         .stack
         .finish(active, response.status().as_u16(), None)
         .await;
-    for (name, value) in headers {
-        if let (Ok(name), Ok(value)) = (HeaderName::try_from(name), HeaderValue::try_from(value)) {
-            response.headers_mut().insert(name, value);
-        }
-    }
+    apply_finish_headers(&mut response, headers);
     response
         .headers_mut()
         .append("vary", HeaderValue::from_static("accept, accept-encoding"));
     response
+}
+
+fn apply_finish_headers(
+    response: &mut Response,
+    headers: impl IntoIterator<Item = (String, String)>,
+) {
+    for (name, value) in headers {
+        if let (Ok(name), Ok(value)) = (HeaderName::try_from(name), HeaderValue::try_from(value)) {
+            // A route-specific CSP can add stronger representation constraints such as `sandbox`.
+            // Preserve both policies instead of replacing the handler policy with the middleware
+            // default: user agents enforce multiple CSP fields cumulatively, so appending cannot
+            // weaken the middleware baseline while retaining route-level restrictions.
+            if name.as_str() == "content-security-policy"
+                && response.headers().contains_key(&name)
+            {
+                response.headers_mut().append(name, value);
+            } else {
+                response.headers_mut().insert(name, value);
+            }
+        }
+    }
 }
 
 fn emit_request_log(event: Event, phase: &'static str) {
@@ -369,5 +386,53 @@ stack_config = "config/middleware.json"
         assert_eq!(error.code, "runtime_stack_config_mismatch");
         assert!(error.variable.is_none());
         assert!(!error.message.contains("config/other.json"));
+    }
+}
+
+#[cfg(test)]
+mod response_header_precedence_tests {
+    use super::*;
+
+    #[test]
+    fn route_specific_csp_is_composed_with_middleware_policy() {
+        let mut response = Response::new(Body::empty());
+        response.headers_mut().insert(
+            "content-security-policy",
+            HeaderValue::from_static("sandbox"),
+        );
+
+        apply_finish_headers(
+            &mut response,
+            [("content-security-policy".to_owned(),
+              "default-src 'self'; frame-ancestors 'none'".to_owned())],
+        );
+
+        let policies = response
+            .headers()
+            .get_all("content-security-policy")
+            .iter()
+            .map(|value| value.to_str().expect("CSP header must be ASCII"))
+            .collect::<Vec<_>>();
+        assert_eq!(policies.len(), 2);
+        assert_eq!(policies[0], "sandbox");
+        assert_eq!(policies[1], "default-src 'self'; frame-ancestors 'none'");
+    }
+
+    #[test]
+    fn middleware_csp_is_inserted_when_route_has_none() {
+        let mut response = Response::new(Body::empty());
+        apply_finish_headers(
+            &mut response,
+            [("content-security-policy".to_owned(),
+              "default-src 'self'; frame-ancestors 'none'".to_owned())],
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get("content-security-policy")
+                .and_then(|value| value.to_str().ok()),
+            Some("default-src 'self'; frame-ancestors 'none'")
+        );
     }
 }
