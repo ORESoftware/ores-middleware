@@ -1,0 +1,111 @@
+name: Ores CLI PR130 exact-head probe
+
+on:
+  push:
+    branches:
+      - DEN-2843-ores-cli-pr130-exact-head-probe
+  pull_request:
+    paths:
+      - .github/workflows/ores-cli-pr130-exact-head-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-cli-pr130-exact-head-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORES_CLI_SHA: dc60b00437539d92ceddf0dce2da3aa0c27097f6
+  INFRA_STATE_BLOB: d9b5d51427226cdd18b0cdc73cfd9db072e93fe5
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Require private-source read credential
+        env:
+          FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN" || {
+            echo 'FLEET_GITHUB_READ_TOKEN is unavailable to this repository' >&2
+            exit 1
+          }
+
+      - name: Check out exact ores-cli candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-cli
+          ref: ${{ env.ORES_CLI_SHA }}
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: ores-cli
+
+      - name: Verify immutable candidate and exact provider-state module
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ORES_CLI_SHA"
+          test "$(git hash-object src/audit/infra_provider_state.rs)" = "$INFRA_STATE_BLOB"
+          git diff --check
+          status=0
+          git grep -n -I -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':(exclude)Cargo.lock' || status=$?
+          test "$status" -eq 1
+
+      - name: Verify shell integration assets
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          bash -n post-install.sh
+          bash -n reconcile-selected-orgs.sh
+          bash -n tests/post_install.sh
+          bash -n tests/reconcile_selected_orgs.sh
+          bash tests/post_install.sh
+          bash tests/reconcile_selected_orgs.sh
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Verify committed dependency graph
+        working-directory: ores-cli
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check formatting and compilation
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo check --all-targets --all-features --locked
+
+      - name: Run focused provider-state regressions
+        working-directory: ores-cli
+        run: cargo test --locked infra_provider_state::tests::
+
+      - name: Run complete Rust suite
+        working-directory: ores-cli
+        run: cargo test --all-targets --all-features --locked
+
+      - name: Reject Clippy warnings
+        working-directory: ores-cli
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run ordinary repository and package self-audits
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo run --quiet --locked -- audit repo --path . --profile rust-cli
+          cargo run --quiet --locked -- audit package --path .
+
+      - name: Prove validation left source clean
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
