@@ -1,0 +1,119 @@
+name: rust-reproducibility
+
+on:
+  pull_request:
+    paths:
+      - src/rust/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/rust-reproducibility.yml
+  push:
+    branches: [main, dev]
+    paths:
+      - src/rust/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/rust-reproducibility.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-reproducibility-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Require whole-crate rustfmt reproducibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path src/rust/Cargo.toml -- --check
+
+      - name: Clippy portable core
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --manifest-path src/rust/Cargo.toml --no-default-features --all-targets -- -D warnings
+
+      - name: Clippy default features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --manifest-path src/rust/Cargo.toml --all-targets -- -D warnings
+
+      - name: Clippy all framework features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --manifest-path src/rust/Cargo.toml --all-features --all-targets -- -D warnings
+
+      - name: Test portable core
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --all-targets
+
+      - name: Test default features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src/rust/Cargo.toml --all-targets
+
+      - name: Test all framework features
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src/rust/Cargo.toml --all-features --all-targets
+
+      - name: Validate runtime descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          descriptor="$(cargo run --quiet --locked --manifest-path src/rust/Cargo.toml --bin contractcheck)"
+          printf '%s\n' "$descriptor" | jq -e '
+            .contractVersion == "1.0.0" and
+            .language == "rust" and
+            (.capabilities | index("request-context")) != null and
+            (.capabilities | index("deadline-timeout")) != null and
+            (.capabilities | index("auth")) != null and
+            (.frameworkAdapters | index("axum")) != null
+          '
+
+      - name: Prove tests did not rewrite tracked source
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --exit-code -- Cargo.toml Cargo.lock src/rust
