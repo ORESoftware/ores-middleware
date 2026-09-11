@@ -1,4 +1,8 @@
 #![forbid(unsafe_code)]
+#![expect(
+    clippy::too_many_arguments,
+    reason = "SharedAuthVerifiedPrincipal keeps all provider, identity, tenant, session, issuer, audience, organization, and realm evidence explicit at construction"
+)]
 
 mod bootstrap;
 mod compat;
@@ -59,8 +63,10 @@ pub use runtime_manifest::{RuntimeManifestError, admit_server_stack};
 pub use shared_auth::{
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
     SUPABASE_AUTH_DATABASE_URL_ENV, SharedAuthDataPlane, SharedAuthDatabaseEnvKeys,
-    SharedAuthDecisionMode, SharedAuthReadyStack, SharedAuthRuntimeTopology, SharedAuthServerRole,
-    SupabaseTopology,
+    SharedAuthDecisionMode, SharedAuthProvider, SharedAuthProviderContext,
+    SharedAuthProviderFailure, SharedAuthProviderFailureKind, SharedAuthProviderTopology,
+    SharedAuthProviderVerifier, SharedAuthReadyStack, SharedAuthRuntimeTopology,
+    SharedAuthServerRole, SharedAuthVerifiedPrincipal,
 };
 
 pub const CONTRACT_VERSION: &str = "1.0.0";

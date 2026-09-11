@@ -1,14 +1,15 @@
 //! Fail-closed construction boundary for protected services using Shared Auth.
 //!
 //! Public/anonymous middleware may still construct `MiddlewareStack` directly.
-//! Protected product/admin services should use `SharedAuthReadyStack`, which
-//! requires an explicit verifier and a validated provider/data-plane topology.
+//! Protected customer and admin services must construct `SharedAuthReadyStack`.
+//! The protected boundary requires two explicit provider verifiers and applies
+//! the configured paired-provider policy before producing an `AuthDecision`.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::{
-    ActiveRequest, AuthVerifier, MiddlewareConfig, MiddlewareError, MiddlewareStack,
-    RequestMetadata, ValidationIssue, config::IntegrationMode, validate_config,
+    ActiveRequest, AuthDecision, AuthVerifier, IntegrationError, MiddlewareConfig, MiddlewareError,
+    MiddlewareStack, RequestMetadata, ValidationIssue, config::IntegrationMode, validate_config,
 };
 
 pub const SUPABASE_AUTH_DATABASE_URL_ENV: &str = "SUPABASE_AUTH_DATABASE_URL";
@@ -30,40 +31,34 @@ pub enum SharedAuthDataPlane {
     AdminAuth,
 }
 
+impl SharedAuthDataPlane {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CustomerAuth => "customer-auth",
+            Self::AdminAuth => "admin-auth",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SharedAuthDecisionMode {
     AvailabilityFirst,
     StrictPaired,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SupabaseTopology {
-    /// Long-term target: one Supabase organization dedicated to the GitHub org.
-    DedicatedOrganization { organization: String },
-    /// Explicit near-term exception: a shared provider organization with a
-    /// dedicated PostgreSQL schema namespace supplied by RuntimeConfig.
-    SharedSchema {
-        organization: String,
-        schema_namespace: String,
-    },
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SharedAuthProvider {
+    Supabase,
+    Neon,
 }
 
-impl SupabaseTopology {
+impl SharedAuthProvider {
     #[must_use]
-    pub fn organization(&self) -> &str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::DedicatedOrganization { organization }
-            | Self::SharedSchema { organization, .. } => organization,
-        }
-    }
-
-    #[must_use]
-    pub fn schema_namespace(&self) -> Option<&str> {
-        match self {
-            Self::DedicatedOrganization { .. } => None,
-            Self::SharedSchema {
-                schema_namespace, ..
-            } => Some(schema_namespace),
+            Self::Supabase => "supabase",
+            Self::Neon => "neon",
         }
     }
 }
@@ -104,62 +99,36 @@ impl SharedAuthServerRole {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharedAuthProviderTopology {
+    pub organization: String,
+    pub issuer: String,
+}
+
+impl SharedAuthProviderTopology {
+    #[must_use]
+    pub fn new(organization: impl Into<String>, issuer: impl Into<String>) -> Self {
+        Self {
+            organization: organization.into(),
+            issuer: issuer.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SharedAuthRuntimeTopology {
     pub github_org: String,
-    pub supabase: SupabaseTopology,
-    pub neon_org: String,
+    pub supabase: SharedAuthProviderTopology,
+    pub neon: SharedAuthProviderTopology,
     pub server_role: SharedAuthServerRole,
     pub audience: String,
     pub decision_mode: SharedAuthDecisionMode,
 }
 
 impl SharedAuthRuntimeTopology {
-    pub fn dedicated(
-        github_org: impl Into<String>,
-        neon_org: impl Into<String>,
-        server_role: SharedAuthServerRole,
-        audience: impl Into<String>,
-        decision_mode: SharedAuthDecisionMode,
-    ) -> Result<Self, Vec<ValidationIssue>> {
-        let github_org = github_org.into();
-        Self::new(
-            github_org.clone(),
-            SupabaseTopology::DedicatedOrganization {
-                organization: github_org,
-            },
-            neon_org,
-            server_role,
-            audience,
-            decision_mode,
-        )
-    }
-
-    pub fn shared_supabase_schema(
-        github_org: impl Into<String>,
-        shared_supabase_org: impl Into<String>,
-        schema_namespace: impl Into<String>,
-        neon_org: impl Into<String>,
-        server_role: SharedAuthServerRole,
-        audience: impl Into<String>,
-        decision_mode: SharedAuthDecisionMode,
-    ) -> Result<Self, Vec<ValidationIssue>> {
-        Self::new(
-            github_org,
-            SupabaseTopology::SharedSchema {
-                organization: shared_supabase_org.into(),
-                schema_namespace: schema_namespace.into(),
-            },
-            neon_org,
-            server_role,
-            audience,
-            decision_mode,
-        )
-    }
-
     pub fn new(
         github_org: impl Into<String>,
-        supabase: SupabaseTopology,
-        neon_org: impl Into<String>,
+        supabase: SharedAuthProviderTopology,
+        neon: SharedAuthProviderTopology,
         server_role: SharedAuthServerRole,
         audience: impl Into<String>,
         decision_mode: SharedAuthDecisionMode,
@@ -167,7 +136,7 @@ impl SharedAuthRuntimeTopology {
         let topology = Self {
             github_org: github_org.into(),
             supabase,
-            neon_org: neon_org.into(),
+            neon,
             server_role,
             audience: audience.into(),
             decision_mode,
@@ -178,6 +147,25 @@ impl SharedAuthRuntimeTopology {
         } else {
             Err(issues)
         }
+    }
+
+    pub fn dedicated(
+        github_org: impl Into<String>,
+        supabase_issuer: impl Into<String>,
+        neon_issuer: impl Into<String>,
+        server_role: SharedAuthServerRole,
+        audience: impl Into<String>,
+        decision_mode: SharedAuthDecisionMode,
+    ) -> Result<Self, Vec<ValidationIssue>> {
+        let github_org = github_org.into();
+        Self::new(
+            github_org.clone(),
+            SharedAuthProviderTopology::new(github_org.clone(), supabase_issuer),
+            SharedAuthProviderTopology::new(github_org, neon_issuer),
+            server_role,
+            audience,
+            decision_mode,
+        )
     }
 
     #[must_use]
@@ -191,6 +179,21 @@ impl SharedAuthRuntimeTopology {
     }
 
     #[must_use]
+    pub fn provider_context(&self, provider: SharedAuthProvider) -> SharedAuthProviderContext {
+        let topology = match provider {
+            SharedAuthProvider::Supabase => &self.supabase,
+            SharedAuthProvider::Neon => &self.neon,
+        };
+        SharedAuthProviderContext {
+            provider,
+            organization: topology.organization.clone(),
+            issuer: topology.issuer.clone(),
+            audience: self.audience.clone(),
+            data_plane: self.data_plane(),
+        }
+    }
+
+    #[must_use]
     pub fn validation_issues(&self) -> Vec<ValidationIssue> {
         let mut issues = Vec::new();
         if !valid_org_slug(&self.github_org) {
@@ -200,42 +203,24 @@ impl SharedAuthRuntimeTopology {
                 "GitHub organization must be a non-empty organization slug",
             ));
         }
-        if !valid_org_slug(&self.neon_org) || self.neon_org != self.github_org {
+        validate_provider_topology(
+            &mut issues,
+            SharedAuthProvider::Supabase,
+            &self.github_org,
+            &self.supabase,
+        );
+        validate_provider_topology(
+            &mut issues,
+            SharedAuthProvider::Neon,
+            &self.github_org,
+            &self.neon,
+        );
+        if self.supabase.issuer == self.neon.issuer {
             issues.push(ValidationIssue::new(
-                "/sharedAuthTopology/neonOrg",
-                "shared_auth_neon_org_mismatch",
-                "Neon organization must exactly match the GitHub organization",
+                "/sharedAuthTopology/providers",
+                "shared_auth_provider_issuers_must_differ",
+                "Supabase Auth and Neon Auth must use independently identified issuers",
             ));
-        }
-        match &self.supabase {
-            SupabaseTopology::DedicatedOrganization { organization } => {
-                if !valid_org_slug(organization) || organization != &self.github_org {
-                    issues.push(ValidationIssue::new(
-                        "/sharedAuthTopology/supabase/organization",
-                        "shared_auth_supabase_org_mismatch",
-                        "dedicated Supabase organization must exactly match the GitHub organization",
-                    ));
-                }
-            }
-            SupabaseTopology::SharedSchema {
-                organization,
-                schema_namespace,
-            } => {
-                if !valid_org_slug(organization) {
-                    issues.push(ValidationIssue::new(
-                        "/sharedAuthTopology/supabase/organization",
-                        "invalid_org_slug",
-                        "shared Supabase provider organization must be a valid organization slug",
-                    ));
-                }
-                if !valid_schema_namespace(schema_namespace) {
-                    issues.push(ValidationIssue::new(
-                        "/sharedAuthTopology/supabase/schemaNamespace",
-                        "shared_auth_schema_namespace_required",
-                        "shared Supabase mode requires a dedicated non-public PostgreSQL schema namespace",
-                    ));
-                }
-            }
         }
         if self.audience.trim().is_empty() {
             issues.push(ValidationIssue::new(
@@ -256,19 +241,142 @@ impl SharedAuthRuntimeTopology {
     }
 }
 
+fn validate_provider_topology(
+    issues: &mut Vec<ValidationIssue>,
+    provider: SharedAuthProvider,
+    github_org: &str,
+    topology: &SharedAuthProviderTopology,
+) {
+    if !valid_org_slug(&topology.organization) || topology.organization != github_org {
+        issues.push(ValidationIssue::new(
+            match provider {
+                SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/organization",
+                SharedAuthProvider::Neon => "/sharedAuthTopology/neon/organization",
+            },
+            "shared_auth_provider_org_mismatch",
+            "provider organization must exactly match the GitHub organization",
+        ));
+    }
+    if !valid_https_issuer(&topology.issuer) {
+        issues.push(ValidationIssue::new(
+            match provider {
+                SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/issuer",
+                SharedAuthProvider::Neon => "/sharedAuthTopology/neon/issuer",
+            },
+            "shared_auth_provider_issuer_invalid",
+            "provider issuer must be a non-empty HTTPS URL without whitespace",
+        ));
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharedAuthProviderContext {
+    pub provider: SharedAuthProvider,
+    pub organization: String,
+    pub issuer: String,
+    pub audience: String,
+    pub data_plane: SharedAuthDataPlane,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharedAuthVerifiedPrincipal {
+    pub provider: SharedAuthProvider,
+    pub subject: String,
+    pub tenant_id: String,
+    pub session_id: String,
+    pub issuer: String,
+    pub audience: String,
+    pub organization: String,
+    pub data_plane: SharedAuthDataPlane,
+}
+
+impl SharedAuthVerifiedPrincipal {
+    #[must_use]
+    pub fn new(
+        provider: SharedAuthProvider,
+        subject: impl Into<String>,
+        tenant_id: impl Into<String>,
+        session_id: impl Into<String>,
+        issuer: impl Into<String>,
+        audience: impl Into<String>,
+        organization: impl Into<String>,
+        data_plane: SharedAuthDataPlane,
+    ) -> Self {
+        Self {
+            provider,
+            subject: subject.into(),
+            tenant_id: tenant_id.into(),
+            session_id: session_id.into(),
+            issuer: issuer.into(),
+            audience: audience.into(),
+            organization: organization.into(),
+            data_plane,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SharedAuthProviderFailureKind {
+    Unavailable,
+    Rejected,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SharedAuthProviderFailure {
+    pub kind: SharedAuthProviderFailureKind,
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl SharedAuthProviderFailure {
+    #[must_use]
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            kind: SharedAuthProviderFailureKind::Unavailable,
+            code: "shared_auth_provider_unavailable",
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn rejected(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind: SharedAuthProviderFailureKind::Rejected,
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+pub trait SharedAuthProviderVerifier: Send + Sync {
+    fn verify<'a>(
+        &'a self,
+        request: &'a RequestMetadata,
+        context: &'a SharedAuthProviderContext,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+                + Send
+                + 'a,
+        >,
+    >;
+}
+
 pub struct SharedAuthReadyStack {
     inner: MiddlewareStack,
     topology: SharedAuthRuntimeTopology,
 }
 
 impl SharedAuthReadyStack {
-    pub fn new<V>(
+    pub fn new<S, N>(
         config: MiddlewareConfig,
         topology: SharedAuthRuntimeTopology,
-        verifier: V,
+        supabase_verifier: S,
+        neon_verifier: N,
     ) -> Result<Self, Vec<ValidationIssue>>
     where
-        V: AuthVerifier + 'static,
+        S: SharedAuthProviderVerifier + 'static,
+        N: SharedAuthProviderVerifier + 'static,
     {
         let mut issues = validate_config(&config);
         issues.extend(topology.validation_issues());
@@ -323,6 +431,11 @@ impl SharedAuthReadyStack {
             return Err(issues);
         }
 
+        let verifier = DualProviderAuthVerifier {
+            topology: topology.clone(),
+            supabase: supabase_verifier,
+            neon: neon_verifier,
+        };
         let inner = MiddlewareStack::new(config)?.with_auth_verifier(Arc::new(verifier));
         Ok(Self { inner, topology })
     }
@@ -351,6 +464,203 @@ impl SharedAuthReadyStack {
     }
 }
 
+struct DualProviderAuthVerifier<S, N> {
+    topology: SharedAuthRuntimeTopology,
+    supabase: S,
+    neon: N,
+}
+
+impl<S, N> AuthVerifier for DualProviderAuthVerifier<S, N>
+where
+    S: SharedAuthProviderVerifier,
+    N: SharedAuthProviderVerifier,
+{
+    fn verify<'a>(
+        &'a self,
+        request: &'a RequestMetadata,
+    ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        Box::pin(async move {
+            let supabase_context = self.topology.provider_context(SharedAuthProvider::Supabase);
+            let neon_context = self.topology.provider_context(SharedAuthProvider::Neon);
+
+            let supabase = checked_provider_outcome(
+                SharedAuthProvider::Supabase,
+                &supabase_context,
+                self.supabase.verify(request, &supabase_context).await,
+            )?;
+            let neon = checked_provider_outcome(
+                SharedAuthProvider::Neon,
+                &neon_context,
+                self.neon.verify(request, &neon_context).await,
+            )?;
+
+            decide_auth(&self.topology, supabase, neon)
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CheckedProviderOutcome {
+    Verified(Box<SharedAuthVerifiedPrincipal>),
+    Unavailable,
+}
+
+fn checked_provider_outcome(
+    provider: SharedAuthProvider,
+    context: &SharedAuthProviderContext,
+    result: Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>,
+) -> Result<CheckedProviderOutcome, IntegrationError> {
+    match result {
+        Ok(principal) => {
+            validate_verified_principal(provider, context, &principal)?;
+            Ok(CheckedProviderOutcome::Verified(Box::new(principal)))
+        }
+        Err(failure) if failure.kind == SharedAuthProviderFailureKind::Unavailable => {
+            Ok(CheckedProviderOutcome::Unavailable)
+        }
+        Err(failure) => Err(IntegrationError {
+            code: failure.code,
+            message: format!("{} authentication proof was rejected", provider.as_str()),
+        }),
+    }
+}
+
+fn validate_verified_principal(
+    provider: SharedAuthProvider,
+    context: &SharedAuthProviderContext,
+    principal: &SharedAuthVerifiedPrincipal,
+) -> Result<(), IntegrationError> {
+    let complete = [
+        principal.subject.as_str(),
+        principal.tenant_id.as_str(),
+        principal.session_id.as_str(),
+        principal.issuer.as_str(),
+        principal.audience.as_str(),
+        principal.organization.as_str(),
+    ]
+    .iter()
+    .all(|value| !value.trim().is_empty());
+
+    if !complete
+        || principal.provider != provider
+        || principal.provider != context.provider
+        || principal.organization != context.organization
+        || principal.issuer != context.issuer
+        || principal.audience != context.audience
+        || principal.data_plane != context.data_plane
+    {
+        return Err(IntegrationError {
+            code: "shared_auth_provider_evidence_mismatch",
+            message: format!(
+                "{} authentication proof did not match the configured organization, issuer, audience, or realm",
+                provider.as_str()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn decide_auth(
+    topology: &SharedAuthRuntimeTopology,
+    supabase: CheckedProviderOutcome,
+    neon: CheckedProviderOutcome,
+) -> Result<AuthDecision, IntegrationError> {
+    match topology.decision_mode {
+        SharedAuthDecisionMode::StrictPaired => match (supabase, neon) {
+            (
+                CheckedProviderOutcome::Verified(supabase),
+                CheckedProviderOutcome::Verified(neon),
+            ) => reconcile_verified_pair(topology, *supabase, *neon),
+            _ => Err(IntegrationError {
+                code: "shared_auth_strict_provider_unavailable",
+                message: "strict paired authentication requires verified Supabase and Neon proofs"
+                    .into(),
+            }),
+        },
+        SharedAuthDecisionMode::AvailabilityFirst => match (supabase, neon) {
+            (
+                CheckedProviderOutcome::Verified(supabase),
+                CheckedProviderOutcome::Verified(neon),
+            ) => reconcile_verified_pair(topology, *supabase, *neon),
+            (CheckedProviderOutcome::Verified(principal), CheckedProviderOutcome::Unavailable) => {
+                single_provider_decision(topology, *principal, SharedAuthProvider::Neon)
+            }
+            (CheckedProviderOutcome::Unavailable, CheckedProviderOutcome::Verified(principal)) => {
+                single_provider_decision(topology, *principal, SharedAuthProvider::Supabase)
+            }
+            (CheckedProviderOutcome::Unavailable, CheckedProviderOutcome::Unavailable) => {
+                Err(IntegrationError {
+                    code: "shared_auth_all_providers_unavailable",
+                    message: "no Shared Auth provider could establish a verified principal".into(),
+                })
+            }
+        },
+    }
+}
+
+fn reconcile_verified_pair(
+    topology: &SharedAuthRuntimeTopology,
+    supabase: SharedAuthVerifiedPrincipal,
+    neon: SharedAuthVerifiedPrincipal,
+) -> Result<AuthDecision, IntegrationError> {
+    if supabase.subject != neon.subject
+        || supabase.tenant_id != neon.tenant_id
+        || supabase.session_id != neon.session_id
+    {
+        return Err(IntegrationError {
+            code: "shared_auth_provider_identity_disagreement",
+            message: "Supabase and Neon proofs resolved to different canonical identities".into(),
+        });
+    }
+
+    Ok(auth_decision(topology, supabase, "verified", "verified"))
+}
+
+fn single_provider_decision(
+    topology: &SharedAuthRuntimeTopology,
+    principal: SharedAuthVerifiedPrincipal,
+    unavailable: SharedAuthProvider,
+) -> Result<AuthDecision, IntegrationError> {
+    if topology.server_role.is_admin() {
+        return Err(IntegrationError {
+            code: "shared_auth_admin_requires_strict_paired",
+            message: "admin authentication cannot use a single-provider outage path".into(),
+        });
+    }
+
+    let (supabase_status, neon_status) = match unavailable {
+        SharedAuthProvider::Supabase => ("unavailable", "verified"),
+        SharedAuthProvider::Neon => ("verified", "unavailable"),
+    };
+    Ok(auth_decision(
+        topology,
+        principal,
+        supabase_status,
+        neon_status,
+    ))
+}
+
+fn auth_decision(
+    topology: &SharedAuthRuntimeTopology,
+    principal: SharedAuthVerifiedPrincipal,
+    supabase_status: &str,
+    neon_status: &str,
+) -> AuthDecision {
+    let mut claims = BTreeMap::new();
+    claims.insert(
+        "shared_auth.data_plane".into(),
+        topology.data_plane().as_str().into(),
+    );
+    claims.insert("shared_auth.supabase".into(), supabase_status.to_owned());
+    claims.insert("shared_auth.neon".into(), neon_status.to_owned());
+
+    AuthDecision {
+        user_id: Some(principal.subject),
+        tenant_id: Some(principal.tenant_id),
+        claims,
+    }
+}
+
 fn valid_org_slug(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -360,41 +670,106 @@ fn valid_org_slug(value: &str) -> bool {
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
-fn valid_schema_namespace(value: &str) -> bool {
-    if value.eq_ignore_ascii_case("public") {
-        return false;
-    }
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+fn valid_https_issuer(value: &str) -> bool {
+    value.starts_with("https://")
+        && value.len() > "https://".len()
+        && !value.chars().any(char::is_whitespace)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, future::Future, pin::Pin};
-
     use super::*;
-    use crate::{AuthDecision, IntegrationError, RuntimeEnvironment, default_config};
+    use crate::{RuntimeEnvironment, default_config};
 
-    struct CanonicalVerifier;
+    #[derive(Clone)]
+    struct StaticProviderVerifier {
+        result: Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>,
+    }
 
-    impl AuthVerifier for CanonicalVerifier {
+    impl StaticProviderVerifier {
+        fn verified(principal: SharedAuthVerifiedPrincipal) -> Self {
+            Self {
+                result: Ok(principal),
+            }
+        }
+
+        fn unavailable() -> Self {
+            Self {
+                result: Err(SharedAuthProviderFailure::unavailable(
+                    "simulated provider outage",
+                )),
+            }
+        }
+
+        fn rejected() -> Self {
+            Self {
+                result: Err(SharedAuthProviderFailure::rejected(
+                    "shared_auth_provider_rejected",
+                    "simulated provider rejection",
+                )),
+            }
+        }
+    }
+
+    impl SharedAuthProviderVerifier for StaticProviderVerifier {
         fn verify<'a>(
             &'a self,
             _request: &'a RequestMetadata,
-        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>>
-        {
-            Box::pin(async {
-                Ok(AuthDecision {
-                    user_id: Some("user-123".into()),
-                    tenant_id: Some("tenant-456".into()),
-                    claims: BTreeMap::new(),
-                })
-            })
+            _context: &'a SharedAuthProviderContext,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            let result = self.result.clone();
+            Box::pin(async move { result })
         }
+    }
+
+    fn topology(
+        role: SharedAuthServerRole,
+        decision_mode: SharedAuthDecisionMode,
+    ) -> SharedAuthRuntimeTopology {
+        SharedAuthRuntimeTopology::dedicated(
+            "messaging-intel",
+            "https://supabase.example.invalid/auth/v1",
+            "https://neon.example.invalid/auth",
+            role,
+            if role.is_admin() {
+                "msgint-admin"
+            } else {
+                "msgint"
+            },
+            decision_mode,
+        )
+        .expect("valid dedicated topology")
+    }
+
+    fn principal(
+        provider: SharedAuthProvider,
+        role: SharedAuthServerRole,
+    ) -> SharedAuthVerifiedPrincipal {
+        let context = topology(
+            role,
+            if role.is_admin() {
+                SharedAuthDecisionMode::StrictPaired
+            } else {
+                SharedAuthDecisionMode::AvailabilityFirst
+            },
+        )
+        .provider_context(provider);
+        SharedAuthVerifiedPrincipal::new(
+            provider,
+            "user-123",
+            "tenant-456",
+            "session-789",
+            context.issuer,
+            context.audience,
+            context.organization,
+            context.data_plane,
+        )
     }
 
     fn protected_config(audience: &str) -> MiddlewareConfig {
@@ -406,6 +781,17 @@ mod tests {
         config.integrations.shared_auth.jwks_uri =
             Some("https://auth.example.invalid/.well-known/jwks.json".into());
         config
+    }
+
+    fn request() -> RequestMetadata {
+        RequestMetadata {
+            method: "GET".into(),
+            path: "/protected".into(),
+            headers: BTreeMap::new(),
+            remote_ip: None,
+            content_length: None,
+            transport_secure: true,
+        }
     }
 
     #[test]
@@ -427,88 +813,55 @@ mod tests {
     }
 
     #[test]
-    fn dedicated_supabase_requires_matching_org() {
+    fn rejects_shared_or_cross_org_provider_ownership() {
         let issues = SharedAuthRuntimeTopology::new(
             "messaging-intel",
-            SupabaseTopology::DedicatedOrganization {
-                organization: "oresoftware".into(),
-            },
-            "messaging-intel",
-            SharedAuthServerRole::ApiServer,
-            "msgint",
-            SharedAuthDecisionMode::AvailabilityFirst,
-        )
-        .expect_err("mismatched dedicated Supabase org must fail");
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.code == "shared_auth_supabase_org_mismatch")
-        );
-    }
-
-    #[test]
-    fn shared_supabase_requires_explicit_non_public_schema() {
-        let topology = SharedAuthRuntimeTopology::shared_supabase_schema(
-            "messaging-intel",
-            "oresoftware",
-            "messaging_intel",
-            "messaging-intel",
-            SharedAuthServerRole::ApiServer,
-            "msgint",
-            SharedAuthDecisionMode::AvailabilityFirst,
-        )
-        .expect("explicit shared provider plus per-org schema is valid");
-        assert_eq!(topology.supabase.organization(), "oresoftware");
-        assert_eq!(
-            topology.supabase.schema_namespace(),
-            Some("messaging_intel")
-        );
-
-        for schema in ["", "public", "bad-schema"] {
-            let issues = SharedAuthRuntimeTopology::shared_supabase_schema(
-                "messaging-intel",
+            SharedAuthProviderTopology::new(
                 "oresoftware",
-                schema,
-                "messaging-intel",
-                SharedAuthServerRole::ApiServer,
-                "msgint",
-                SharedAuthDecisionMode::AvailabilityFirst,
-            )
-            .expect_err("shared Supabase without dedicated schema must fail");
-            assert!(
-                issues
-                    .iter()
-                    .any(|issue| issue.code == "shared_auth_schema_namespace_required")
-            );
-        }
-    }
-
-    #[test]
-    fn neon_remains_dedicated_to_github_org() {
-        let issues = SharedAuthRuntimeTopology::shared_supabase_schema(
-            "messaging-intel",
-            "oresoftware",
-            "messaging_intel",
-            "another-org",
+                "https://supabase.example.invalid/auth/v1",
+            ),
+            SharedAuthProviderTopology::new("messaging-intel", "https://neon.example.invalid/auth"),
             SharedAuthServerRole::ApiServer,
             "msgint",
             SharedAuthDecisionMode::AvailabilityFirst,
         )
-        .expect_err("shared Neon org must fail closed");
+        .expect_err("shared Supabase organization must fail closed");
         assert!(
             issues
                 .iter()
-                .any(|issue| issue.code == "shared_auth_neon_org_mismatch")
+                .any(|issue| issue.code == "shared_auth_provider_org_mismatch")
         );
     }
 
     #[test]
-    fn admin_requires_strict_paired_mode() {
-        let issues = SharedAuthRuntimeTopology::shared_supabase_schema(
+    fn rejects_duplicate_or_insecure_provider_issuers() {
+        let issues = SharedAuthRuntimeTopology::dedicated(
             "messaging-intel",
-            "oresoftware",
-            "messaging_intel",
+            "http://provider.example.invalid",
+            "http://provider.example.invalid",
+            SharedAuthServerRole::ApiServer,
+            "msgint",
+            SharedAuthDecisionMode::AvailabilityFirst,
+        )
+        .expect_err("insecure duplicate issuers must fail closed");
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_provider_issuer_invalid")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_provider_issuers_must_differ")
+        );
+    }
+
+    #[test]
+    fn rejects_availability_first_for_admin_servers() {
+        let issues = SharedAuthRuntimeTopology::dedicated(
             "messaging-intel",
+            "https://supabase.example.invalid/auth/v1",
+            "https://neon.example.invalid/auth",
             SharedAuthServerRole::AdminWebServer,
             "msgint-admin",
             SharedAuthDecisionMode::AvailabilityFirst,
@@ -523,20 +876,21 @@ mod tests {
 
     #[test]
     fn construction_requires_enabled_shared_auth_and_matching_audience() {
-        let topology = SharedAuthRuntimeTopology::shared_supabase_schema(
-            "messaging-intel",
-            "oresoftware",
-            "messaging_intel",
-            "messaging-intel",
-            SharedAuthServerRole::WebServer,
-            "msgint",
-            SharedAuthDecisionMode::AvailabilityFirst,
-        )
-        .unwrap();
+        let disabled = default_config("test-service");
         let issues = SharedAuthReadyStack::new(
-            default_config("test-service"),
-            topology.clone(),
-            CanonicalVerifier,
+            disabled,
+            topology(
+                SharedAuthServerRole::WebServer,
+                SharedAuthDecisionMode::AvailabilityFirst,
+            ),
+            StaticProviderVerifier::verified(principal(
+                SharedAuthProvider::Supabase,
+                SharedAuthServerRole::WebServer,
+            )),
+            StaticProviderVerifier::verified(principal(
+                SharedAuthProvider::Neon,
+                SharedAuthServerRole::WebServer,
+            )),
         )
         .err()
         .expect("disabled Shared Auth must be rejected");
@@ -546,10 +900,23 @@ mod tests {
                 .any(|issue| issue.code == "shared_auth_verifier_required")
         );
 
-        let issues =
-            SharedAuthReadyStack::new(protected_config("wrong"), topology, CanonicalVerifier)
-                .err()
-                .expect("audience mismatch must be rejected");
+        let issues = SharedAuthReadyStack::new(
+            protected_config("wrong-audience"),
+            topology(
+                SharedAuthServerRole::WebServer,
+                SharedAuthDecisionMode::AvailabilityFirst,
+            ),
+            StaticProviderVerifier::verified(principal(
+                SharedAuthProvider::Supabase,
+                SharedAuthServerRole::WebServer,
+            )),
+            StaticProviderVerifier::verified(principal(
+                SharedAuthProvider::Neon,
+                SharedAuthServerRole::WebServer,
+            )),
+        )
+        .err()
+        .expect("audience mismatch must be rejected");
         assert!(
             issues
                 .iter()
@@ -557,28 +924,139 @@ mod tests {
         );
     }
 
-    #[test]
-    fn construction_accepts_explicit_verifier_and_shared_schema_topology() {
-        let topology = SharedAuthRuntimeTopology::shared_supabase_schema(
-            "messaging-intel",
-            "oresoftware",
-            "messaging_intel",
-            "messaging-intel",
-            SharedAuthServerRole::ApiServer,
-            "msgint",
-            SharedAuthDecisionMode::AvailabilityFirst,
+    #[tokio::test]
+    async fn strict_pair_accepts_matching_provider_proofs() {
+        let role = SharedAuthServerRole::AdminApiServer;
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint-admin"),
+            topology(role, SharedAuthDecisionMode::StrictPaired),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Supabase, role)),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Neon, role)),
         )
-        .unwrap();
-        let ready =
-            SharedAuthReadyStack::new(protected_config("msgint"), topology, CanonicalVerifier)
-                .expect("explicit verifier plus scoped topology should satisfy readiness");
-        assert_eq!(
-            ready.topology().data_plane(),
-            SharedAuthDataPlane::CustomerAuth
-        );
-        assert_eq!(
-            ready.topology().supabase.schema_namespace(),
-            Some("messaging_intel")
-        );
+        .expect("matching paired proofs should construct");
+
+        let active = ready
+            .begin(request())
+            .await
+            .expect("matching paired proofs should authenticate");
+        assert_eq!(active.context.user_id.as_deref(), Some("user-123"));
+        assert_eq!(active.context.tenant_id.as_deref(), Some("tenant-456"));
+    }
+
+    #[tokio::test]
+    async fn strict_pair_rejects_single_provider_outage() {
+        let role = SharedAuthServerRole::AdminApiServer;
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint-admin"),
+            topology(role, SharedAuthDecisionMode::StrictPaired),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Supabase, role)),
+            StaticProviderVerifier::unavailable(),
+        )
+        .expect("valid strict topology should construct");
+
+        let error = ready
+            .begin(request())
+            .await
+            .err()
+            .expect("strict paired proof must reject a provider outage");
+        assert_eq!(error.code, "shared_auth_strict_provider_unavailable");
+    }
+
+    #[tokio::test]
+    async fn availability_first_accepts_one_explicit_outage_for_customer_role() {
+        let role = SharedAuthServerRole::ApiServer;
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint"),
+            topology(role, SharedAuthDecisionMode::AvailabilityFirst),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Supabase, role)),
+            StaticProviderVerifier::unavailable(),
+        )
+        .expect("valid customer topology should construct");
+
+        let active = ready
+            .begin(request())
+            .await
+            .expect("one verified provider plus explicit outage is admissible");
+        assert_eq!(active.context.user_id.as_deref(), Some("user-123"));
+    }
+
+    #[tokio::test]
+    async fn availability_first_rejects_provider_rejection() {
+        let role = SharedAuthServerRole::ApiServer;
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint"),
+            topology(role, SharedAuthDecisionMode::AvailabilityFirst),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Supabase, role)),
+            StaticProviderVerifier::rejected(),
+        )
+        .expect("valid customer topology should construct");
+
+        let error = ready
+            .begin(request())
+            .await
+            .err()
+            .expect("provider rejection is not an availability event");
+        assert_eq!(error.code, "shared_auth_provider_rejected");
+    }
+
+    #[tokio::test]
+    async fn rejects_provider_identity_disagreement() {
+        let role = SharedAuthServerRole::ApiServer;
+        let mut neon = principal(SharedAuthProvider::Neon, role);
+        neon.subject = "different-user".into();
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint"),
+            topology(role, SharedAuthDecisionMode::StrictPaired),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Supabase, role)),
+            StaticProviderVerifier::verified(neon),
+        )
+        .expect("valid paired topology should construct");
+
+        let error = ready
+            .begin(request())
+            .await
+            .err()
+            .expect("provider identity disagreement must fail closed");
+        assert_eq!(error.code, "shared_auth_provider_identity_disagreement");
+    }
+
+    #[tokio::test]
+    async fn rejects_wrong_provider_realm_or_issuer() {
+        let role = SharedAuthServerRole::ApiServer;
+        let mut supabase = principal(SharedAuthProvider::Supabase, role);
+        supabase.data_plane = SharedAuthDataPlane::AdminAuth;
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint"),
+            topology(role, SharedAuthDecisionMode::StrictPaired),
+            StaticProviderVerifier::verified(supabase),
+            StaticProviderVerifier::verified(principal(SharedAuthProvider::Neon, role)),
+        )
+        .expect("valid paired topology should construct");
+
+        let error = ready
+            .begin(request())
+            .await
+            .err()
+            .expect("wrong provider realm must fail closed");
+        assert_eq!(error.code, "shared_auth_provider_evidence_mismatch");
+    }
+
+    #[tokio::test]
+    async fn rejects_both_providers_unavailable() {
+        let role = SharedAuthServerRole::WebServer;
+        let ready = SharedAuthReadyStack::new(
+            protected_config("msgint"),
+            topology(role, SharedAuthDecisionMode::AvailabilityFirst),
+            StaticProviderVerifier::unavailable(),
+            StaticProviderVerifier::unavailable(),
+        )
+        .expect("valid customer topology should construct");
+
+        let error = ready
+            .begin(request())
+            .await
+            .err()
+            .expect("two unavailable providers cannot authenticate");
+        assert_eq!(error.code, "shared_auth_all_providers_unavailable");
     }
 }
