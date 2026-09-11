@@ -23,8 +23,13 @@ concurrency:
 
 jobs:
   erlang:
-    runs-on: ubuntu-24.04
+    name: erlang-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
     env:
       EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -82,6 +87,16 @@ jobs:
             .operationSymbols.descriptor == "ores_middleware:descriptor/0" and
             .operationSymbols.currentContext == "ores_middleware:current_context/0"
           ' src/erlang/adapter.manifest.json
+
+      - name: Validate live Erlang runtime descriptor
+        shell: bash
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          escript escript/contractcheck.escript | jq -e '
+            .language == "erlang" and
+            .contractVersion == "1.0.0"
+          '
 
       - name: Run compiled randomized adversarial Erlang suite
         shell: bash
