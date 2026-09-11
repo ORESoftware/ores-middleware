@@ -18,12 +18,11 @@ concurrency:
 
 env:
   ORES_CLI_SHA: dc60b00437539d92ceddf0dce2da3aa0c27097f6
-  INFRA_STATE_BLOB: d9b5d51427226cdd18b0cdc73cfd9db072e93fe5
 
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 55
     steps:
       - name: Require private-source read credential
         env:
@@ -45,12 +44,12 @@ jobs:
           fetch-depth: 1
           path: ores-cli
 
-      - name: Verify immutable candidate and exact provider-state module
+      - name: Verify immutable candidate and exact provider-state source
         working-directory: ores-cli
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$ORES_CLI_SHA"
-          test "$(git hash-object src/audit/infra_provider_state.rs)" = "$INFRA_STATE_BLOB"
+          test "$(git hash-object src/audit/infra_provider_state.rs)" = d9b5d51427226cdd18b0cdc73cfd9db072e93fe5
           git diff --check
           status=0
           git grep -n -I -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':(exclude)Cargo.lock' || status=$?
@@ -77,18 +76,19 @@ jobs:
         working-directory: ores-cli
         run: cargo metadata --locked --format-version 1 > /dev/null
 
-      - name: Check formatting and compilation
+      - name: Check formatting
         working-directory: ores-cli
-        run: |
-          set -euo pipefail
-          cargo fmt --all --check
-          cargo check --all-targets --all-features --locked
+        run: cargo fmt --all --check
+
+      - name: Compile all targets
+        working-directory: ores-cli
+        run: cargo check --all-targets --all-features --locked
 
       - name: Run focused provider-state regressions
         working-directory: ores-cli
         run: cargo test --locked infra_provider_state::tests::
 
-      - name: Run complete Rust suite
+      - name: Run all Rust tests
         working-directory: ores-cli
         run: cargo test --all-targets --all-features --locked
 
@@ -96,12 +96,13 @@ jobs:
         working-directory: ores-cli
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
-      - name: Run ordinary repository and package self-audits
+      - name: Run ores-cli repository self-audit
         working-directory: ores-cli
-        run: |
-          set -euo pipefail
-          cargo run --quiet --locked -- audit repo --path . --profile rust-cli
-          cargo run --quiet --locked -- audit package --path .
+        run: cargo run --quiet --locked -- audit repo --path . --profile rust-cli
+
+      - name: Run ores-cli package self-audit
+        working-directory: ores-cli
+        run: cargo run --quiet --locked -- audit package --path .
 
       - name: Prove validation left source clean
         working-directory: ores-cli
