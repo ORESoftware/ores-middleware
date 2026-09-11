@@ -5,9 +5,42 @@
   "description": "Independent JSON Schema/OpenAPI-lane authority for the normalized .ores-mw.toml shape; semantic path, overlap, flags-2-env, environment-binding, and target-role invariants are additionally enforced by scripts/ores_mw_config.py.",
   "$ref": "#/$defs/MiddlewareManifest",
   "$defs": {
+    "Flags2EnvConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "requireAudit", "precedence"],
+      "properties": {
+        "contract": { "type": "string" },
+        "requireAudit": { "type": "boolean" },
+        "precedence": { "type": "string", "const": "argv-over-env" }
+      }
+    },
+    "EnvBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key", "kind", "required", "secret"],
+      "properties": {
+        "name": { "type": "string" },
+        "key": { "type": "string" },
+        "kind": {
+          "anyOf": [
+            { "type": "string", "const": "string" },
+            { "type": "string", "const": "bool" },
+            { "type": "string", "const": "integer" },
+            { "type": "string", "const": "double" },
+            { "type": "string", "const": "json" },
+            { "type": "string", "const": "url" }
+          ]
+        },
+        "required": { "type": "boolean" },
+        "secret": { "type": "boolean" },
+        "defaultValue": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
     "MiddlewareTarget": {
       "type": "object",
-      "unevaluatedProperties": false,
+      "additionalProperties": false,
       "required": ["name", "role", "roots", "enabled", "middleware"],
       "properties": {
         "name": { "type": "string" },
@@ -35,7 +68,7 @@
     },
     "MiddlewareManifest": {
       "type": "object",
-      "unevaluatedProperties": false,
+      "additionalProperties": false,
       "required": ["schemaVersion", "repositoryMode", "allowOverlappingRoots", "targets"],
       "properties": {
         "schemaVersion": { "type": "number", "const": 1 },
@@ -48,41 +81,10 @@
         },
         "allowOverlappingRoots": { "type": "boolean" },
         "defaultTarget": { "type": "string" },
-        "flags2env": {
-          "type": "object",
-          "unevaluatedProperties": false,
-          "required": ["contract", "requireAudit", "precedence"],
-          "properties": {
-            "contract": { "type": "string" },
-            "requireAudit": { "type": "boolean" },
-            "precedence": { "type": "string", "const": "argv-over-env" }
-          }
-        },
+        "flags2env": { "$ref": "#/$defs/Flags2EnvConfig" },
         "env": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "unevaluatedProperties": false,
-            "required": ["name", "key", "kind", "required", "secret"],
-            "properties": {
-              "name": { "type": "string" },
-              "key": { "type": "string" },
-              "kind": {
-                "anyOf": [
-                  { "type": "string", "const": "string" },
-                  { "type": "string", "const": "bool" },
-                  { "type": "string", "const": "integer" },
-                  { "type": "string", "const": "double" },
-                  { "type": "string", "const": "json" },
-                  { "type": "string", "const": "url" }
-                ]
-              },
-              "required": { "type": "boolean" },
-              "secret": { "type": "boolean" },
-              "defaultValue": { "type": "string" },
-              "description": { "type": "string" }
-            }
-          }
+          "items": { "$ref": "#/$defs/EnvBinding" }
         },
         "targets": {
           "type": "array",
