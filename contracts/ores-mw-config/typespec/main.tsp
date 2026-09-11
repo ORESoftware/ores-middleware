@@ -1,12 +1,12 @@
 namespace Ores.Middleware.Config;
 
-model Flags2EnvConfig {
+model Flags2EnvConfig extends Record<never> {
   contract: string;
   requireAudit: boolean;
   precedence: "argv-over-env";
 }
 
-model EnvBinding {
+model EnvBinding extends Record<never> {
   name: string;
   key: string;
   kind: "string" | "bool" | "integer" | "double" | "json" | "url";
@@ -16,7 +16,7 @@ model EnvBinding {
   description?: string;
 }
 
-model MiddlewareTarget {
+model MiddlewareTarget extends Record<never> {
   name: string;
   role: "server" | "client";
   roots: string[];
@@ -26,7 +26,7 @@ model MiddlewareTarget {
   propagateHeaders?: string[];
 }
 
-model MiddlewareManifest {
+model MiddlewareManifest extends Record<never> {
   schemaVersion: 1;
   repositoryMode: "server-only" | "client-only" | "hybrid";
   allowOverlappingRoots: boolean;
