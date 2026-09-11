@@ -1,0 +1,7 @@
+{
+  "name": "redis_url",
+  "key": "REDIS_URL",
+  "kind": "url",
+  "required": true,
+  "secret": true
+}
