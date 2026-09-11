@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 const TYPESPEC_SOURCE: &str = "contracts/persistence/idempotency-record.tsp";
@@ -34,13 +34,13 @@ impl StringConstraints {
     }
 
     fn validate(&self, label: &str) -> Result<()> {
-        if let (Some(minimum), Some(maximum)) = (self.min_length, self.max_length)
-            && minimum > maximum
-        {
-            return Err(format!(
-                "{label} has minLength/minLength decorator {minimum} greater than maxLength/maxLength decorator {maximum}"
-            )
-            .into());
+        if let (Some(minimum), Some(maximum)) = (self.min_length, self.max_length) {
+            if minimum > maximum {
+                return Err(format!(
+                    "{label} has minimum length {minimum} greater than maximum length {maximum}"
+                )
+                .into());
+            }
         }
         Ok(())
     }
@@ -145,8 +145,9 @@ fn parse_pattern_decorator(line: &str) -> Result<Option<String>> {
         .captures(line)
         .and_then(|captures| captures.name("literal"))
         .map(|literal| {
-            serde_json::from_str::<String>(literal.as_str())
-                .map_err(|error| format!("invalid @pattern string literal in {line}: {error}").into())
+            serde_json::from_str::<String>(literal.as_str()).map_err(|error| {
+                format!("invalid @pattern string literal in {line}: {error}").into()
+            })
         })
         .transpose()
 }
@@ -329,8 +330,7 @@ fn parse_json_schema(root: &Path) -> Result<ConstraintSnapshot> {
             min_length: json_u64(property, "minLength", &format!("property {name}"))?,
             max_length: json_u64(property, "maxLength", &format!("property {name}"))?,
         };
-        if !constraints.is_empty()
-            && property.get("type").and_then(Value::as_str) != Some("string")
+        if !constraints.is_empty() && property.get("type").and_then(Value::as_str) != Some("string")
         {
             return Err(format!(
                 "string constraints on non-string JSON Schema property {name}: {value}"
@@ -435,20 +435,33 @@ fn write_report(
         "zeroUnexplainedFindings": findings.is_empty(),
         "discrepancies": findings,
     });
-    fs::write(path, format!("{}\n", serde_json::to_string_pretty(&report)?))?;
+    fs::write(
+        path,
+        format!("{}\n", serde_json::to_string_pretty(&report)?),
+    )?;
     Ok(())
 }
 
 fn resolve(root: &Path, value: PathBuf) -> Result<PathBuf> {
-    let path = if value.is_absolute() {
+    let relative = if value.is_absolute() {
         value
+            .strip_prefix(root)
+            .map_err(|_| format!("report path must remain inside {}", root.display()))?
     } else {
-        root.join(value)
+        value.as_path()
     };
-    if !path.starts_with(root) {
-        return Err(format!("report path must remain inside {}", root.display()).into());
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(format!(
+            "report path must be a normalized descendant of {}",
+            root.display()
+        )
+        .into());
     }
-    Ok(path)
+    Ok(root.join(relative))
 }
 
 fn parse_args() -> std::result::Result<(PathBuf, PathBuf), String> {
@@ -498,12 +511,9 @@ fn main() -> ExitCode {
 
     match run(&root) {
         Ok((typespec, json_schema, findings)) => {
-            if let Err(error) = write_report(
-                &report,
-                Some(&typespec),
-                Some(&json_schema),
-                &findings,
-            ) {
+            if let Err(error) =
+                write_report(&report, Some(&typespec), Some(&json_schema), &findings)
+            {
                 eprintln!("failed to write {}: {error}", report.display());
                 return ExitCode::from(2);
             }
@@ -643,12 +653,10 @@ mod tests {
     fn missing_typespec_closure_is_a_hard_failure() {
         let temp = fixture_root();
         let path = temp.path().join(TYPESPEC_SOURCE);
-        let source = fs::read_to_string(&path)
-            .unwrap()
-            .replace(
-                "@TypeSpec.JsonSchema.extension(\"additionalProperties\", false)\n",
-                "",
-            );
+        let source = fs::read_to_string(&path).unwrap().replace(
+            "@TypeSpec.JsonSchema.extension(\"additionalProperties\", false)\n",
+            "",
+        );
         fs::write(&path, source).unwrap();
         let error = run(temp.path()).expect_err("missing closure must fail");
         assert!(error.to_string().contains("additionalProperties"));
@@ -675,6 +683,17 @@ mod tests {
         fs::write(&path, source).unwrap();
         let error = run(temp.path()).expect_err("unsupported decorator must fail");
         assert!(error.to_string().contains("@secret"));
+    }
+
+    #[test]
+    fn report_path_traversal_is_rejected() {
+        let root = tempfile::tempdir().expect("root");
+        assert!(resolve(root.path(), PathBuf::from("../outside.json")).is_err());
+        assert!(resolve(root.path(), root.path().join("../outside.json")).is_err());
+        assert_eq!(
+            resolve(root.path(), PathBuf::from("target/report.json")).unwrap(),
+            root.path().join("target/report.json")
+        );
     }
 
     #[test]
