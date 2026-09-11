@@ -1,0 +1,60 @@
+name: repair persistence gate v2
+
+on:
+  push:
+    branches:
+      - hardening/rust-persistence-constraint-parity-2026-09-11
+    paths:
+      - '.github/workflows/repair-persistence-gate-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: hardening/rust-persistence-constraint-parity-2026-09-11
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Install declared MSRV
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+
+      - name: Apply reviewed patch and canonical formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_persistence_constraint_gate_once.py
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+
+      - name: Compile, lint, and test every target at MSRV
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --manifest-path tools/contract-parity/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
+          cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_constraint_gate -- --report target/schema-convergence/constraint-parity.json
+          git diff --check
+
+      - name: Remove one-shot files and commit repaired source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/contract-parity/src/bin/persistence_constraint_gate.rs
+          git rm scripts/repair_persistence_constraint_gate_once.py
+          git rm .github/workflows/repair-persistence-gate-v2.yml
+          git diff --cached --check
+          git commit -m 'hardening: enforce MSRV-safe report path containment'
+          git push origin HEAD:hardening/rust-persistence-constraint-parity-2026-09-11
