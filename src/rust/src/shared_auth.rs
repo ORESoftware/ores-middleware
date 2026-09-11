@@ -7,8 +7,8 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
-    config::IntegrationMode, validate_config, ActiveRequest, AuthVerifier, MiddlewareConfig,
-    MiddlewareError, MiddlewareStack, RequestMetadata, ValidationIssue,
+    ActiveRequest, AuthVerifier, MiddlewareConfig, MiddlewareError, MiddlewareStack,
+    RequestMetadata, ValidationIssue, config::IntegrationMode, validate_config,
 };
 
 pub const SUPABASE_AUTH_DATABASE_URL_ENV: &str = "SUPABASE_AUTH_DATABASE_URL";
@@ -244,8 +244,7 @@ impl SharedAuthRuntimeTopology {
                 "Shared Auth audience must not be empty",
             ));
         }
-        if self.server_role.is_admin()
-            && self.decision_mode != SharedAuthDecisionMode::StrictPaired
+        if self.server_role.is_admin() && self.decision_mode != SharedAuthDecisionMode::StrictPaired
         {
             issues.push(ValidationIssue::new(
                 "/sharedAuthTopology/decisionMode",
@@ -338,10 +337,7 @@ impl SharedAuthReadyStack {
         &self.topology
     }
 
-    pub async fn begin(
-        &self,
-        request: RequestMetadata,
-    ) -> Result<ActiveRequest, MiddlewareError> {
+    pub async fn begin(&self, request: RequestMetadata) -> Result<ActiveRequest, MiddlewareError> {
         self.inner.begin(request).await
     }
 
@@ -381,7 +377,7 @@ mod tests {
     use std::{collections::BTreeMap, future::Future, pin::Pin};
 
     use super::*;
-    use crate::{default_config, AuthDecision, IntegrationError, RuntimeEnvironment};
+    use crate::{AuthDecision, IntegrationError, RuntimeEnvironment, default_config};
 
     struct CanonicalVerifier;
 
@@ -389,7 +385,8 @@ mod tests {
         fn verify<'a>(
             &'a self,
             _request: &'a RequestMetadata,
-        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>>
+        {
             Box::pin(async {
                 Ok(AuthDecision {
                     user_id: Some("user-123".into()),
@@ -442,7 +439,11 @@ mod tests {
             SharedAuthDecisionMode::AvailabilityFirst,
         )
         .expect_err("mismatched dedicated Supabase org must fail");
-        assert!(issues.iter().any(|issue| issue.code == "shared_auth_supabase_org_mismatch"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_supabase_org_mismatch")
+        );
     }
 
     #[test]
@@ -458,7 +459,10 @@ mod tests {
         )
         .expect("explicit shared provider plus per-org schema is valid");
         assert_eq!(topology.supabase.organization(), "oresoftware");
-        assert_eq!(topology.supabase.schema_namespace(), Some("messaging_intel"));
+        assert_eq!(
+            topology.supabase.schema_namespace(),
+            Some("messaging_intel")
+        );
 
         for schema in ["", "public", "bad-schema"] {
             let issues = SharedAuthRuntimeTopology::shared_supabase_schema(
@@ -471,7 +475,11 @@ mod tests {
                 SharedAuthDecisionMode::AvailabilityFirst,
             )
             .expect_err("shared Supabase without dedicated schema must fail");
-            assert!(issues.iter().any(|issue| issue.code == "shared_auth_schema_namespace_required"));
+            assert!(
+                issues
+                    .iter()
+                    .any(|issue| issue.code == "shared_auth_schema_namespace_required")
+            );
         }
     }
 
@@ -487,7 +495,11 @@ mod tests {
             SharedAuthDecisionMode::AvailabilityFirst,
         )
         .expect_err("shared Neon org must fail closed");
-        assert!(issues.iter().any(|issue| issue.code == "shared_auth_neon_org_mismatch"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_neon_org_mismatch")
+        );
     }
 
     #[test]
@@ -502,7 +514,11 @@ mod tests {
             SharedAuthDecisionMode::AvailabilityFirst,
         )
         .expect_err("admin availability-first must fail closed");
-        assert!(issues.iter().any(|issue| issue.code == "shared_auth_admin_requires_strict_paired"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_admin_requires_strict_paired")
+        );
     }
 
     #[test]
@@ -517,15 +533,28 @@ mod tests {
             SharedAuthDecisionMode::AvailabilityFirst,
         )
         .unwrap();
-        let issues = SharedAuthReadyStack::new(default_config("test-service"), topology.clone(), CanonicalVerifier)
-            .err()
-            .expect("disabled Shared Auth must be rejected");
-        assert!(issues.iter().any(|issue| issue.code == "shared_auth_verifier_required"));
+        let issues = SharedAuthReadyStack::new(
+            default_config("test-service"),
+            topology.clone(),
+            CanonicalVerifier,
+        )
+        .err()
+        .expect("disabled Shared Auth must be rejected");
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_verifier_required")
+        );
 
-        let issues = SharedAuthReadyStack::new(protected_config("wrong"), topology, CanonicalVerifier)
-            .err()
-            .expect("audience mismatch must be rejected");
-        assert!(issues.iter().any(|issue| issue.code == "shared_auth_audience_mismatch"));
+        let issues =
+            SharedAuthReadyStack::new(protected_config("wrong"), topology, CanonicalVerifier)
+                .err()
+                .expect("audience mismatch must be rejected");
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "shared_auth_audience_mismatch")
+        );
     }
 
     #[test]
@@ -540,13 +569,16 @@ mod tests {
             SharedAuthDecisionMode::AvailabilityFirst,
         )
         .unwrap();
-        let ready = SharedAuthReadyStack::new(
-            protected_config("msgint"),
-            topology,
-            CanonicalVerifier,
-        )
-        .expect("explicit verifier plus scoped topology should satisfy readiness");
-        assert_eq!(ready.topology().data_plane(), SharedAuthDataPlane::CustomerAuth);
-        assert_eq!(ready.topology().supabase.schema_namespace(), Some("messaging_intel"));
+        let ready =
+            SharedAuthReadyStack::new(protected_config("msgint"), topology, CanonicalVerifier)
+                .expect("explicit verifier plus scoped topology should satisfy readiness");
+        assert_eq!(
+            ready.topology().data_plane(),
+            SharedAuthDataPlane::CustomerAuth
+        );
+        assert_eq!(
+            ready.topology().supabase.schema_namespace(),
+            Some("messaging_intel")
+        );
     }
 }

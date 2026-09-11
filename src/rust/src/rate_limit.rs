@@ -410,8 +410,9 @@ fn signal_value(
         RateLimitSignal::Ip => effective_client_ip.map(str::to_owned),
         RateLimitSignal::IpPrefix => effective_client_ip.and_then(ip_prefix),
         RateLimitSignal::User | RateLimitSignal::Subject => context.user_id.clone(),
-        RateLimitSignal::Email => claim(auth, &["email", "email_address"])
-            .map(|value| value.trim().to_ascii_lowercase()),
+        RateLimitSignal::Email => {
+            claim(auth, &["email", "email_address"]).map(|value| value.trim().to_ascii_lowercase())
+        }
         RateLimitSignal::Tenant => context.tenant_id.clone(),
         RateLimitSignal::Organization => {
             claim(auth, &["organization_id", "org_id"]).map(str::to_owned)
@@ -575,6 +576,12 @@ mod tests {
             RateLimitSignal::Route,
             RateLimitSignal::Method,
         ];
-        assert_eq!(signals.iter().filter(|signal| signal.is_edge_safe()).count(), 4);
+        assert_eq!(
+            signals
+                .iter()
+                .filter(|signal| signal.is_edge_safe())
+                .count(),
+            4
+        );
     }
 }

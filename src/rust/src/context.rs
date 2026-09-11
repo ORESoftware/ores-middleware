@@ -111,9 +111,9 @@ impl ContextRegistry {
 
     pub async fn get(&self, request_id: &str) -> Option<RequestContext> {
         let guard = self.inner.read().await;
-        guard.get(request_id).and_then(|(created, context)| {
-            (created.elapsed() <= self.ttl).then(|| context.clone())
-        })
+        guard
+            .get(request_id)
+            .and_then(|(created, context)| (created.elapsed() <= self.ttl).then(|| context.clone()))
     }
 
     pub async fn remove(&self, request_id: &str) {
@@ -151,10 +151,7 @@ mod tests {
                 Some("0123456789abcdef0123456789abcdef")
             );
             assert_eq!(current_user_id().as_deref(), Some("user-42"));
-            assert_eq!(
-                current_logged_in_user_id().as_deref(),
-                Some("user-42")
-            );
+            assert_eq!(current_logged_in_user_id().as_deref(), Some("user-42"));
             assert_eq!(current_tenant_id().as_deref(), Some("tenant-7"));
         })
         .await;

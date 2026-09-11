@@ -118,13 +118,8 @@ pub trait RateLimiter: Send + Sync {
     fn evaluate<'a>(
         &'a self,
         request: &'a RateLimitRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<RateLimitDecision, IntegrationError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<RateLimitDecision, IntegrationError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let allowed = self
                 .allow(
@@ -317,8 +312,7 @@ impl InMemoryTokenBucket {
                 generation,
             });
             let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
-            bucket.tokens =
-                (bucket.tokens + elapsed * refill_per_second).min(f64::from(capacity));
+            bucket.tokens = (bucket.tokens + elapsed * refill_per_second).min(f64::from(capacity));
             bucket.last_refill = now;
             bucket.last_seen = now;
             bucket.generation = generation;
@@ -328,11 +322,7 @@ impl InMemoryTokenBucket {
             if allowed {
                 bucket.tokens -= cost;
             }
-            let remaining = bucket
-                .tokens
-                .floor()
-                .max(0.0)
-                .min(f64::from(u32::MAX)) as u32;
+            let remaining = bucket.tokens.floor().max(0.0).min(f64::from(u32::MAX)) as u32;
             let retry_after_ms = if allowed {
                 None
             } else {
@@ -381,13 +371,8 @@ impl RateLimiter for InMemoryTokenBucket {
     fn evaluate<'a>(
         &'a self,
         request: &'a RateLimitRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<RateLimitDecision, IntegrationError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<RateLimitDecision, IntegrationError>> + Send + 'a>>
+    {
         Box::pin(async move {
             match request.algorithm {
                 RateLimitAlgorithm::TokenBucket => {}
