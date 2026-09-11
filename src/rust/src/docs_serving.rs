@@ -116,7 +116,10 @@ impl DocsDecision {
             status: Some(status),
             representation: None,
             head_only: false,
-            headers: with_headers(base_headers("application/json; charset=utf-8"), allow_header),
+            headers: with_headers(
+                base_headers("application/json; charset=utf-8"),
+                allow_header,
+            ),
         }
     }
 }
@@ -128,10 +131,7 @@ struct MediaRange {
     index: usize,
 }
 
-fn with_headers<I>(
-    base: BTreeMap<String, String>,
-    additions: I,
-) -> BTreeMap<String, String>
+fn with_headers<I>(base: BTreeMap<String, String>, additions: I) -> BTreeMap<String, String>
 where
     I: IntoIterator<Item = (String, String)>,
 {
@@ -157,8 +157,8 @@ fn representation_headers(
     representation: Representation,
     docs_digest: Option<&str>,
 ) -> BTreeMap<String, String> {
-    let frame_header = (representation == Representation::Html)
-        .then(|| ("X-Frame-Options".into(), "DENY".into()));
+    let frame_header =
+        (representation == Representation::Html).then(|| ("X-Frame-Options".into(), "DENY".into()));
     let csp_header = (representation == Representation::Html).then(|| {
         (
             "Content-Security-Policy".into(),
@@ -402,7 +402,10 @@ mod tests {
 
         first.headers.insert("X-Test".into(), "changed".into());
 
-        assert_eq!(first.headers.get("X-Test").map(String::as_str), Some("changed"));
+        assert_eq!(
+            first.headers.get("X-Test").map(String::as_str),
+            Some("changed")
+        );
         assert!(!second.headers.contains_key("X-Test"));
         assert_eq!(second.action, Action::Serve);
     }
