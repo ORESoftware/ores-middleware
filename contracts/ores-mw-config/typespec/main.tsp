@@ -1,12 +1,26 @@
+/**
+ * Normalized .ores-mw.toml orchestration contract.
+ *
+ * This TypeSpec file and the sibling Draft 2020-12 schema are independent,
+ * human-authored peer authorities. The TOML manifest is normalized into this
+ * JSON shape; neither authority is generated from the other.
+ *
+ * Runtime environment bindings are names/metadata only. `.cli-flags.toml`
+ * remains the sole argv contract and is interpreted by flags-2-env.
+ */
+import "@typespec/json-schema";
+
 namespace Ores.Middleware.Config;
 
-model Flags2EnvConfig extends Record<never> {
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model Flags2EnvConfig {
   contract: string;
   requireAudit: boolean;
   precedence: "argv-over-env";
 }
 
-model EnvBinding extends Record<never> {
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model EnvBinding {
   name: string;
   key: string;
   kind: "string" | "bool" | "integer" | "double" | "json" | "url";
@@ -16,7 +30,8 @@ model EnvBinding extends Record<never> {
   description?: string;
 }
 
-model MiddlewareTarget extends Record<never> {
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model MiddlewareTarget {
   name: string;
   role: "server" | "client";
   roots: string[];
@@ -26,7 +41,8 @@ model MiddlewareTarget extends Record<never> {
   propagateHeaders?: string[];
 }
 
-model MiddlewareManifest extends Record<never> {
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model MiddlewareManifest {
   schemaVersion: 1;
   repositoryMode: "server-only" | "client-only" | "hybrid";
   allowOverlappingRoots: boolean;
