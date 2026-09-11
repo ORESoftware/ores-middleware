@@ -1,0 +1,98 @@
+name: js-runtime-portability
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  schedule:
+    - cron: "29 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: js-runtime-portability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portability:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Verify exact candidate revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+
+      - name: Install Bun 1.4.2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install Deno 2.9.6
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "v2.9.6"
+
+      - name: Install Rust 1.95.0 for independent authority generation
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+
+      - name: Generate TypeSpec and JSON Schema/OpenAPI TypeScript artifacts independently
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run contracts:polyglot-generate
+          test -s target/schema-convergence/typespec/typescript/idempotency_record.mjs
+          test -s target/schema-convergence/json-schema-openapi/typescript/idempotency_record.mjs
+
+      - name: Execute generated contracts and portable middleware under Node, Bun, and Deno
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/js_runtime_portability.mjs
+
+      - name: Assert complete source-bound runtime receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e --arg expected "$ORES_WORKFLOW_SOURCE_SHA" '
+            .schema == "ores.middleware.js-runtime-portability-report/v1"
+            and .commit == $expected
+            and .status == "passed"
+            and .zeroUnexplainedFindings == true
+            and ([.runtimes[].name] | sort) == ["bun", "deno", "node"]
+            and (.runtimeWitnesses | length) == 6
+            and ([.runtimeWitnesses[].state] | all(. == "executed"))
+            and (.smokeWitnesses | length) == 3
+            and ([.smokeWitnesses[].state] | all(. == "executed"))
+            and (.discrepancies | length) == 0
+          ' target/js-runtime-portability/receipt.json
+
+      - name: Upload runtime portability receipt and raw logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: js-runtime-portability-${{ github.run_id }}
+          path: target/js-runtime-portability/**/*
+          if-no-files-found: error
+          retention-days: 90
