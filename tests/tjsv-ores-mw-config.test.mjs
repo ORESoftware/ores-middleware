@@ -11,6 +11,8 @@ import {
 } from '../scripts/check-tjsv-ores-mw.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+const CORPUS_INSTANCES = 12;
+const SNAPSHOT_FILES = 14;
 
 function successfulReport(corpusInstances) {
   const rows = DECLARATIONS.map((name, index) => ({
@@ -66,25 +68,28 @@ test('pins a full immutable TJSV revision', () => {
   assert.match(TJSV_REV, /^[0-9a-f]{40}$/);
 });
 
-test('fixture snapshot covers both declarations with valid and invalid lanes', () => {
+test('fixture snapshot covers all four declarations with valid and invalid lanes', () => {
   const value = snapshotInputs(root);
-  assert.equal(value.corpusInstances, 8);
-  assert.equal(value.files, 10);
+  assert.equal(value.corpusInstances, CORPUS_INSTANCES);
+  assert.equal(value.files, SNAPSHOT_FILES);
   assert.match(value.digest, /^[0-9a-f]{64}$/);
 });
 
 test('admission policy requires complete exact declaration/probe/corpus evidence', () => {
-  assert.doesNotThrow(() => assertSuccessfulReceipt(successfulReport(8), 8));
+  assert.doesNotThrow(() => assertSuccessfulReceipt(
+    successfulReport(CORPUS_INSTANCES),
+    CORPUS_INSTANCES,
+  ));
   for (const mutate of [
     (report) => { report.status = 'stopped_for_evaluation'; },
     (report) => { report.counts.structuralFindings = 1; },
-    (report) => { report.differential.summary.corpusInstances = 7; },
+    (report) => { report.differential.summary.corpusInstances = CORPUS_INSTANCES - 1; },
     (report) => { report.differential.declarations[0].typespec = 'Wrong.Namespace'; },
     (report) => { report.differential.declarations[0].refusals = 1; },
   ]) {
-    const report = successfulReport(8);
+    const report = successfulReport(CORPUS_INSTANCES);
     mutate(report);
-    assert.throws(() => assertSuccessfulReceipt(report, 8));
+    assert.throws(() => assertSuccessfulReceipt(report, CORPUS_INSTANCES));
   }
 });
 

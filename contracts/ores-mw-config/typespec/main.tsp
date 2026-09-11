@@ -13,6 +13,24 @@ import "@typespec/json-schema";
 namespace Ores.Middleware.Config;
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
+model Flags2EnvConfig {
+  contract: string;
+  requireAudit: boolean;
+  precedence: "argv-over-env";
+}
+
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model EnvBinding {
+  name: string;
+  key: string;
+  kind: "string" | "bool" | "integer" | "double" | "json" | "url";
+  required: boolean;
+  secret: boolean;
+  defaultValue?: string;
+  description?: string;
+}
+
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model MiddlewareTarget {
   name: string;
   role: "server" | "client";
@@ -29,22 +47,7 @@ model MiddlewareManifest {
   repositoryMode: "server-only" | "client-only" | "hybrid";
   allowOverlappingRoots: boolean;
   defaultTarget?: string;
-
-  flags2env?: {
-    contract: string;
-    requireAudit: boolean;
-    precedence: "argv-over-env";
-  };
-
-  env?: {
-    name: string;
-    key: string;
-    kind: "string" | "bool" | "integer" | "double" | "json" | "url";
-    required: boolean;
-    secret: boolean;
-    defaultValue?: string;
-    description?: string;
-  }[];
-
+  flags2env?: Flags2EnvConfig;
+  env?: EnvBinding[];
   targets: MiddlewareTarget[];
 }
