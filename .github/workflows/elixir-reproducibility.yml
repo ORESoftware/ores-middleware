@@ -1,4 +1,5 @@
 name: elixir-reproducibility
+# Elixir source below this gate is normalized with the same pinned 1.18.4 formatter.
 
 on:
   pull_request:
