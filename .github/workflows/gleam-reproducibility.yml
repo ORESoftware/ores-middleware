@@ -23,8 +23,13 @@ concurrency:
 
 jobs:
   gleam:
-    runs-on: ubuntu-24.04
+    name: gleam-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
     env:
       EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -91,6 +96,16 @@ jobs:
             .operationSymbols.descriptor == "descriptor" and
             .operationSymbols.currentContext == "current_context"
           ' src/gleam/adapter.manifest.json
+
+      - name: Validate live Gleam runtime descriptor
+        shell: bash
+        working-directory: src/gleam
+        run: |
+          set -euo pipefail
+          gleam run -m ores_middleware_contractcheck | jq -e '
+            .language == "gleam" and
+            .contractVersion == "1.0.0"
+          '
 
       - name: Run compiled randomized adversarial Gleam suite
         shell: bash
