@@ -13,7 +13,7 @@ type HandlerFuncAdapter func(http.HandlerFunc) http.HandlerFunc
 
 // Chain composes adapters around handler while preserving declaration order.
 //
-//   Chain(handler, requestID, auth, rateLimit)
+//	Chain(handler, requestID, auth, rateLimit)
 //
 // executes requestID -> auth -> rateLimit -> handler. This intentionally
 // mirrors the useful adapter-chaining pattern used by ORESoftware/cp-go-api,
