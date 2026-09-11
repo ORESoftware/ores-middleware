@@ -82,15 +82,32 @@ async fn dispatch(
     let headers = stack
         .finish(active, response.status().as_u16(), None)
         .await;
-    for (name, value) in headers {
-        if let (Ok(name), Ok(value)) = (HeaderName::try_from(name), HeaderValue::try_from(value)) {
-            response.headers_mut().insert(name, value);
-        }
-    }
+    apply_finish_headers(&mut response, headers);
     response
         .headers_mut()
         .append("vary", HeaderValue::from_static("accept, accept-encoding"));
     response
+}
+
+fn apply_finish_headers(
+    response: &mut Response,
+    headers: impl IntoIterator<Item = (String, String)>,
+) {
+    for (name, value) in headers {
+        if let (Ok(name), Ok(value)) = (HeaderName::try_from(name), HeaderValue::try_from(value)) {
+            // Route handlers can impose representation-specific CSP constraints
+            // such as `sandbox`. Preserve both policies rather than replacing the
+            // handler policy with the middleware baseline: browsers enforce
+            // multiple CSP fields cumulatively, so this cannot weaken either one.
+            if name.as_str() == "content-security-policy"
+                && response.headers().contains_key(&name)
+            {
+                response.headers_mut().append(name, value);
+            } else {
+                response.headers_mut().insert(name, value);
+            }
+        }
+    }
 }
 
 fn request_metadata(request: &Request) -> RequestMetadata {
@@ -143,3 +160,56 @@ fn problem(error: MiddlewareError) -> Response {
 }
 
 pub type AxumBody = Body;
+
+#[cfg(test)]
+mod response_header_precedence_tests {
+    use super::*;
+
+    #[test]
+    fn route_specific_csp_is_composed_with_middleware_policy() {
+        let mut response = Response::new(Body::empty());
+        response.headers_mut().insert(
+            "content-security-policy",
+            HeaderValue::from_static("sandbox"),
+        );
+
+        apply_finish_headers(
+            &mut response,
+            [(
+                "content-security-policy".to_owned(),
+                "default-src 'self'; frame-ancestors 'none'".to_owned(),
+            )],
+        );
+
+        let policies = response
+            .headers()
+            .get_all("content-security-policy")
+            .iter()
+            .map(|value| value.to_str().expect("CSP header must be ASCII"))
+            .collect::<Vec<_>>();
+        assert_eq!(policies.len(), 2);
+        assert_eq!(policies[0], "sandbox");
+        assert_eq!(policies[1], "default-src 'self'; frame-ancestors 'none'");
+    }
+
+    #[test]
+    fn non_csp_finish_headers_keep_existing_overwrite_semantics() {
+        let mut response = Response::new(Body::empty());
+        response
+            .headers_mut()
+            .insert("x-frame-options", HeaderValue::from_static("SAMEORIGIN"));
+
+        apply_finish_headers(
+            &mut response,
+            [("x-frame-options".to_owned(), "DENY".to_owned())],
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get("x-frame-options")
+                .and_then(|value| value.to_str().ok()),
+            Some("DENY")
+        );
+    }
+}
