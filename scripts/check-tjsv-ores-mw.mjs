@@ -10,7 +10,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const TJSV_REV = '03ccc0ecdfc70f9198c3ccf80718910961d3fde1';
-export const DECLARATIONS = Object.freeze(['MiddlewareManifest', 'MiddlewareTarget']);
+export const DECLARATIONS = Object.freeze(['EnvBinding', 'Flags2EnvConfig', 'MiddlewareManifest', 'MiddlewareTarget']);
 const REPORT_SCHEMA = 'ores.typespec-json-schema-validator.report/v1';
 const CORPUS = 'contracts/tjsv-instances/ores-mw-config';
 const TYPESPEC = 'contracts/ores-mw-config/typespec/main.tsp';
