@@ -9,29 +9,45 @@ pub use next_loggers::*;
 /// Maps the portable, serializable middleware context into ores-otel's native
 /// task context. Only allow-listed correlation metadata is copied.
 pub fn to_ores_log_context(context: &RequestContext) -> LogContext {
-    let mut fields = JsonObject::from_iter([
-        (
+    // This is a domain-mapping boundary rather than a mutable registry or I/O
+    // buffer. Build one fresh map directly from required + optional entries so
+    // the resulting logging snapshot owns its values without a mutate-after-
+    // construction phase or a second collection copy.
+    let fields = [
+        Some((
             "request.id".into(),
             Value::String(context.request_id.clone()),
-        ),
-        ("trace.id".into(), Value::String(context.trace_id.clone())),
-        (
+        )),
+        Some((
+            "trace.id".into(),
+            Value::String(context.trace_id.clone()),
+        )),
+        Some((
             "request.started_at_unix_ms".into(),
             Value::from(context.started_at_unix_ms),
-        ),
-    ]);
-    if let Some(user_id) = &context.user_id {
-        fields.insert("user.id".into(), Value::String(user_id.clone()));
-    }
-    if let Some(tenant_id) = &context.tenant_id {
-        fields.insert("tenant.id".into(), Value::String(tenant_id.clone()));
-    }
-    if let Some(locale) = &context.locale {
-        fields.insert("request.locale".into(), Value::String(locale.clone()));
-    }
-    if let Some(deadline) = context.deadline_unix_ms {
-        fields.insert("request.deadline_unix_ms".into(), Value::from(deadline));
-    }
+        )),
+        context
+            .user_id
+            .as_ref()
+            .map(|user_id| ("user.id".into(), Value::String(user_id.clone()))),
+        context
+            .tenant_id
+            .as_ref()
+            .map(|tenant_id| ("tenant.id".into(), Value::String(tenant_id.clone()))),
+        context
+            .locale
+            .as_ref()
+            .map(|locale| ("request.locale".into(), Value::String(locale.clone()))),
+        context.deadline_unix_ms.map(|deadline| {
+            (
+                "request.deadline_unix_ms".into(),
+                Value::from(deadline),
+            )
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<JsonObject>();
 
     let logged_in_user = context
         .user_id
@@ -145,6 +161,22 @@ mod tests {
                 ("authorization".into(), "must-not-propagate".into()),
             ]),
         }
+    }
+
+    #[test]
+    fn mapped_log_context_owns_fresh_metadata_collections() {
+        let source = request_context();
+        let mut mapped = to_ores_log_context(&source);
+
+        mapped
+            .fields
+            .insert("tenant.id".into(), Value::String("changed".into()));
+        mapped
+            .baggage
+            .insert("otel.vendor".into(), "changed".into());
+
+        assert_eq!(source.tenant_id.as_deref(), Some("tenant-7"));
+        assert_eq!(source.baggage.get("otel.vendor").map(String::as_str), Some("allowed"));
     }
 
     #[tokio::test]
