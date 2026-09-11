@@ -138,139 +138,126 @@ pub struct OrderViolation {
     pub message: &'static str,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OrderRule {
+    first: MiddlewareStage,
+    second: MiddlewareStage,
+    code: &'static str,
+}
+
+const ORDER_RULES: [OrderRule; 11] = [
+    OrderRule {
+        first: MiddlewareStage::RequestId,
+        second: MiddlewareStage::TraceContext,
+        code: "request-id-before-trace",
+    },
+    OrderRule {
+        first: MiddlewareStage::TraceContext,
+        second: MiddlewareStage::TrustedProxy,
+        code: "trace-before-proxy-policy",
+    },
+    OrderRule {
+        first: MiddlewareStage::TrustedProxy,
+        second: MiddlewareStage::TransportSecurity,
+        code: "proxy-before-transport-policy",
+    },
+    OrderRule {
+        first: MiddlewareStage::TrustedProxy,
+        second: MiddlewareStage::AnonymousFloodGuard,
+        code: "trusted-proxy-before-anonymous-identity",
+    },
+    OrderRule {
+        first: MiddlewareStage::PayloadLimit,
+        second: MiddlewareStage::Authentication,
+        code: "payload-limit-before-authentication",
+    },
+    OrderRule {
+        first: MiddlewareStage::AnonymousFloodGuard,
+        second: MiddlewareStage::Authentication,
+        code: "anonymous-guard-before-authentication",
+    },
+    OrderRule {
+        first: MiddlewareStage::Authentication,
+        second: MiddlewareStage::PrincipalRateLimit,
+        code: "authentication-before-principal-rate-limit",
+    },
+    OrderRule {
+        first: MiddlewareStage::PrincipalRateLimit,
+        second: MiddlewareStage::Authorization,
+        code: "principal-rate-limit-before-authorization",
+    },
+    OrderRule {
+        first: MiddlewareStage::Authorization,
+        second: MiddlewareStage::Handler,
+        code: "authorization-before-handler",
+    },
+    OrderRule {
+        first: MiddlewareStage::Handler,
+        second: MiddlewareStage::ResponseCompression,
+        code: "handler-before-response-compression",
+    },
+    OrderRule {
+        first: MiddlewareStage::SecurityHeaders,
+        second: MiddlewareStage::TelemetryFinalize,
+        code: "security-headers-before-telemetry-finalize",
+    },
+];
+
 /// Validates the ordering invariants shared by framework adapters and service
 /// composition roots. Every declared stage must occur exactly once, and the
 /// complete request/response execution sequence must match the reviewed order.
+///
+/// Rule helpers return new violation values instead of mutating a caller-owned
+/// accumulator. That keeps the validation boundary referentially transparent:
+/// callers provide stages and receive a newly constructed result vector.
 pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolation> {
-    let mut violations = Vec::new();
+    let duplicates = stages.iter().enumerate().filter_map(|(index, stage)| {
+        stages[..index].contains(stage).then_some(OrderViolation {
+            code: "duplicate-stage",
+            message: "middleware stages must occur exactly once",
+        })
+    });
 
-    for (index, stage) in stages.iter().enumerate() {
-        if stages[..index].contains(stage) {
-            violations.push(OrderViolation {
-                code: "duplicate-stage",
-                message: "middleware stages must occur exactly once",
-            });
-        }
-    }
+    let missing = DEFAULT_MIDDLEWARE_ORDER
+        .into_iter()
+        .filter(|expected| !stages.contains(expected))
+        .map(|_| OrderViolation {
+            code: "missing-stage",
+            message: "every reviewed middleware stage must be present exactly once",
+        });
 
-    for expected in DEFAULT_MIDDLEWARE_ORDER {
-        if !stages.contains(&expected) {
-            violations.push(OrderViolation {
-                code: "missing-stage",
-                message: "every reviewed middleware stage must be present exactly once",
-            });
-        }
-    }
-
-    require_first(
+    let first = require_first(
         stages,
         MiddlewareStage::PanicBoundary,
         "panic-boundary-must-be-first",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::RequestId,
-        MiddlewareStage::TraceContext,
-        "request-id-before-trace",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::TraceContext,
-        MiddlewareStage::TrustedProxy,
-        "trace-before-proxy-policy",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::TrustedProxy,
-        MiddlewareStage::TransportSecurity,
-        "proxy-before-transport-policy",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::TrustedProxy,
-        MiddlewareStage::AnonymousFloodGuard,
-        "trusted-proxy-before-anonymous-identity",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::PayloadLimit,
-        MiddlewareStage::Authentication,
-        "payload-limit-before-authentication",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::AnonymousFloodGuard,
-        MiddlewareStage::Authentication,
-        "anonymous-guard-before-authentication",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::Authentication,
-        MiddlewareStage::PrincipalRateLimit,
-        "authentication-before-principal-rate-limit",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::PrincipalRateLimit,
-        MiddlewareStage::Authorization,
-        "principal-rate-limit-before-authorization",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::Authorization,
-        MiddlewareStage::Handler,
-        "authorization-before-handler",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::Handler,
-        MiddlewareStage::ResponseCompression,
-        "handler-before-response-compression",
-        &mut violations,
-    );
-    require_before(
-        stages,
-        MiddlewareStage::SecurityHeaders,
-        MiddlewareStage::TelemetryFinalize,
-        "security-headers-before-telemetry-finalize",
-        &mut violations,
-    );
+    )
+    .into_iter();
 
-    for pair in DEFAULT_MIDDLEWARE_ORDER.windows(2) {
-        require_before(
-            stages,
-            pair[0],
-            pair[1],
-            "reviewed-stage-order",
-            &mut violations,
-        );
-    }
+    let declared_rules = ORDER_RULES
+        .into_iter()
+        .filter_map(|rule| require_before(stages, rule.first, rule.second, rule.code));
 
-    violations
+    let reviewed_order = DEFAULT_MIDDLEWARE_ORDER
+        .windows(2)
+        .filter_map(|pair| require_before(stages, pair[0], pair[1], "reviewed-stage-order"));
+
+    duplicates
+        .chain(missing)
+        .chain(first)
+        .chain(declared_rules)
+        .chain(reviewed_order)
+        .collect()
 }
 
 fn require_first(
     stages: &[MiddlewareStage],
     expected: MiddlewareStage,
     code: &'static str,
-    violations: &mut Vec<OrderViolation>,
-) {
-    if stages.first().copied() != Some(expected) {
-        violations.push(OrderViolation {
-            code,
-            message: "the outer panic boundary must observe every downstream failure",
-        });
-    }
+) -> Option<OrderViolation> {
+    (stages.first().copied() != Some(expected)).then_some(OrderViolation {
+        code,
+        message: "the outer panic boundary must observe every downstream failure",
+    })
 }
 
 fn require_before(
@@ -278,16 +265,15 @@ fn require_before(
     first: MiddlewareStage,
     second: MiddlewareStage,
     code: &'static str,
-    violations: &mut Vec<OrderViolation>,
-) {
+) -> Option<OrderViolation> {
     let first_index = stages.iter().position(|stage| *stage == first);
     let second_index = stages.iter().position(|stage| *stage == second);
-    if !matches!((first_index, second_index), (Some(left), Some(right)) if left < right) {
-        violations.push(OrderViolation {
+    (!matches!((first_index, second_index), (Some(left), Some(right)) if left < right)).then_some(
+        OrderViolation {
             code,
             message: "required middleware stages are missing or out of order",
-        });
-    }
+        },
+    )
 }
 
 #[cfg(test)]
