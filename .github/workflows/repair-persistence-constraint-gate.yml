@@ -1,0 +1,146 @@
+name: repair persistence constraint gate
+
+on:
+  push:
+    branches:
+      - hardening/rust-persistence-constraint-parity-2026-09-11
+    paths:
+      - '.github/workflows/repair-persistence-constraint-gate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: hardening/rust-persistence-constraint-parity-2026-09-11
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Install declared MSRV
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.85.0
+          components: rustfmt, clippy
+
+      - name: Apply reviewed semantic repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tools/contract-parity/src/bin/persistence_constraint_gate.rs')
+          text = path.read_text(encoding='utf-8')
+
+          text = text.replace(
+              'use std::path::{Path, PathBuf};',
+              'use std::path::{Component, Path, PathBuf};',
+          )
+          text = text.replace(
+              '''        if let (Some(minimum), Some(maximum)) = (self.min_length, self.max_length)
+            && minimum > maximum
+        {
+            return Err(format!(
+                "{label} has minLength/minLength decorator {minimum} greater than maxLength/maxLength decorator {maximum}"
+            )
+            .into());
+        }
+''',
+              '''        if let (Some(minimum), Some(maximum)) = (self.min_length, self.max_length) {
+            if minimum > maximum {
+                return Err(format!(
+                    "{label} has minimum length {minimum} greater than maximum length {maximum}"
+                )
+                .into());
+            }
+        }
+''',
+          )
+          old_resolve = '''fn resolve(root: &Path, value: PathBuf) -> Result<PathBuf> {
+    let path = if value.is_absolute() {
+        value
+    } else {
+        root.join(value)
+    };
+    if !path.starts_with(root) {
+        return Err(format!("report path must remain inside {}", root.display()).into());
+    }
+    Ok(path)
+}
+'''
+          new_resolve = '''fn resolve(root: &Path, value: PathBuf) -> Result<PathBuf> {
+    let relative = if value.is_absolute() {
+        value
+            .strip_prefix(root)
+            .map_err(|_| format!("report path must remain inside {}", root.display()))?
+    } else {
+        value.as_path()
+    };
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(format!(
+            "report path must be a normalized descendant of {}",
+            root.display()
+        )
+        .into());
+    }
+    Ok(root.join(relative))
+}
+'''
+          if old_resolve not in text:
+              raise SystemExit('reviewed resolve function no longer matches; refusing blind patch')
+          text = text.replace(old_resolve, new_resolve)
+
+          marker = '''    #[test]
+    fn impossible_length_range_is_rejected() {
+'''
+          test = '''    #[test]
+    fn report_path_traversal_is_rejected() {
+        let root = tempfile::tempdir().expect("root");
+        assert!(resolve(root.path(), PathBuf::from("../outside.json")).is_err());
+        assert!(resolve(root.path(), root.path().join("../outside.json")).is_err());
+        assert_eq!(
+            resolve(root.path(), PathBuf::from("target/report.json")).unwrap(),
+            root.path().join("target/report.json")
+        );
+    }
+
+'''
+          if marker not in text:
+              raise SystemExit('test insertion marker missing')
+          text = text.replace(marker, test + marker, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml
+          rm .github/workflows/repair-persistence-constraint-gate.yml
+
+      - name: Verify MSRV, lint, tests, and path containment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
+          cargo clippy --manifest-path tools/contract-parity/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
+          git diff --check
+
+      - name: Commit reviewed repairs and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/contract-parity/src/bin/persistence_constraint_gate.rs
+          git rm .github/workflows/repair-persistence-constraint-gate.yml
+          git diff --cached --check
+          git commit -m 'hardening: enforce MSRV-safe report path containment'
+          git push origin HEAD:hardening/rust-persistence-constraint-parity-2026-09-11
