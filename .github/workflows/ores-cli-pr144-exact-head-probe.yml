@@ -1,4 +1,4 @@
-name: Ores CLI PR144 exact-head probe
+name: Ores CLI current-main membership exact-head probe
 
 # PR synchronize marker: keep this evidence-only workflow tied to the exact product head below.
 on:
@@ -14,11 +14,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: ores-cli-pr144-exact-head-probe-${{ github.ref }}
+  group: ores-cli-membership-current-main-probe-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  ORES_CLI_SHA: 4779b1b226c61f0b8102c64b097614c52bf1d402
+  ORES_CLI_SHA: c4d744880874dab259e285f025aa19fe538afec4
 
 jobs:
   verify:
