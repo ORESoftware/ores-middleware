@@ -245,7 +245,11 @@ export function createOresOtelMiddleware(
 
         const deadlineTimer = setTimeout(emitTimeout, timeoutMs);
         emitRequestLog(
-          logger.info("request handler started").addFields(requestFields),
+          logger
+            .info("request handler started")
+            .addTraceId(context.traceId)
+            .addTraceId("ores-trace-Kp0UT7YAyrX6u_p6PWRyL")
+            .addFields(requestFields),
           "started"
         );
 
@@ -258,6 +262,8 @@ export function createOresOtelMiddleware(
             emitRequestLog(
               logger
                 .info("request handler completed")
+                .addTraceId(context.traceId)
+                .addTraceId("ores-trace--WtHt21MXUYO5yiuI_lVt")
                 .addFields({
                   ...requestFields,
                   "http.response.status_code": response.status,
@@ -273,6 +279,8 @@ export function createOresOtelMiddleware(
             emitRequestLog(
               logger
                 .error("request handler failed", error)
+                .addTraceId(context.traceId)
+                .addTraceId("ores-trace-Ox1MJf64W2YQV5ydX_zZy")
                 .addFields({
                   ...requestFields,
                   "request.outcome": "failed",
