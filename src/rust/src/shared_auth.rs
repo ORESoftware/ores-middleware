@@ -307,19 +307,18 @@ fn provider_topology_issues(
     github_org: &str,
     topology: &SharedAuthProviderTopology,
 ) -> impl Iterator<Item = ValidationIssue> {
-    let org_mismatch =
-        (!valid_org_slug(&topology.organization) || topology.organization != github_org).then(
-            || {
-                ValidationIssue::new(
-                    match provider {
-                        SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/organization",
-                        SharedAuthProvider::Neon => "/sharedAuthTopology/neon/organization",
-                    },
-                    "shared_auth_provider_org_mismatch",
-                    "provider organization must exactly match the GitHub organization",
-                )
-            },
-        );
+    let org_mismatch = (!valid_org_slug(&topology.organization)
+        || topology.organization != github_org)
+        .then(|| {
+            ValidationIssue::new(
+                match provider {
+                    SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/organization",
+                    SharedAuthProvider::Neon => "/sharedAuthTopology/neon/organization",
+                },
+                "shared_auth_provider_org_mismatch",
+                "provider organization must exactly match the GitHub organization",
+            )
+        });
     let issuer_invalid = (!valid_https_issuer(&topology.issuer)).then(|| {
         ValidationIssue::new(
             match provider {
@@ -445,7 +444,10 @@ impl SharedAuthReadyStack {
         let issues: Vec<ValidationIssue> = validate_config(&config)
             .into_iter()
             .chain(topology.validation_issues())
-            .chain(integration_issues(&config.integrations.shared_auth, &topology))
+            .chain(integration_issues(
+                &config.integrations.shared_auth,
+                &topology,
+            ))
             .collect();
         if !issues.is_empty() {
             return Err(issues);

@@ -506,8 +506,14 @@ fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
     .chain([
         ("retry-after", seconds_ceil(retry_after_ms).to_string()),
         ("x-ores-rate-limit-policy", decision.policy_id.clone()),
-        ("x-ores-rate-limit-layer", decision.layer.as_str().to_owned()),
-        ("x-ores-rate-limit-decision", decision.kind.as_str().to_owned()),
+        (
+            "x-ores-rate-limit-layer",
+            decision.layer.as_str().to_owned(),
+        ),
+        (
+            "x-ores-rate-limit-decision",
+            decision.kind.as_str().to_owned(),
+        ),
     ])
     .map(|(name, value)| (name.to_owned(), value))
     .collect();

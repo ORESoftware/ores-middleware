@@ -434,8 +434,10 @@ const RATE_LIMIT_RULES: &[Rule] = &[
                     .any(|signal| !signal.is_edge_safe()),
             "/settings/rateLimit/keyBy",
             "edge_identity_forbidden",
-            || "Cloudflare edge policies may use only IP, IP prefix, route, and method signals"
-                .into(),
+            || {
+                "Cloudflare edge policies may use only IP, IP prefix, route, and method signals"
+                    .into()
+            },
         )
     },
     |config| {

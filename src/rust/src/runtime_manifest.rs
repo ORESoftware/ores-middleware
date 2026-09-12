@@ -409,10 +409,9 @@ fn strip_comment(line: &str) -> Result<&str, RuntimeManifestError> {
         Open { quoted: bool },
         CommentAt(usize),
     }
-    let scan = line
-        .bytes()
-        .enumerate()
-        .try_fold(Scan::Open { quoted: false }, |scan, (index, byte)| match scan {
+    let scan = line.bytes().enumerate().try_fold(
+        Scan::Open { quoted: false },
+        |scan, (index, byte)| match scan {
             Scan::CommentAt(_) => Ok(scan),
             Scan::Open { quoted } => match byte {
                 b'"' => Ok(Scan::Open { quoted: !quoted }),
@@ -420,7 +419,8 @@ fn strip_comment(line: &str) -> Result<&str, RuntimeManifestError> {
                 b'\\' if quoted => Err(RuntimeManifestError::InvalidDocument),
                 _ => Ok(Scan::Open { quoted }),
             },
-        })?;
+        },
+    )?;
     match scan {
         Scan::CommentAt(index) => Ok(&line[..index]),
         Scan::Open { quoted: false } => Ok(line),
