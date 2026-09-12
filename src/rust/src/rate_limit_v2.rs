@@ -121,11 +121,7 @@ impl RateLimitPolicyV2 {
                     "refillIntervalMs",
                     "token-bucket-refill-interval-required",
                 ),
-                forbid(
-                    self.window_ms,
-                    "windowMs",
-                    "token-bucket-window-forbidden",
-                ),
+                forbid(self.window_ms, "windowMs", "token-bucket-window-forbidden"),
             ],
             RateLimitAlgorithmV2::SlidingWindowCounter
             | RateLimitAlgorithmV2::FixedWindow
@@ -143,11 +139,7 @@ impl RateLimitPolicyV2 {
                 ),
             ],
             RateLimitAlgorithmV2::Concurrency => [
-                forbid(
-                    self.window_ms,
-                    "windowMs",
-                    "concurrency-window-forbidden",
-                ),
+                forbid(self.window_ms, "windowMs", "concurrency-window-forbidden"),
                 forbid(
                     self.refill_tokens,
                     "refillTokens",
@@ -373,11 +365,7 @@ fn forbid(
     code: &'static str,
 ) -> Option<RateLimitPolicyViolation> {
     value.is_some().then(|| {
-        RateLimitPolicyViolation::new(
-            code,
-            path,
-            "field is not valid for the selected algorithm",
-        )
+        RateLimitPolicyViolation::new(code, path, "field is not valid for the selected algorithm")
     })
 }
 
