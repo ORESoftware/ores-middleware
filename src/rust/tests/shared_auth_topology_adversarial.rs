@@ -107,10 +107,7 @@ fn duplicate_provider_issuer_is_a_distinct_topology_violation() {
 
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].path, "/sharedAuthTopology/providers");
-    assert_eq!(
-        issues[0].code,
-        "shared_auth_provider_issuers_must_differ"
-    );
+    assert_eq!(issues[0].code, "shared_auth_provider_issuers_must_differ");
 }
 
 #[test]
@@ -127,10 +124,7 @@ fn admin_availability_first_mode_fails_without_spurious_provider_errors() {
 
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].path, "/sharedAuthTopology/decisionMode");
-    assert_eq!(
-        issues[0].code,
-        "shared_auth_admin_requires_strict_paired"
-    );
+    assert_eq!(issues[0].code, "shared_auth_admin_requires_strict_paired");
 }
 
 #[test]
