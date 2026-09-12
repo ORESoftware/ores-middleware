@@ -263,13 +263,14 @@ fn parse_json_model(schema: &Value, name: &str) -> Result<Value> {
     Ok(Value::Object(properties))
 }
 
-fn compare(label: &str, left: &Value, right: &Value, out: &mut Vec<Discrepancy>) {
-    if left != right {
-        out.push(Discrepancy::new(
+/// The discrepancy between two peer-authority views of `label`, if any.
+fn compare(label: &str, left: &Value, right: &Value) -> Option<Discrepancy> {
+    (left != right).then(|| {
+        Discrepancy::new(
             "peer-contract-mismatch",
             format!("{label}: TypeSpec={left}; JSON-Schema={right}"),
-        ));
-    }
+        )
+    })
 }
 
 fn check_topology(topology: &Value) -> Vec<Discrepancy> {
@@ -364,24 +365,33 @@ pub fn run(root: &Path) -> Result<Vec<Discrepancy>> {
     let topology: Value =
         serde_json::from_slice(&fs::read(root.join("contracts/authority-topology.json"))?)?;
 
-    let mut discrepancies = check_topology(&topology);
-    for name in ["DocsRepresentation", "DocsAction"] {
-        let left = serde_json::to_value(parse_tsp_enum(&tsp, name)?)?;
-        let right = schema
-            .pointer(&format!("/$defs/{name}/enum"))
-            .cloned()
-            .ok_or_else(|| format!("missing JSON Schema enum {name}"))?;
-        compare(&format!("enum {name}"), &left, &right, &mut discrepancies);
-    }
-    for name in ["DocsRequest", "DocsDecision"] {
-        compare(
-            &format!("model {name}"),
-            &parse_tsp_model(&tsp, name)?,
-            &parse_json_model(&schema, name)?,
-            &mut discrepancies,
-        );
-    }
-    Ok(discrepancies)
+    let enum_discrepancies = ["DocsRepresentation", "DocsAction"]
+        .into_iter()
+        .map(|name| -> Result<Option<Discrepancy>> {
+            let left = serde_json::to_value(parse_tsp_enum(&tsp, name)?)?;
+            let right = schema
+                .pointer(&format!("/$defs/{name}/enum"))
+                .cloned()
+                .ok_or_else(|| format!("missing JSON Schema enum {name}"))?;
+            Ok(compare(&format!("enum {name}"), &left, &right))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let model_discrepancies = ["DocsRequest", "DocsDecision"]
+        .into_iter()
+        .map(|name| -> Result<Option<Discrepancy>> {
+            Ok(compare(
+                &format!("model {name}"),
+                &parse_tsp_model(&tsp, name)?,
+                &parse_json_model(&schema, name)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(check_topology(&topology)
+        .into_iter()
+        .chain(enum_discrepancies.into_iter().flatten())
+        .chain(model_discrepancies.into_iter().flatten())
+        .collect())
 }
 
 pub fn write_report(path: &Path, discrepancies: &[Discrepancy]) -> Result<()> {

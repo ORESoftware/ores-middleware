@@ -134,20 +134,34 @@ export function defaultConfig(serviceName: string): MiddlewareConfig {
   };
 }
 
+/** A pure validation rule: config in, zero or more issues out. */
+type ConfigRule = (config: MiddlewareConfig) => readonly ValidationIssue[];
+
+const issueWhen = (failed: boolean, path: string, code: string, message: string): readonly ValidationIssue[] =>
+  failed ? [{ path, code, message }] : [];
+
+/**
+ * Rules are independent values composed by `validateConfig`; none of them
+ * shares or mutates an accumulator, so each can be read and tested alone.
+ */
+const configRules: readonly ConfigRule[] = [
+  (c) => issueWhen(c.contractVersion !== contractVersion, "/contractVersion", "unsupported_version", `expected ${contractVersion}`),
+  (c) => issueWhen(!Number.isFinite(c.settings.timeoutMs) || c.settings.timeoutMs <= 0, "/settings/timeoutMs", "range", "timeout must be positive"),
+  (c) => issueWhen(!Number.isSafeInteger(c.settings.maxBodyBytes) || c.settings.maxBodyBytes <= 0, "/settings/maxBodyBytes", "range", "body limit must be a positive safe integer"),
+  (c) => issueWhen(c.settings.rateLimit.enabled && (c.settings.rateLimit.capacity <= 0 || c.settings.rateLimit.refillPerSecond <= 0), "/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill"),
+  (c) => issueWhen(c.settings.faultInjection.errorRate < 0 || c.settings.faultInjection.errorRate > 1 || c.settings.faultInjection.dropRate < 0 || c.settings.faultInjection.dropRate > 1, "/settings/faultInjection", "range", "fault rates must be within 0..=1"),
+  (c) => issueWhen(c.environment === "production" && c.settings.faultInjection.enabled, "/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production"),
+  (c) => issueWhen(c.environment === "production" && c.settings.testAuthBypass.enabled, "/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production"),
+  (c) => issueWhen(c.integrations.sharedAuth.failOpen, "/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed"),
+  (c) => issueWhen(c.settings.tls.mode === "trusted-proxy" && c.settings.tls.trustedProxyCidrs.length === 0, "/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs"),
+  (c) =>
+    c.requiredCapabilities
+      .filter((capability) => !(capabilities as readonly string[]).includes(capability))
+      .map((capability) => ({ path: "/requiredCapabilities", code: "unknown_capability", message: capability }))
+];
+
 export function validateConfig(config: MiddlewareConfig): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  const issue = (path: string, code: string, message: string) => issues.push({ path, code, message });
-  if (config.contractVersion !== contractVersion) issue("/contractVersion", "unsupported_version", `expected ${contractVersion}`);
-  if (!Number.isFinite(config.settings.timeoutMs) || config.settings.timeoutMs <= 0) issue("/settings/timeoutMs", "range", "timeout must be positive");
-  if (!Number.isSafeInteger(config.settings.maxBodyBytes) || config.settings.maxBodyBytes <= 0) issue("/settings/maxBodyBytes", "range", "body limit must be a positive safe integer");
-  if (config.settings.rateLimit.enabled && (config.settings.rateLimit.capacity <= 0 || config.settings.rateLimit.refillPerSecond <= 0)) issue("/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill");
-  if (config.settings.faultInjection.errorRate < 0 || config.settings.faultInjection.errorRate > 1 || config.settings.faultInjection.dropRate < 0 || config.settings.faultInjection.dropRate > 1) issue("/settings/faultInjection", "range", "fault rates must be within 0..=1");
-  if (config.environment === "production" && config.settings.faultInjection.enabled) issue("/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production");
-  if (config.environment === "production" && config.settings.testAuthBypass.enabled) issue("/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production");
-  if (config.integrations.sharedAuth.failOpen) issue("/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed");
-  if (config.settings.tls.mode === "trusted-proxy" && config.settings.tls.trustedProxyCidrs.length === 0) issue("/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs");
-  for (const capability of config.requiredCapabilities) if (!(capabilities as readonly string[]).includes(capability)) issue("/requiredCapabilities", "unknown_capability", capability);
-  return issues;
+  return configRules.flatMap((rule) => rule(config));
 }
 
 class MemoryTokenBucket {
@@ -155,12 +169,12 @@ class MemoryTokenBucket {
   constructor(private readonly now: () => number) {}
   async allow(key: string, capacity: number, refillPerSecond: number): Promise<boolean> {
     const now = this.now();
-    const bucket = this.#buckets.get(key) ?? { tokens: capacity, last: now };
-    bucket.tokens = Math.min(capacity, bucket.tokens + ((now - bucket.last) / 1_000) * refillPerSecond);
-    bucket.last = now;
-    const allowed = bucket.tokens >= 1;
-    if (allowed) bucket.tokens -= 1;
-    this.#buckets.set(key, bucket);
+    const previous = this.#buckets.get(key) ?? { tokens: capacity, last: now };
+    // The bucket is a new value derived from the previous one; the Map is the
+    // one stateful store and is replaced entry-by-entry, never edited in place.
+    const refilled = Math.min(capacity, previous.tokens + ((now - previous.last) / 1_000) * refillPerSecond);
+    const allowed = refilled >= 1;
+    this.#buckets.set(key, { tokens: allowed ? refilled - 1 : refilled, last: now });
     return allowed;
   }
 }
@@ -177,6 +191,19 @@ class MemoryIdempotencyStore {
   async set(key: string, value: StoredResponse): Promise<void> { this.#entries.set(key, value); }
 }
 
+/** The post-authentication request context, built as a new value from the pre-auth one. */
+function withAuth(context: RequestContext, auth: AuthDecision): RequestContext {
+  return {
+    ...context,
+    userId: auth.userId,
+    tenantId: auth.tenantId,
+    baggage: {
+      ...context.baggage,
+      ...Object.fromEntries(Object.entries(auth.claims ?? {}).filter(([key]) => key.startsWith("otel.")))
+    }
+  };
+}
+
 export function createMiddleware(config: MiddlewareConfig, dependencies: MiddlewareDependencies = {}): PortableMiddleware {
   const issues = validateConfig(config);
   if (issues.length > 0) throw new MiddlewareConfigError(issues);
@@ -189,7 +216,7 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const started = now();
     const requestId = validToken(request.headers.get(config.settings.requestIdHeader)) ?? crypto.randomUUID();
     const traceId = parseTraceId(request.headers.get(config.settings.traceHeader)) ?? crypto.randomUUID().replaceAll("-", "");
-    let context: RequestContext = {
+    const initialContext: RequestContext = {
       requestId,
       traceId,
       locale: request.headers.get("accept-language") ?? undefined,
@@ -201,19 +228,22 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const preAuthOutcome = await runOperationBoundary(
       { transport: "http", scope: "request", name: "middleware.pre_auth", signal: request.signal },
       async () => {
+    // Every early exit carries the pre-auth context; the success path carries the
+    // authenticated one, so nothing outside this closure depends on a mutated binding.
+    const early = (response: Response) => ({ response, context: initialContext });
     const contentLength = Number(request.headers.get("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > config.settings.maxBodyBytes) return problem(413, "payload_too_large", "request body exceeds configured limit");
+    if (Number.isFinite(contentLength) && contentLength > config.settings.maxBodyBytes) return early(problem(413, "payload_too_large", "request body exceeds configured limit"));
     const accepted = request.headers.get("accept");
-    if (accepted && accepted !== "*/*" && !config.settings.contentRepresentations.some((representation) => accepted.includes(representation))) return problem(406, "not_acceptable", "no supported representation was requested");
+    if (accepted && accepted !== "*/*" && !config.settings.contentRepresentations.some((representation) => accepted.includes(representation))) return early(problem(406, "not_acceptable", "no supported representation was requested"));
 
     const url = new URL(request.url);
     const forwardedProto = request.headers.get("x-forwarded-proto");
     const trustedProxy = dependencies.isTrustedProxy?.(request) ?? false;
     const effectiveHttps = url.protocol === "https:" || (trustedProxy && forwardedProto === "https");
-    if (config.settings.tls.requireHttps && !effectiveHttps) return problem(426, "https_required", "HTTPS is required");
-    if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer");
+    if (config.settings.tls.requireHttps && !effectiveHttps) return early(problem(426, "https_required", "HTTPS is required"));
+    if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return early(problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer"));
 
-    if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, context))) return problem(403, "ip_policy_denied", "request source is not permitted");
+    if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, initialContext))) return early(problem(403, "ip_policy_denied", "request source is not permitted"));
 
     const contractFailure = await checkRequestContract(
       dependencies.requestContractValidator,
@@ -224,34 +254,24 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
       const detail = contractFailure.code === "unknown_operation"
         ? "no request contract matched the HTTP method and pathname"
         : "request path, query, headers, or JSON payload failed contract validation";
-      return problem(contractFailure.status, contractFailure.code, detail);
+      return early(problem(contractFailure.status, contractFailure.code, detail));
     }
 
     if (config.settings.rateLimit.enabled) {
-      const rateKey = [context.tenantId ?? "_", context.userId ?? "_", request.headers.get("x-real-ip") ?? "_", url.pathname].join(":");
-      if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) return problem(429, "rate_limited", "rate limit exceeded");
+      const rateKey = [initialContext.tenantId ?? "_", initialContext.userId ?? "_", request.headers.get("x-real-ip") ?? "_", url.pathname].join(":");
+      if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) return early(problem(429, "rate_limited", "rate limit exceeded"));
     }
 
     const canBypass = config.environment === "test" || config.environment === "staging";
     const bypassRequested = config.settings.testAuthBypass.enabled && request.headers.get(config.settings.testAuthBypass.headerName) === "true";
-    let auth: AuthDecision = {};
-    if (bypassRequested) {
-      if (!canBypass || !dependencies.resolveTestIdentity) return problem(403, "test_bypass_denied", "test identity bypass is unavailable");
-      auth = await dependencies.resolveTestIdentity(request, context);
-    } else if (dependencies.authVerifier) {
-      auth = await dependencies.authVerifier(request, context);
-    }
-    context = {
-      ...context,
-      userId: auth.userId,
-      tenantId: auth.tenantId,
-      baggage: {
-        ...context.baggage,
-        ...Object.fromEntries(
-          Object.entries(auth.claims ?? {}).filter(([key]) => key.startsWith("otel."))
-        )
-      }
-    };
+    if (bypassRequested && (!canBypass || !dependencies.resolveTestIdentity)) return early(problem(403, "test_bypass_denied", "test identity bypass is unavailable"));
+    const auth: AuthDecision = bypassRequested
+      ? await dependencies.resolveTestIdentity!(request, initialContext)
+      : dependencies.authVerifier
+        ? await dependencies.authVerifier(request, initialContext)
+        : {};
+    // The authenticated context is a new object; the pre-auth context is never edited.
+    const context: RequestContext = withAuth(initialContext, auth);
 
     const authenticatedOutcome = await runOperationBoundary(
       { transport: "http", scope: "request", name: "middleware.request", signal: request.signal },
@@ -271,10 +291,11 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     }
 
     await dependencies.telemetry?.started(context, request);
-    let response = await withDeadline(config.settings.timeoutMs, () => next(request));
-
-    response = await attachEtag(request, response);
-    response = maybeCompress(config, request, response);
+    const response = maybeCompress(
+      config,
+      request,
+      await attachEtag(request, await withDeadline(config.settings.timeoutMs, () => next(request)))
+    );
     // Observers and persistence consume the semantic response before
     // request-specific security and correlation headers are finalized.
     const durationMs = Math.max(0, now() - started);
@@ -299,17 +320,17 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const response = authenticatedOutcome.ok
       ? authenticatedOutcome.value
       : operationFailureResponse(authenticatedOutcome.failure);
-    return response;
+    return { response, context };
       },
       {
-        context: operationContextFromRequestContext(context),
+        context: operationContextFromRequestContext(initialContext),
         reportFailure: dependencies.operationFailureReporter
       }
     );
-    const response = preAuthOutcome.ok
+    const { response, context: finalContext } = preAuthOutcome.ok
       ? preAuthOutcome.value
-      : operationFailureResponse(preAuthOutcome.failure);
-    return attachHeaders(config, context, response);
+      : { response: operationFailureResponse(preAuthOutcome.failure), context: initialContext };
+    return attachHeaders(config, finalContext, response);
   };
 }
 

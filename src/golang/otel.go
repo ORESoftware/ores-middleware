@@ -50,30 +50,18 @@ func OresLoggerFromContext(ctx context.Context) (*nextloggers.Logger, bool) {
 // ToOresLogContext maps the data-only middleware context onto the canonical
 // ores-otel context. Only allow-listed correlation metadata is propagated.
 func ToOresLogContext(value RequestContext) nextloggers.LogContext {
-	fields := map[string]any{
-		"request.id":                 value.RequestID,
-		"trace.id":                   value.TraceID,
-		"request.started_at_unix_ms": value.StartedAtUnixMS,
-	}
-	if value.UserID != "" {
-		fields["user.id"] = value.UserID
-	}
-	if value.TenantID != "" {
-		fields["tenant.id"] = value.TenantID
-	}
-	if value.Locale != "" {
-		fields["request.locale"] = value.Locale
-	}
-	if value.DeadlineUnixMS > 0 {
-		fields["request.deadline_unix_ms"] = value.DeadlineUnixMS
-	}
-
-	baggage := make(map[string]string)
-	for key, item := range value.Baggage {
-		if strings.HasPrefix(key, "otel.") {
-			baggage[key] = item
-		}
-	}
+	fields := mapOf(
+		kv[string, any]("request.id", value.RequestID),
+		kv[string, any]("trace.id", value.TraceID),
+		kv[string, any]("request.started_at_unix_ms", value.StartedAtUnixMS),
+		kvWhen[string, any](value.UserID != "", "user.id", value.UserID),
+		kvWhen[string, any](value.TenantID != "", "tenant.id", value.TenantID),
+		kvWhen[string, any](value.Locale != "", "request.locale", value.Locale),
+		kvWhen[string, any](value.DeadlineUnixMS > 0, "request.deadline_unix_ms", value.DeadlineUnixMS),
+	)
+	baggage := filterMap(value.Baggage, func(key, _ string) bool {
+		return strings.HasPrefix(key, "otel.")
+	})
 
 	var user map[string]any
 	if value.UserID != "" {
@@ -105,14 +93,6 @@ func WithOresLogContext(parent context.Context, value RequestContext) context.Co
 	return nextloggers.WithLogContext(parent, ToOresLogContext(value))
 }
 
-func cloneOresFields(source map[string]any) map[string]any {
-	target := make(map[string]any, len(source))
-	for key, value := range source {
-		target[key] = value
-	}
-	return target
-}
-
 // CreateOresRequestLogger derives a logger per request while retaining the
 // root logger's transports, level, lifecycle hooks, and configured file fields.
 func CreateOresRequestLogger(root *nextloggers.Logger, value RequestContext) *nextloggers.Logger {
@@ -120,14 +100,9 @@ func CreateOresRequestLogger(root *nextloggers.Logger, value RequestContext) *ne
 		return nil
 	}
 	logContext := ToOresLogContext(value)
-	fields := cloneOresFields(root.Fields)
-	for key, item := range logContext.Fields {
-		fields[key] = item
-	}
-	user := cloneOresFields(root.CurrentUser)
-	for key, item := range logContext.LoggedInUser {
-		user[key] = item
-	}
+	// Both maps are new values: the root logger's maps are never written to.
+	fields := mergeMaps(root.Fields, logContext.Fields)
+	user := mergeMaps(root.CurrentUser, logContext.LoggedInUser)
 	name := "request"
 	if root.Name != "" {
 		name = root.Name + ":request"

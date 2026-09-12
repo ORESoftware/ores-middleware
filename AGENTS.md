@@ -9,3 +9,6 @@ Additional repository rules:
 - Never commit credentials, decrypted environment files, or request payloads containing secrets or personal data.
 - Middleware test bypass and fault injection are disabled unless the runtime environment is explicitly `test` or `staging`, and production startup must fail if either is enabled.
 - TLS may terminate in-process or at a trusted proxy. Forwarded headers are ignored unless the peer is in the configured trusted-proxy set.
+- Build values, don't mutate them: functions return new values instead of filling `&mut`/pointer
+  parameters or caller-owned collections; every language. Deliberate exceptions on hot paths carry a
+  `HOT-PATH (imperative by design)` comment with the reason. See [`FUNCTIONAL-STYLE.md`](./FUNCTIONAL-STYLE.md).

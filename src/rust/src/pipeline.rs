@@ -87,11 +87,7 @@ impl MiddlewareStack {
         ));
         let rate_limit_key_deriver: DynRateLimitKeyDeriver = match policy.key_derivation {
             RateLimitKeyDerivationMode::EphemeralHmacSha256 => {
-                let mut secret = [0_u8; 32];
-                let first = Uuid::new_v4();
-                let second = Uuid::new_v4();
-                secret[..16].copy_from_slice(first.as_bytes());
-                secret[16..].copy_from_slice(second.as_bytes());
+                let secret: [u8; 32] = ephemeral_secret(Uuid::new_v4(), Uuid::new_v4());
                 Arc::new(HmacSha256KeyDeriver::from_key(secret))
             }
             RateLimitKeyDerivationMode::ExternalHmacSha256 => {
@@ -365,38 +361,40 @@ impl MiddlewareStack {
         })
         .await;
 
-        let mut headers = BTreeMap::new();
-        headers.insert(
+        let security = &self.config.settings.security_headers;
+        let request_id_header = (
             self.config.settings.request_id_header.clone(),
             context.request_id,
         );
-        if self.config.settings.security_headers.enabled {
-            headers.insert("x-content-type-options".into(), "nosniff".into());
-            headers.insert(
-                "x-frame-options".into(),
-                self.config.settings.security_headers.frame_options.clone(),
-            );
-            headers.insert(
-                "referrer-policy".into(),
-                "strict-origin-when-cross-origin".into(),
-            );
-            headers.insert(
-                "strict-transport-security".into(),
-                format!(
-                    "max-age={}; includeSubDomains",
-                    self.config.settings.security_headers.hsts_max_age_seconds
+        let security_headers = security.enabled.then(|| {
+            [
+                ("x-content-type-options".to_owned(), "nosniff".to_owned()),
+                ("x-frame-options".to_owned(), security.frame_options.clone()),
+                (
+                    "referrer-policy".to_owned(),
+                    "strict-origin-when-cross-origin".to_owned(),
                 ),
-            );
-            if let Some(csp) = &self
-                .config
-                .settings
-                .security_headers
-                .content_security_policy
-            {
-                headers.insert("content-security-policy".into(), csp.clone());
-            }
-        }
-        headers
+                (
+                    "strict-transport-security".to_owned(),
+                    format!(
+                        "max-age={}; includeSubDomains",
+                        security.hsts_max_age_seconds
+                    ),
+                ),
+            ]
+        });
+        let csp_header = security
+            .enabled
+            .then(|| security.content_security_policy.clone())
+            .flatten()
+            .map(|csp| ("content-security-policy".to_owned(), csp));
+
+        // The response header set is assembled as one value from its parts rather
+        // than by inserting into a shared mutable map.
+        std::iter::once(request_id_header)
+            .chain(security_headers.into_iter().flatten())
+            .chain(csp_header)
+            .collect()
     }
 }
 
@@ -495,32 +493,24 @@ fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
         "rate limit exceeded"
     };
 
-    let mut headers = BTreeMap::new();
-    headers.insert("ratelimit-limit".into(), decision.limit.to_string());
-    headers.insert("ratelimit-remaining".into(), decision.remaining.to_string());
-    if let Some(reset_after_ms) = decision.reset_after_ms {
-        headers.insert(
-            "ratelimit-reset".into(),
-            seconds_ceil(reset_after_ms).to_string(),
-        );
-    }
+    let reset_header = decision
+        .reset_after_ms
+        .map(|reset_after_ms| ("ratelimit-reset", seconds_ceil(reset_after_ms).to_string()));
     let retry_after_ms = decision.retry_after_ms.unwrap_or(1_000);
-    headers.insert(
-        "retry-after".into(),
-        seconds_ceil(retry_after_ms).to_string(),
-    );
-    headers.insert(
-        "x-ores-rate-limit-policy".into(),
-        decision.policy_id.clone(),
-    );
-    headers.insert(
-        "x-ores-rate-limit-layer".into(),
-        decision.layer.as_str().into(),
-    );
-    headers.insert(
-        "x-ores-rate-limit-decision".into(),
-        decision.kind.as_str().into(),
-    );
+    let headers: BTreeMap<String, String> = [
+        ("ratelimit-limit", decision.limit.to_string()),
+        ("ratelimit-remaining", decision.remaining.to_string()),
+    ]
+    .into_iter()
+    .chain(reset_header)
+    .chain([
+        ("retry-after", seconds_ceil(retry_after_ms).to_string()),
+        ("x-ores-rate-limit-policy", decision.policy_id.clone()),
+        ("x-ores-rate-limit-layer", decision.layer.as_str().to_owned()),
+        ("x-ores-rate-limit-decision", decision.kind.as_str().to_owned()),
+    ])
+    .map(|(name, value)| (name.to_owned(), value))
+    .collect();
 
     MiddlewareError::new(status, code, message).with_headers(headers)
 }
@@ -615,11 +605,20 @@ fn valid_token(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
+/// Concatenate two v4 UUIDs into one 32-byte ephemeral HMAC key, as a value.
+fn ephemeral_secret(first: Uuid, second: Uuid) -> [u8; 32] {
+    let mut secret = [0_u8; 32];
+    // Fixed-size byte assembly: an array literal cannot be spliced from two
+    // 16-byte slices without `copy_from_slice`, so this is the one local write.
+    secret[..16].copy_from_slice(first.as_bytes());
+    secret[16..].copy_from_slice(second.as_bytes());
+    secret
+}
+
 fn parse_trace_id(header: Option<&String>) -> Option<String> {
     let value = header?;
-    let mut parts = value.split('-');
-    let _version = parts.next()?;
-    let trace_id = parts.next()?.to_ascii_lowercase();
+    // `traceparent` is `<version>-<trace-id>-...`; take the second dash-separated field.
+    let trace_id = value.split('-').nth(1)?.to_ascii_lowercase();
     (trace_id.len() == 32
         && trace_id != "00000000000000000000000000000000"
         && trace_id.bytes().all(|byte| byte.is_ascii_hexdigit()))

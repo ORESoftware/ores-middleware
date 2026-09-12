@@ -9,7 +9,9 @@ use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::{
     ActiveRequest, AuthDecision, AuthVerifier, IntegrationError, MiddlewareConfig, MiddlewareError,
-    MiddlewareStack, RequestMetadata, ValidationIssue, config::IntegrationMode, validate_config,
+    MiddlewareStack, RequestMetadata, ValidationIssue,
+    config::{IntegrationMode, SharedAuthIntegration},
+    validate_config,
 };
 
 pub const SUPABASE_AUTH_DATABASE_URL_ENV: &str = "SUPABASE_AUTH_DATABASE_URL";
@@ -193,80 +195,142 @@ impl SharedAuthRuntimeTopology {
         }
     }
 
+    /// Validation is a composition of pure rules: each rule maps the topology to at
+    /// most one issue, and the provider rules are the same function applied to each
+    /// provider. Nothing is accumulated by mutation.
     #[must_use]
     pub fn validation_issues(&self) -> Vec<ValidationIssue> {
-        let mut issues = Vec::new();
-        if !valid_org_slug(&self.github_org) {
-            issues.push(ValidationIssue::new(
+        let org_slug = (!valid_org_slug(&self.github_org)).then(|| {
+            ValidationIssue::new(
                 "/sharedAuthTopology/githubOrg",
                 "invalid_org_slug",
                 "GitHub organization must be a non-empty organization slug",
-            ));
-        }
-        validate_provider_topology(
-            &mut issues,
-            SharedAuthProvider::Supabase,
-            &self.github_org,
-            &self.supabase,
-        );
-        validate_provider_topology(
-            &mut issues,
-            SharedAuthProvider::Neon,
-            &self.github_org,
-            &self.neon,
-        );
-        if self.supabase.issuer == self.neon.issuer {
-            issues.push(ValidationIssue::new(
+            )
+        });
+        let issuers_differ = (self.supabase.issuer == self.neon.issuer).then(|| {
+            ValidationIssue::new(
                 "/sharedAuthTopology/providers",
                 "shared_auth_provider_issuers_must_differ",
                 "Supabase Auth and Neon Auth must use independently identified issuers",
-            ));
-        }
-        if self.audience.trim().is_empty() {
-            issues.push(ValidationIssue::new(
+            )
+        });
+        let audience = self.audience.trim().is_empty().then(|| {
+            ValidationIssue::new(
                 "/sharedAuthTopology/audience",
                 "shared_auth_audience_required",
                 "Shared Auth audience must not be empty",
-            ));
-        }
-        if self.server_role.is_admin() && self.decision_mode != SharedAuthDecisionMode::StrictPaired
-        {
-            issues.push(ValidationIssue::new(
-                "/sharedAuthTopology/decisionMode",
-                "shared_auth_admin_requires_strict_paired",
-                "admin web and API servers require strict paired provider proof",
-            ));
-        }
-        issues
+            )
+        });
+        let admin_mode = (self.server_role.is_admin()
+            && self.decision_mode != SharedAuthDecisionMode::StrictPaired)
+            .then(|| {
+                ValidationIssue::new(
+                    "/sharedAuthTopology/decisionMode",
+                    "shared_auth_admin_requires_strict_paired",
+                    "admin web and API servers require strict paired provider proof",
+                )
+            });
+
+        org_slug
+            .into_iter()
+            .chain(provider_topology_issues(
+                SharedAuthProvider::Supabase,
+                &self.github_org,
+                &self.supabase,
+            ))
+            .chain(provider_topology_issues(
+                SharedAuthProvider::Neon,
+                &self.github_org,
+                &self.neon,
+            ))
+            .chain(issuers_differ)
+            .chain(audience)
+            .chain(admin_mode)
+            .collect()
     }
 }
 
-fn validate_provider_topology(
-    issues: &mut Vec<ValidationIssue>,
+/// Startup rules that tie the middleware's Shared Auth integration block to the
+/// runtime topology. Pure: config + topology in, issues out.
+fn integration_issues(
+    shared_auth: &SharedAuthIntegration,
+    topology: &SharedAuthRuntimeTopology,
+) -> impl Iterator<Item = ValidationIssue> {
+    let non_blank = |value: &Option<String>| {
+        value
+            .as_deref()
+            .is_some_and(|candidate| !candidate.trim().is_empty())
+    };
+    let verifier_required = matches!(shared_auth.mode, IntegrationMode::Disabled).then(|| {
+        ValidationIssue::new(
+            "/integrations/sharedAuth/mode",
+            "shared_auth_verifier_required",
+            "protected services must enable Shared Auth before startup",
+        )
+    });
+    let issuer_required = (!non_blank(&shared_auth.issuer)).then(|| {
+        ValidationIssue::new(
+            "/integrations/sharedAuth/issuer",
+            "shared_auth_issuer_required",
+            "Shared Auth issuer must be configured",
+        )
+    });
+    let audience_mismatch = (shared_auth.audience.as_deref() != Some(topology.audience.as_str()))
+        .then(|| {
+            ValidationIssue::new(
+                "/integrations/sharedAuth/audience",
+                "shared_auth_audience_mismatch",
+                "middleware audience must exactly match the topology audience",
+            )
+        });
+    let endpoint_required = (matches!(shared_auth.mode, IntegrationMode::Http)
+        && !non_blank(&shared_auth.jwks_uri)
+        && !non_blank(&shared_auth.introspection_url))
+    .then(|| {
+        ValidationIssue::new(
+            "/integrations/sharedAuth",
+            "shared_auth_verification_endpoint_required",
+            "HTTP Shared Auth requires JWKS or introspection configuration",
+        )
+    });
+    verifier_required
+        .into_iter()
+        .chain(issuer_required)
+        .chain(audience_mismatch)
+        .chain(endpoint_required)
+}
+
+/// Issues for one provider's topology, as a value. Applied once per provider by
+/// [`SharedAuthTopology::validation_issues`].
+fn provider_topology_issues(
     provider: SharedAuthProvider,
     github_org: &str,
     topology: &SharedAuthProviderTopology,
-) {
-    if !valid_org_slug(&topology.organization) || topology.organization != github_org {
-        issues.push(ValidationIssue::new(
-            match provider {
-                SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/organization",
-                SharedAuthProvider::Neon => "/sharedAuthTopology/neon/organization",
+) -> impl Iterator<Item = ValidationIssue> {
+    let org_mismatch =
+        (!valid_org_slug(&topology.organization) || topology.organization != github_org).then(
+            || {
+                ValidationIssue::new(
+                    match provider {
+                        SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/organization",
+                        SharedAuthProvider::Neon => "/sharedAuthTopology/neon/organization",
+                    },
+                    "shared_auth_provider_org_mismatch",
+                    "provider organization must exactly match the GitHub organization",
+                )
             },
-            "shared_auth_provider_org_mismatch",
-            "provider organization must exactly match the GitHub organization",
-        ));
-    }
-    if !valid_https_issuer(&topology.issuer) {
-        issues.push(ValidationIssue::new(
+        );
+    let issuer_invalid = (!valid_https_issuer(&topology.issuer)).then(|| {
+        ValidationIssue::new(
             match provider {
                 SharedAuthProvider::Supabase => "/sharedAuthTopology/supabase/issuer",
                 SharedAuthProvider::Neon => "/sharedAuthTopology/neon/issuer",
             },
             "shared_auth_provider_issuer_invalid",
             "provider issuer must be a non-empty HTTPS URL without whitespace",
-        ));
-    }
+        )
+    });
+    org_mismatch.into_iter().chain(issuer_invalid)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -378,55 +442,11 @@ impl SharedAuthReadyStack {
         S: SharedAuthProviderVerifier + 'static,
         N: SharedAuthProviderVerifier + 'static,
     {
-        let mut issues = validate_config(&config);
-        issues.extend(topology.validation_issues());
-
-        let shared_auth = &config.integrations.shared_auth;
-        if matches!(shared_auth.mode, IntegrationMode::Disabled) {
-            issues.push(ValidationIssue::new(
-                "/integrations/sharedAuth/mode",
-                "shared_auth_verifier_required",
-                "protected services must enable Shared Auth before startup",
-            ));
-        }
-        if shared_auth
-            .issuer
-            .as_deref()
-            .is_none_or(|issuer| issuer.trim().is_empty())
-        {
-            issues.push(ValidationIssue::new(
-                "/integrations/sharedAuth/issuer",
-                "shared_auth_issuer_required",
-                "Shared Auth issuer must be configured",
-            ));
-        }
-        match shared_auth.audience.as_deref() {
-            Some(audience) if audience == topology.audience => {}
-            _ => issues.push(ValidationIssue::new(
-                "/integrations/sharedAuth/audience",
-                "shared_auth_audience_mismatch",
-                "middleware audience must exactly match the topology audience",
-            )),
-        }
-        if matches!(shared_auth.mode, IntegrationMode::Http)
-            && shared_auth
-                .jwks_uri
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-                .is_none()
-            && shared_auth
-                .introspection_url
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-                .is_none()
-        {
-            issues.push(ValidationIssue::new(
-                "/integrations/sharedAuth",
-                "shared_auth_verification_endpoint_required",
-                "HTTP Shared Auth requires JWKS or introspection configuration",
-            ));
-        }
-
+        let issues: Vec<ValidationIssue> = validate_config(&config)
+            .into_iter()
+            .chain(topology.validation_issues())
+            .chain(integration_issues(&config.integrations.shared_auth, &topology))
+            .collect();
         if !issues.is_empty() {
             return Err(issues);
         }
@@ -646,13 +666,17 @@ fn auth_decision(
     supabase_status: &str,
     neon_status: &str,
 ) -> AuthDecision {
-    let mut claims = BTreeMap::new();
-    claims.insert(
-        "shared_auth.data_plane".into(),
-        topology.data_plane().as_str().into(),
-    );
-    claims.insert("shared_auth.supabase".into(), supabase_status.to_owned());
-    claims.insert("shared_auth.neon".into(), neon_status.to_owned());
+    let claims: BTreeMap<String, String> = [
+        (
+            "shared_auth.data_plane",
+            topology.data_plane().as_str().to_owned(),
+        ),
+        ("shared_auth.supabase", supabase_status.to_owned()),
+        ("shared_auth.neon", neon_status.to_owned()),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value))
+    .collect();
 
     AuthDecision {
         user_id: Some(principal.subject),
@@ -662,12 +686,11 @@ fn auth_decision(
 }
 
 fn valid_org_slug(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    first.is_ascii_alphanumeric()
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '-')
+    value.chars().next().is_some_and(char::is_ascii_alphanumeric)
+        && value
+            .chars()
+            .skip(1)
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 fn valid_https_issuer(value: &str) -> bool {
