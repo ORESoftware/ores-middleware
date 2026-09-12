@@ -109,70 +109,58 @@ impl RateLimitPolicyV2 {
             ));
         }
 
-        match self.algorithm {
-            RateLimitAlgorithmV2::TokenBucket => {
+        let algorithm_violations = match self.algorithm {
+            RateLimitAlgorithmV2::TokenBucket => [
                 require_positive(
                     self.refill_tokens,
                     "refillTokens",
                     "token-bucket-refill-tokens-required",
-                    &mut violations,
-                );
+                ),
                 require_bounded_duration(
                     self.refill_interval_ms,
                     "refillIntervalMs",
                     "token-bucket-refill-interval-required",
-                    &mut violations,
-                );
+                ),
                 forbid(
                     self.window_ms,
                     "windowMs",
                     "token-bucket-window-forbidden",
-                    &mut violations,
-                );
-            }
+                ),
+            ],
             RateLimitAlgorithmV2::SlidingWindowCounter
             | RateLimitAlgorithmV2::FixedWindow
-            | RateLimitAlgorithmV2::Gcra => {
-                require_bounded_duration(
-                    self.window_ms,
-                    "windowMs",
-                    "window-required",
-                    &mut violations,
-                );
+            | RateLimitAlgorithmV2::Gcra => [
+                require_bounded_duration(self.window_ms, "windowMs", "window-required"),
                 forbid(
                     self.refill_tokens,
                     "refillTokens",
                     "window-refill-tokens-forbidden",
-                    &mut violations,
-                );
+                ),
                 forbid(
                     self.refill_interval_ms,
                     "refillIntervalMs",
                     "window-refill-interval-forbidden",
-                    &mut violations,
-                );
-            }
-            RateLimitAlgorithmV2::Concurrency => {
+                ),
+            ],
+            RateLimitAlgorithmV2::Concurrency => [
                 forbid(
                     self.window_ms,
                     "windowMs",
                     "concurrency-window-forbidden",
-                    &mut violations,
-                );
+                ),
                 forbid(
                     self.refill_tokens,
                     "refillTokens",
                     "concurrency-refill-tokens-forbidden",
-                    &mut violations,
-                );
+                ),
                 forbid(
                     self.refill_interval_ms,
                     "refillIntervalMs",
                     "concurrency-refill-interval-forbidden",
-                    &mut violations,
-                );
-            }
-        }
+                ),
+            ],
+        };
+        violations.extend(algorithm_violations.into_iter().flatten());
 
         match self.consistency {
             RateLimitConsistency::Strict => {
@@ -351,14 +339,15 @@ fn require_positive(
     value: Option<u64>,
     path: &'static str,
     code: &'static str,
-    violations: &mut Vec<RateLimitPolicyViolation>,
-) {
-    if !value.is_some_and(|value| value > 0 && value <= MAX_CAPACITY) {
-        violations.push(RateLimitPolicyViolation::new(
+) -> Option<RateLimitPolicyViolation> {
+    if value.is_some_and(|value| value > 0 && value <= MAX_CAPACITY) {
+        None
+    } else {
+        Some(RateLimitPolicyViolation::new(
             code,
             path,
             "field is required and must be a positive bounded integer",
-        ));
+        ))
     }
 }
 
@@ -366,14 +355,15 @@ fn require_bounded_duration(
     value: Option<u64>,
     path: &'static str,
     code: &'static str,
-    violations: &mut Vec<RateLimitPolicyViolation>,
-) {
-    if !value.is_some_and(|value| value > 0 && value <= MAX_WINDOW_MS) {
-        violations.push(RateLimitPolicyViolation::new(
+) -> Option<RateLimitPolicyViolation> {
+    if value.is_some_and(|value| value > 0 && value <= MAX_WINDOW_MS) {
+        None
+    } else {
+        Some(RateLimitPolicyViolation::new(
             code,
             path,
             "duration is required and must be between 1 millisecond and 31 days",
-        ));
+        ))
     }
 }
 
@@ -381,15 +371,14 @@ fn forbid(
     value: Option<u64>,
     path: &'static str,
     code: &'static str,
-    violations: &mut Vec<RateLimitPolicyViolation>,
-) {
-    if value.is_some() {
-        violations.push(RateLimitPolicyViolation::new(
+) -> Option<RateLimitPolicyViolation> {
+    value.is_some().then(|| {
+        RateLimitPolicyViolation::new(
             code,
             path,
             "field is not valid for the selected algorithm",
-        ));
-    }
+        )
+    })
 }
 
 #[cfg(test)]
@@ -455,6 +444,29 @@ mod tests {
                 .validate()
                 .iter()
                 .any(|violation| violation.code == "edge-denial-forbidden-for-operation")
+        );
+    }
+
+    #[test]
+    fn algorithm_validation_returns_values_in_stable_order() {
+        let mut policy = RateLimitPolicyV2::audit_for(OperationClass::PublicRead);
+        policy.refill_tokens = None;
+        policy.refill_interval_ms = None;
+        policy.window_ms = Some(1_000);
+
+        let codes = policy
+            .validate()
+            .into_iter()
+            .map(|violation| violation.code)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            codes,
+            vec![
+                "token-bucket-refill-tokens-required",
+                "token-bucket-refill-interval-required",
+                "token-bucket-window-forbidden",
+            ]
         );
     }
 
