@@ -1,6 +1,9 @@
 name: Ores CLI public-readiness exact-head probe
 
 on:
+  push:
+    branches:
+      - DEN-3828-ores-cli-public-readiness-exact-head-probe
   pull_request:
     paths:
       - .github/workflows/ores-cli-public-readiness-exact-head.yml
