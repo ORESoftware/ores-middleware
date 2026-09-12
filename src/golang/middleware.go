@@ -178,11 +178,30 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		idempotencyKey := ""
 		if s.config.Settings.Idempotency.Enabled && slices.Contains(s.config.Settings.Idempotency.RequiredMethods, request.Method) {
 			if header := request.Header.Get(s.config.Settings.Idempotency.HeaderName); header != "" {
-				idempotencyKey = request.Method + ":" + request.URL.Path + ":" + header
+				var err error
+				idempotencyKey, err = ScopedIdempotencyKey(IdempotencyScope{
+					ServiceName: s.config.Integrations.OresOtel.ServiceName,
+					TenantID:    value.TenantID, UserID: value.UserID,
+					Method: request.Method, Path: request.URL.EscapedPath(),
+					Query: request.URL.RawQuery, IdempotencyKey: header,
+				})
+				if err != nil {
+					writeProblem(writer, 500, "invalid_replay_scope", "idempotency scope could not be established")
+					return
+				}
 			}
 			if idempotencyKey != "" {
 				if cached, ok, err := s.deps.IdempotencyStore.Get(ctx, idempotencyKey); err == nil && ok {
-					copyResponse(writer, cached.Status, cached.Header, cached.Body)
+					headers := cached.Header.Clone()
+					if headers == nil {
+						headers = make(http.Header)
+					}
+					applySecurityHeaders(s.config, headers)
+					headers.Set(s.config.Settings.RequestIDHeader, value.RequestID)
+					// A cached response does not own the current tracing span.
+					headers.Del("Traceparent")
+					headers.Del("Tracestate")
+					copyResponse(writer, cached.Status, headers, cached.Body)
 					return
 				}
 			}

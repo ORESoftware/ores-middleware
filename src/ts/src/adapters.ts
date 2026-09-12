@@ -1,17 +1,18 @@
 import {
   currentContext,
-  type NextHandler,
   type PortableMiddleware,
   type RequestContext
 } from "./index.js";
 
-export function denoHandler(middleware: PortableMiddleware, handler: NextHandler): NextHandler {
-  return (request) => middleware(request, handler);
-}
-
-export const bunHandler = denoHandler;
-export const nextjsMiddleware = denoHandler;
-export const nodeWebHandler = denoHandler;
+export {
+  fetchHandler,
+  fetchHandler as denoHandler,
+  fetchHandler as bunHandler,
+  fetchHandler as nextjsMiddleware,
+  fetchHandler as nextjsRouteHandler,
+  fetchHandler as nodeWebHandler
+} from "./fetch-adapter.js";
+export { hapiHandler, hapiLifecycle } from "./hapi.js";
 
 /** Stable carrier keys shared by Express, NestJS, and plain node:http adapters. */
 export const nodeRequestContextSymbol = Symbol.for(
@@ -276,31 +277,6 @@ export function honoMiddleware(middleware: PortableMiddleware) {
       return context.res;
     });
     context.res = response;
-  };
-}
-
-export function hapiLifecycle(middleware: PortableMiddleware) {
-  return async (request: any, h: any) => {
-    const url = request.url instanceof URL
-      ? request.url
-      : new URL(
-          String(request.url),
-          `${request.server.info.protocol}://${request.info.host}`
-        );
-    const webRequest = new Request(url, {
-      method: request.method.toUpperCase(),
-      headers: request.headers as HeadersInit,
-      body: request.payload ? JSON.stringify(request.payload) : undefined
-    });
-    const response = await middleware(
-      webRequest,
-      async () => new Response(null, { status: 204 })
-    );
-    if (response.status === 204) return h.continue;
-    return h
-      .response(Buffer.from(await response.arrayBuffer()))
-      .code(response.status)
-      .headers(Object.fromEntries(response.headers.entries()));
   };
 }
 

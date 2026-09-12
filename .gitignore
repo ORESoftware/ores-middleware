@@ -47,3 +47,4 @@ temp/
 
 # Root dependency cache
 /node_modules/
+# Temporary agent/tooling state

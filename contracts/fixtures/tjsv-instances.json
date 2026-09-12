@@ -1,0 +1,32 @@
+{
+  "docs-serving": {
+    "DocsAction": {
+      "valid": ["pass", "serve", "method-not-allowed", "not-acceptable", "stopped-for-evaluation"],
+      "invalid": ["continue", 204, null]
+    },
+    "DocsRepresentation": {
+      "valid": ["html", "catalog", "openapi", "openrpc", "connect", "hyper-schema"],
+      "invalid": ["json", false, null]
+    },
+    "DocsRequest": {
+      "valid": [{"method":"GET","path":"/docs"}, {"method":"HEAD","path":"/docs","runtimeContractDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "invalid": [{"path":"/docs"}, {"method":2,"path":"/docs"}, {"method":"GET","path":"/docs","extra":true}, {"method":"GET","path":"/docs","runtimeContractDigest":"bad"}]
+    },
+    "DocsDecision": {
+      "valid": [{"action":"pass","headOnly":false,"headers":{}}, {"action":"serve","status":65535,"representation":"html","headOnly":true,"headers":{"x-request-id":"test"}}],
+      "invalid": [{"action":"serve","headOnly":false,"headers":{},"status":65536}, {"action":"serve","headOnly":false,"headers":{"x-count":4}}, {"action":"serve","headers":{}}, {"action":"serve","headOnly":false,"headers":{},"extra":true}]
+    }
+  },
+  "idempotency-scope": {
+    "IdempotencyScope": {
+      "valid": [],
+      "invalid": [
+        {},
+        {"serviceName":"orders","tenantId":"a","userId":"b","method":"POST","path":"orders","query":"","idempotencyKey":"k"},
+        {"serviceName":"orders","tenantId":"a","userId":"b","method":"POST","path":"/orders","query":"","idempotencyKey":""},
+        {"serviceName":"orders","tenantId":"a","userId":"b","method":"POST","path":"/orders","query":"","idempotencyKey":"k","unexpected":true},
+        {"serviceName":"orders","userId":"b","method":"POST","path":"/orders","query":"","idempotencyKey":"k"}
+      ]
+    }
+  }
+}

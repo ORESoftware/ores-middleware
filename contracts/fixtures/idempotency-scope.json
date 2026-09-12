@@ -1,0 +1,18 @@
+{
+  "schema": "ores.middleware.idempotency-scope-fixtures/v2",
+  "cases": [
+    {"name":"baseline","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-a","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:5b53d5b5bfdd4f9e0c0332ce794ba807e173d1895517934aeb33acc0ac3ccdfd"},
+    {"name":"serviceName","scope":{"serviceName":"orders-admin","tenantId":"tenant-a","userId":"user-a","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:7f9e9d6171dfee6217c731584e84eeb950460c595f693ffbfbdd78b74f9b0262"},
+    {"name":"tenantId","scope":{"serviceName":"orders","tenantId":"tenant-b","userId":"user-a","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:dc5cbae5b20b6f374742d8e26e75bf1a7121a5859595460f0c0378ce965c8915"},
+    {"name":"userId","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-b","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:dcda75f60fd6de1b870e8426bbd3aed3ffe7c2c33ca176e8904fa2a5884f2f59"},
+    {"name":"method","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-a","method":"PUT","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:e562b45095a78b853d763b9e18d7ba2a3e73e652cdfe944b31af2a8be87fce8f"},
+    {"name":"path","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-a","method":"POST","path":"/orders/1","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:a9bc88449898fe03a3a5532efba070e325b13f0a58d91911fd7bdd17f6a7dedf"},
+    {"name":"query","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-a","method":"POST","path":"/orders","query":"currency=EUR","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:fcbf9794e071f2e454fa79f012821db91654b0eb310989a6a4b2a248ff5681f1"},
+    {"name":"idempotencyKey","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-a","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-2"},"expectedKey":"ores:idempotency:v2:e539b24bc0666a4ba5c6141f08658f2ca61844852ae57ef55853624d21026ea0"},
+    {"name":"delimiter-left","scope":{"serviceName":"orders","tenantId":"a:b","userId":"c","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:27e65b94c7d10a6b012af26220a5368f838ad21265a14f230e524d6900adce8e"},
+    {"name":"delimiter-right","scope":{"serviceName":"orders","tenantId":"a","userId":"b:c","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:1875227acfb60fbb2c86b753f5a0d29dbd0190f08207ed8d32f3d322bfb142a6"},
+    {"name":"unicode","scope":{"serviceName":"orders","tenantId":"Lima-é","userId":"😀","method":"POST","path":"/orders","query":"currency=USD","idempotencyKey":"llave-ñ"},"expectedKey":"ores:idempotency:v2:9a4eda2e79b0137e2c77f529aacc73a2ccb1c3200dbadcda06e71f2eb6418921"},
+    {"name":"anonymous","scope":{"serviceName":"orders","tenantId":"","userId":"","method":"POST","path":"/orders","query":"","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:dccdecca49db2b7f64e3f01cbaa8d10f33cfaa2d078b33f2f60c23b104673c0b"},
+    {"name":"encoded-path","scope":{"serviceName":"orders","tenantId":"tenant-a","userId":"user-a","method":"POST","path":"/orders/a%2Fb","query":"x=1&x=2","idempotencyKey":"retry-1"},"expectedKey":"ores:idempotency:v2:1d7b3d496fafa517910950eaf97eba2fc2718f8dc076c3d9c23a29c115305579"}
+  ]
+}

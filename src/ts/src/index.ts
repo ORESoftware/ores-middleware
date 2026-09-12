@@ -1,3 +1,5 @@
+import { boundRequestBody, PayloadTooLargeError } from "./request-body.js";
+import { scopedIdempotencyKey } from "./idempotency-scope.js";
 import { currentContext, runWithContext } from "./context.js";
 import {
   checkRequestContract,
@@ -215,6 +217,13 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
 
     if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, context))) return problem(403, "ip_policy_denied", "request source is not permitted");
 
+    try {
+      request = await boundRequestBody(request, config.settings.maxBodyBytes, config.settings.timeoutMs);
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) return problem(413, "payload_too_large", "request body exceeds configured limit");
+      throw error;
+    }
+
     const contractFailure = await checkRequestContract(
       dependencies.requestContractValidator,
       request,
@@ -265,8 +274,13 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     }
 
     const idempotencyKey = config.settings.idempotency.enabled && config.settings.idempotency.requiredMethods.includes(request.method.toUpperCase()) ? request.headers.get(config.settings.idempotency.headerName) : null;
-    if (idempotencyKey) {
-      const cached = await idempotencyStore.get(`${request.method}:${url.pathname}:${idempotencyKey}`);
+    const replayKey = idempotencyKey ? await scopedIdempotencyKey({
+      serviceName: config.integrations.oresOtel.serviceName,
+      tenantId: context.tenantId ?? "", userId: context.userId ?? "",
+      method: request.method, path: url.pathname, query: url.search.slice(1), idempotencyKey
+    }) : undefined;
+    if (replayKey) {
+      const cached = await idempotencyStore.get(replayKey);
       if (cached) return new Response(cached.body.slice(), { status: cached.status, headers: cached.headers });
     }
 
@@ -285,9 +299,9 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
       catch { if (!config.integrations.optoSync.failOpen) return problem(503, "sync_observer_failed", "opto-sync observation failed"); }
     }
 
-    if (idempotencyKey && response.status >= 200 && response.status < 300) {
+    if (replayKey && response.status >= 200 && response.status < 300) {
       const body = new Uint8Array(await response.clone().arrayBuffer());
-      await idempotencyStore.set(`${request.method}:${url.pathname}:${idempotencyKey}`, { status: response.status, headers: [...response.headers.entries()], body, expiresAt: now() + config.settings.idempotency.ttlSeconds * 1_000 });
+      await idempotencyStore.set(replayKey, { status: response.status, headers: [...response.headers.entries()], body, expiresAt: now() + config.settings.idempotency.ttlSeconds * 1_000 });
     }
     return response;
       },
