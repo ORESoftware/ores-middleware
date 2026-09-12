@@ -25,7 +25,9 @@ for (const [schemaPath, fixturePath] of cases) {
 const middlewareSchema = await loadJson("contracts/json-schema/middleware-stack.schema.json");
 const malformedIssuer = await loadJson("contracts/fixtures/stack.minimal.json");
 malformedIssuer.integrations.sharedAuth.issuer = "not a uri";
-const validateMalformedIssuer = ajv.compile(middlewareSchema);
+const malformedIssuerAjv = new Ajv2020({ allErrors: true, strict: true });
+addFormats(malformedIssuerAjv);
+const validateMalformedIssuer = malformedIssuerAjv.compile(middlewareSchema);
 assert.equal(
   validateMalformedIssuer(malformedIssuer),
   false,
@@ -35,7 +37,7 @@ assert(
   validateMalformedIssuer.errors?.some(
     (error) => error.instancePath === "/integrations/sharedAuth/issuer" && error.keyword === "format"
   ),
-  `malformed issuer must fail the URI format boundary: ${ajv.errorsText(validateMalformedIssuer.errors, { separator: "\n" })}`
+  `malformed issuer must fail the URI format boundary: ${malformedIssuerAjv.errorsText(validateMalformedIssuer.errors, { separator: "\n" })}`
 );
 console.log("rejected malformed Shared Auth issuer URI");
 
