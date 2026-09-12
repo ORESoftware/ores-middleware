@@ -1,0 +1,105 @@
+name: Ores CLI PR151 runtime-TOML probe
+
+on:
+  push:
+    branches:
+      - DEN-390-ores-cli-pr151-runtime-toml-probe
+  pull_request:
+    paths:
+      - .github/workflows/ores-cli-pr151-runtime-toml-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-cli-pr151-runtime-toml-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORES_CLI_SHA: 05fbce549f6cb9298c067bbfeea7194e38b3e9df
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - name: Require private-source read credential
+        env:
+          FLEET_TOKEN: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$FLEET_TOKEN" || {
+            echo 'FLEET_GITHUB_READ_TOKEN is unavailable to this repository' >&2
+            exit 1
+          }
+
+      - name: Check out exact ores-cli stacked candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-cli
+          ref: ${{ env.ORES_CLI_SHA }}
+          token: ${{ secrets.FLEET_GITHUB_READ_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: ores-cli
+
+      - name: Verify exact candidate and adapter blobs
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ORES_CLI_SHA"
+          test "$(git hash-object src/audit/runtime_toml_chat.rs)" = 51645f2527ce383eb2f2bd2f834d751866d8c286
+          test "$(git hash-object src/audit/runtime_toml_middleware.rs)" = bc0aaba10a37e93fea3fb6a359c2b088484e1f76
+          test "$(git hash-object src/audit/runtime_toml_lru.rs)" = 82da6c6971f21f4111aa4267190649a5ac204bab
+          git diff --check
+          status=0
+          git grep -n -I -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':(exclude)Cargo.lock' || status=$?
+          test "$status" -eq 1
+
+      - name: Install repository Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Verify committed dependency graph
+        working-directory: ores-cli
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check formatting and compilation
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo check --all-targets --all-features --locked
+
+      - name: Run focused Chat Middleware and LRU regressions
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo test --locked runtime_toml_chat::tests::
+          cargo test --locked runtime_toml_middleware::tests::
+          cargo test --locked runtime_toml_lru::tests::
+
+      - name: Run complete Rust suite
+        working-directory: ores-cli
+        run: cargo test --all-targets --all-features --locked
+
+      - name: Reject Clippy warnings
+        working-directory: ores-cli
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run composed repository and package self-audits
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          cargo run --quiet --locked -- audit repo --path . --profile rust-cli
+          cargo run --quiet --locked -- audit package --path .
+
+      - name: Prove validation left source clean
+        working-directory: ores-cli
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
