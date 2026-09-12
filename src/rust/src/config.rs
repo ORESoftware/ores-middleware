@@ -620,7 +620,12 @@ mod tests {
                 .iter()
                 .map(|issue| issue.code.as_str())
                 .collect::<Vec<_>>(),
-            vec!["invalid_rate_limit", "required", "principal_required", "range"]
+            vec![
+                "invalid_rate_limit",
+                "required",
+                "principal_required",
+                "range"
+            ]
         );
     }
 }
