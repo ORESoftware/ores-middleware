@@ -1,0 +1,18 @@
+[package]
+name = "ores-middleware-rate-limit-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Optional Zed-installed adapter from ores-middleware to the deterministic ORES rate-limit core"
+publish = false
+
+[dependencies]
+ores-middleware = { path = "../../src/rust", version = "0.1.0" }
+ores-rl-lib-core = { path = "../../.vendor/.zed/ores-rate-limit/ores-rl-lib-core", version = "0.1.0" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[workspace]
