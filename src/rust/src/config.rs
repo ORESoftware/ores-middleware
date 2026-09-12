@@ -245,7 +245,7 @@ pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
         ));
     }
 
-    validate_rate_limit_policy(config, &mut issues);
+    issues.extend(validate_rate_limit_policy(config));
 
     if !(0.0..=1.0).contains(&config.settings.fault_injection.error_rate)
         || !(0.0..=1.0).contains(&config.settings.fault_injection.drop_rate)
@@ -329,12 +329,13 @@ pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     issues
 }
 
-fn validate_rate_limit_policy(config: &MiddlewareConfig, issues: &mut Vec<ValidationIssue>) {
+fn validate_rate_limit_policy(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     let policy = &config.settings.rate_limit;
     if !policy.enabled {
-        return;
+        return Vec::new();
     }
 
+    let mut issues = Vec::new();
     if policy.capacity == 0
         || !policy.refill_per_second.is_finite()
         || policy.refill_per_second <= 0.0
@@ -437,6 +438,7 @@ fn validate_rate_limit_policy(config: &MiddlewareConfig, issues: &mut Vec<Valida
             "production rate limiting requires a stable external HMAC key",
         ));
     }
+    issues
 }
 
 pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
@@ -598,6 +600,27 @@ mod tests {
             validate_config(&config)
                 .iter()
                 .any(|issue| issue.code == "authorization_fail_open_forbidden")
+        );
+    }
+
+    #[test]
+    fn rate_limit_validation_returns_repeatable_owned_issues() {
+        let mut config = default_config("test-service");
+        config.settings.rate_limit.capacity = 0;
+        config.settings.rate_limit.policy_id = "   ".into();
+        config.settings.rate_limit.key_by = vec![RateLimitSignal::Route];
+        config.settings.rate_limit.window_ms = 0;
+
+        let first = validate_rate_limit_policy(&config);
+        let second = validate_rate_limit_policy(&config);
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first
+                .iter()
+                .map(|issue| issue.code.as_str())
+                .collect::<Vec<_>>(),
+            vec!["invalid_rate_limit", "required", "principal_required", "range"]
         );
     }
 }
