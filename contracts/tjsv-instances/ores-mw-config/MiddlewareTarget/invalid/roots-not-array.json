@@ -1,0 +1,7 @@
+{
+  "name": "edge",
+  "role": "server",
+  "roots": "src",
+  "enabled": true,
+  "middleware": "disabled"
+}

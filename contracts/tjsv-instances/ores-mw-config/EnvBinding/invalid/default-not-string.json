@@ -1,0 +1,8 @@
+{
+  "name": "port",
+  "key": "PORT",
+  "kind": "integer",
+  "required": false,
+  "secret": false,
+  "defaultValue": 8080
+}
