@@ -235,7 +235,7 @@ model MiddlewareSettings {
 
 model SharedAuthIntegration {
   mode: IntegrationMode;
-  issuer?: string;
+  issuer?: url;
   audience?: string;
   jwksUri?: url;
   introspectionUrl?: url;
