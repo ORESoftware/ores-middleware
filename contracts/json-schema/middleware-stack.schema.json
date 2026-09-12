@@ -347,7 +347,7 @@
       "required": ["mode", "failOpen"],
       "properties": {
         "mode": { "$ref": "#/$defs/integrationMode" },
-        "issuer": { "type": "string" },
+        "issuer": { "type": "string", "format": "uri" },
         "audience": { "type": "string" },
         "jwksUri": { "type": "string", "format": "uri" },
         "introspectionUrl": { "type": "string", "format": "uri" },
