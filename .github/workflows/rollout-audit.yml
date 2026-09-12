@@ -1,0 +1,75 @@
+name: Rust rollout audit
+
+on:
+  push:
+    branches:
+      - feat/cross-language-middleware-contract-v1
+  workflow_dispatch:
+  schedule:
+    - cron: '17 7 * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ores-middleware-rollout-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/cross-language-middleware-contract-v1
+
+      - name: Audit shipped rollout branches
+        run: python3 scripts/audit-rust-rollout-api.py
+
+      - name: Publish report in the workflow summary
+        if: always()
+        run: cat target/rollout-audit.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update the canonical rollout audit issue
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='ORES middleware rollout audit'
+          issue_number="$(gh issue list \
+            --repo ORESoftware/ores-middleware \
+            --state open \
+            --search "${title} in:title" \
+            --json number,title \
+            --jq '.[] | select(.title == "ORES middleware rollout audit") | .number' \
+            | head -n1)"
+          if [[ -n "$issue_number" ]]; then
+            gh issue edit "$issue_number" \
+              --repo ORESoftware/ores-middleware \
+              --body-file target/rollout-audit.md
+          else
+            gh issue create \
+              --repo ORESoftware/ores-middleware \
+              --title "$title" \
+              --body-file target/rollout-audit.md \
+              --label middleware-rollout || \
+            gh issue create \
+              --repo ORESoftware/ores-middleware \
+              --title "$title" \
+              --body-file target/rollout-audit.md
+          fi
+
+      - name: Upload machine-readable audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ores-middleware-rollout-audit
+          path: |
+            target/rollout-audit.json
+            target/rollout-audit.md
+          if-no-files-found: error
