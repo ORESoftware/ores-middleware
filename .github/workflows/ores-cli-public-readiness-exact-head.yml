@@ -87,7 +87,7 @@ jobs:
 
       - name: Run focused public-readiness regressions
         working-directory: ores-cli
-        run: cargo test --locked public_readiness_claims::tests::
+        run: 'cargo test --locked public_readiness_claims::tests::'
 
       - name: Run all Rust tests
         working-directory: ores-cli
