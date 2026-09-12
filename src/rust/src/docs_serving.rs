@@ -216,7 +216,7 @@ fn parse_media_range(index: usize, raw_part: &str) -> Option<MediaRange> {
     let quality = parameters
         .split(';')
         .filter(|parameter| !parameter.trim().is_empty())
-        .filter_map(|parameter| parameter.split_once('=').or(Some((parameter, ""))))
+        .map(|parameter| parameter.split_once('=').unwrap_or((parameter, "")))
         .filter(|(name, _)| name.trim().eq_ignore_ascii_case("q"))
         // The last `q=` parameter wins; any malformed `q` invalidates the member.
         .try_fold(1.0_f32, |_, (_, raw_value)| {

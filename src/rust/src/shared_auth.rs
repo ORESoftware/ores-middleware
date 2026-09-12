@@ -686,7 +686,10 @@ fn auth_decision(
 }
 
 fn valid_org_slug(value: &str) -> bool {
-    value.chars().next().is_some_and(char::is_ascii_alphanumeric)
+    value
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphanumeric())
         && value
             .chars()
             .skip(1)
