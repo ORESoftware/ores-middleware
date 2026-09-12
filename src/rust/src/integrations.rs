@@ -431,6 +431,12 @@ fn milliseconds_until(tokens: f64, refill_per_second: f64) -> u64 {
         .min(u64::MAX as f64) as u64
 }
 
+// HOT-PATH (imperative by design): `purge_expired` and `evict_one` run inside the
+// bucket-store lock on every rate-limited request. They mutate the store in place
+// because rebuilding the `HashMap` + recency `VecDeque` as new values per request
+// would be O(entries) allocation on the request path; in-place removal is O(1)
+// amortized. The mutation is confined to this module behind the lock, and the
+// decision returned to callers is still an immutable `RateLimitDecision` value.
 fn purge_expired(state: &mut BucketStore, now: Instant, ttl: Duration) {
     loop {
         let Some((key, generation)) = state.recency.front().cloned() else {

@@ -197,51 +197,43 @@ fn parse_accept(value: Option<&str>) -> Vec<MediaRange> {
     let Some(value) = value.filter(|item| !item.trim().is_empty()) else {
         return Vec::new();
     };
-    // This mutable state is intentionally parser-local and never aliases caller
-    // data. Keeping one bounded accumulator avoids extra intermediate vectors
-    // while parsing and sorting Accept ranges; the immutable-value rule applies
-    // to the domain decisions returned from this parser boundary.
-    let mut ranges = Vec::new();
-    for (index, raw_part) in value.split(',').enumerate() {
-        let mut pieces = raw_part.split(';');
-        let media = pieces
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
-        if media.is_empty() {
-            continue;
-        }
-        let mut quality = 1.0_f32;
-        let mut valid = true;
-        for raw_parameter in pieces {
-            let mut pair = raw_parameter.splitn(2, '=');
-            let name = pair.next().unwrap_or_default().trim();
-            if !name.eq_ignore_ascii_case("q") {
-                continue;
-            }
-            let Some(raw_value) = pair.next() else {
-                valid = false;
-                break;
-            };
-            let Ok(parsed) = raw_value.trim().parse::<f32>() else {
-                valid = false;
-                break;
-            };
-            if !(0.0..=1.0).contains(&parsed) {
-                valid = false;
-                break;
-            }
-            quality = parsed;
-        }
-        if valid && quality > 0.0 {
-            ranges.push(MediaRange {
-                media,
-                quality,
-                index,
-            });
-        }
+    let ranges: Vec<MediaRange> = value
+        .split(',')
+        .enumerate()
+        .filter_map(|(index, raw_part)| parse_media_range(index, raw_part))
+        .collect();
+    sorted_by_preference(ranges)
+}
+
+/// Parse one comma-separated `Accept` member into a range, or `None` when it is
+/// empty, malformed, or has a zero (or out-of-range) quality.
+fn parse_media_range(index: usize, raw_part: &str) -> Option<MediaRange> {
+    let (media, parameters) = raw_part.split_once(';').unwrap_or((raw_part, ""));
+    let media = media.trim().to_ascii_lowercase();
+    if media.is_empty() {
+        return None;
     }
+    let quality = parameters
+        .split(';')
+        .filter(|parameter| !parameter.trim().is_empty())
+        .map(|parameter| parameter.split_once('=').unwrap_or((parameter, "")))
+        .filter(|(name, _)| name.trim().eq_ignore_ascii_case("q"))
+        // The last `q=` parameter wins; any malformed `q` invalidates the member.
+        .try_fold(1.0_f32, |_, (_, raw_value)| {
+            let parsed = raw_value.trim().parse::<f32>().ok()?;
+            (0.0..=1.0).contains(&parsed).then_some(parsed)
+        })?;
+    (quality > 0.0).then_some(MediaRange {
+        media,
+        quality,
+        index,
+    })
+}
+
+/// Highest quality first; ties keep their original (index) order. Takes the
+/// vector by value and returns it sorted — the caller never observes a
+/// half-sorted intermediate.
+fn sorted_by_preference(mut ranges: Vec<MediaRange>) -> Vec<MediaRange> {
     ranges.sort_by(|left, right| {
         right
             .quality

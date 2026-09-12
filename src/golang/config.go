@@ -166,44 +166,56 @@ func DefaultConfig(serviceName string) Config {
 	}
 }
 
+// configRules are the pure validation rules for a Config. Each rule reads the
+// config and reports at most one issue; ValidateConfig composes them in order.
+var configRules = []Rule[Config]{
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.ContractVersion != ContractVersion, "/contractVersion", "unsupported_version", "expected "+ContractVersion)
+	},
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.Settings.TimeoutMS <= 0, "/settings/timeoutMs", "range", "timeout must be positive")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.Settings.MaxBodyBytes <= 0, "/settings/maxBodyBytes", "range", "body limit must be positive")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		rl := c.Settings.RateLimit
+		return issueWhen(rl.Enabled && (rl.Capacity <= 0 || rl.RefillPerSecond <= 0), "/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		fi := c.Settings.FaultInjection
+		outOfRange := fi.ErrorRate < 0 || fi.ErrorRate > 1 || fi.DropRate < 0 || fi.DropRate > 1
+		return issueWhen(outOfRange, "/settings/faultInjection", "range", "fault rates must be within 0..=1")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.Environment == Production && c.Settings.FaultInjection.Enabled, "/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.Environment == Production && c.Settings.TestAuthBypass.Enabled, "/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.Integrations.SharedAuth.FailOpen, "/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed")
+	},
+	func(c Config) (ValidationIssue, bool) {
+		return issueWhen(c.Settings.TLS.Mode == "trusted-proxy" && len(c.Settings.TLS.TrustedProxyCIDRs) == 0, "/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs")
+	},
+}
+
+// unknownCapabilityIssues is the one rule that can yield several issues, so it
+// is expressed as a slice transformation rather than a single Rule.
+func unknownCapabilityIssues(config Config) ValidationIssues {
+	unknown := filterSlice(config.RequiredCapabilities, func(capability string) bool {
+		return !slices.Contains(Capabilities, capability)
+	})
+	return mapSlice(unknown, func(capability string) ValidationIssue {
+		return ValidationIssue{Path: "/requiredCapabilities", Code: "unknown_capability", Message: capability}
+	})
+}
+
+// ValidateConfig returns the issues for config as a new slice. It is pure:
+// the config is read, never modified, and no accumulator is shared.
 func ValidateConfig(config Config) ValidationIssues {
-	var issues ValidationIssues
-	add := func(path, code, message string) {
-		issues = append(issues, ValidationIssue{Path: path, Code: code, Message: message})
-	}
-	if config.ContractVersion != ContractVersion {
-		add("/contractVersion", "unsupported_version", "expected "+ContractVersion)
-	}
-	if config.Settings.TimeoutMS <= 0 {
-		add("/settings/timeoutMs", "range", "timeout must be positive")
-	}
-	if config.Settings.MaxBodyBytes <= 0 {
-		add("/settings/maxBodyBytes", "range", "body limit must be positive")
-	}
-	if config.Settings.RateLimit.Enabled && (config.Settings.RateLimit.Capacity <= 0 || config.Settings.RateLimit.RefillPerSecond <= 0) {
-		add("/settings/rateLimit", "invalid_rate_limit", "enabled token bucket requires positive capacity and refill")
-	}
-	if config.Settings.FaultInjection.ErrorRate < 0 || config.Settings.FaultInjection.ErrorRate > 1 || config.Settings.FaultInjection.DropRate < 0 || config.Settings.FaultInjection.DropRate > 1 {
-		add("/settings/faultInjection", "range", "fault rates must be within 0..=1")
-	}
-	if config.Environment == Production && config.Settings.FaultInjection.Enabled {
-		add("/settings/faultInjection/enabled", "production_forbidden", "fault injection is forbidden in production")
-	}
-	if config.Environment == Production && config.Settings.TestAuthBypass.Enabled {
-		add("/settings/testAuthBypass/enabled", "production_forbidden", "test auth bypass is forbidden in production")
-	}
-	if config.Integrations.SharedAuth.FailOpen {
-		add("/integrations/sharedAuth/failOpen", "auth_fail_open", "shared-auth must fail closed")
-	}
-	if config.Settings.TLS.Mode == "trusted-proxy" && len(config.Settings.TLS.TrustedProxyCIDRs) == 0 {
-		add("/settings/tls/trustedProxyCidrs", "trusted_proxy_required", "trusted-proxy mode requires explicit CIDRs")
-	}
-	for _, capability := range config.RequiredCapabilities {
-		if !slices.Contains(Capabilities, capability) {
-			add("/requiredCapabilities", "unknown_capability", capability)
-		}
-	}
-	return issues
+	return append(runRules(config, configRules...), unknownCapabilityIssues(config)...)
 }
 
 type AdapterDescriptor struct {

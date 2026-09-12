@@ -488,16 +488,29 @@ func clientIP(request *http.Request, trusted bool) string {
 	}
 	return request.RemoteAddr
 }
-func applySecurityHeaders(config Config, headers http.Header) {
-	if !config.Settings.SecurityHeaders.Enabled {
-		return
+
+// securityHeaders is the pure policy: config in, the header set to add out.
+// Nothing is written here; the response is the effect and stays at the boundary.
+func securityHeaders(config Config) map[string]string {
+	policy := config.Settings.SecurityHeaders
+	if !policy.Enabled {
+		return map[string]string{}
 	}
-	headers.Set("X-Content-Type-Options", "nosniff")
-	headers.Set("X-Frame-Options", config.Settings.SecurityHeaders.FrameOptions)
-	headers.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	headers.Set("Strict-Transport-Security", fmt.Sprintf("max-age=%d; includeSubDomains", config.Settings.SecurityHeaders.HSTSMaxAgeSeconds))
-	if value := config.Settings.SecurityHeaders.ContentSecurityPolicy; value != "" {
-		headers.Set("Content-Security-Policy", value)
+	return mapOf(
+		kv("X-Content-Type-Options", "nosniff"),
+		kv("X-Frame-Options", policy.FrameOptions),
+		kv("Referrer-Policy", "strict-origin-when-cross-origin"),
+		kv("Strict-Transport-Security", fmt.Sprintf("max-age=%d; includeSubDomains", policy.HSTSMaxAgeSeconds)),
+		kvWhen(policy.ContentSecurityPolicy != "", "Content-Security-Policy", policy.ContentSecurityPolicy),
+	)
+}
+
+// applySecurityHeaders is the effect boundary: it writes the value computed by
+// securityHeaders onto the response headers. http.Header is the standard
+// library's mutable response surface, so this is the one place it is touched.
+func applySecurityHeaders(config Config, headers http.Header) {
+	for name, value := range securityHeaders(config) {
+		headers.Set(name, value)
 	}
 }
 func shouldGzip(config Config, request *http.Request, headers http.Header, body []byte) bool {

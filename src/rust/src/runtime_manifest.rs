@@ -53,7 +53,7 @@ struct Target {
     stack_config: Option<String>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct TargetBuilder {
     name: Option<String>,
     role: Option<String>,
@@ -63,13 +63,30 @@ struct TargetBuilder {
 }
 
 impl TargetBuilder {
-    fn assign(&mut self, key: &str, value: &str) -> Result<(), RuntimeManifestError> {
+    /// Return a new builder with `key` assigned. A key that was already assigned is
+    /// a document error; the builder itself is never mutated in place.
+    fn with(self, key: &str, value: &str) -> Result<Self, RuntimeManifestError> {
         match key {
-            "name" => set_once(&mut self.name, parse_string(value)?),
-            "role" => set_once(&mut self.role, parse_string(value)?),
-            "enabled" => set_once(&mut self.enabled, parse_bool(value)?),
-            "middleware" => set_once(&mut self.middleware, parse_string(value)?),
-            "stack_config" => set_once(&mut self.stack_config, parse_string(value)?),
+            "name" => Ok(Self {
+                name: set_once(self.name, parse_string(value)?)?,
+                ..self
+            }),
+            "role" => Ok(Self {
+                role: set_once(self.role, parse_string(value)?)?,
+                ..self
+            }),
+            "enabled" => Ok(Self {
+                enabled: set_once(self.enabled, parse_bool(value)?)?,
+                ..self
+            }),
+            "middleware" => Ok(Self {
+                middleware: set_once(self.middleware, parse_string(value)?)?,
+                ..self
+            }),
+            "stack_config" => Ok(Self {
+                stack_config: set_once(self.stack_config, parse_string(value)?)?,
+                ..self
+            }),
             _ => Err(RuntimeManifestError::InvalidDocument),
         }
     }
@@ -107,11 +124,216 @@ impl TargetBuilder {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum Section {
+    #[default]
     Root,
     Target,
     Other,
+}
+
+/// The parser state after some prefix of the document.
+///
+/// Parsing is a fold: [`ParseState::step`] consumes one line and returns a *new*
+/// state (struct-update syntax moves the untouched fields, so no field is ever
+/// mutated through a reference). The final state is turned into a
+/// [`ParsedManifest`] by [`ParseState::finish`].
+#[derive(Default)]
+struct ParseState {
+    section: Section,
+    version: Option<u32>,
+    repository_mode: Option<String>,
+    default_target: Option<String>,
+    targets: Vec<Target>,
+    current: Option<TargetBuilder>,
+    pending_array_depth: usize,
+}
+
+/// The runtime-relevant selection admitted from a manifest document.
+struct ParsedManifest {
+    version: Option<u32>,
+    repository_mode: Option<String>,
+    default_target: Option<String>,
+    targets: Vec<Target>,
+}
+
+impl ParseState {
+    fn step(self, raw: &str) -> Result<Self, RuntimeManifestError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(self);
+        }
+        if self.pending_array_depth > 0 {
+            let line = strip_comment(raw)?.trim();
+            if line.is_empty() {
+                return Ok(self);
+            }
+            let pending_array_depth = advance_array_depth(line, self.pending_array_depth)?;
+            return Ok(Self {
+                pending_array_depth,
+                ..self
+            });
+        }
+        if trimmed.starts_with('[') {
+            let header = strip_comment(raw)?.trim();
+            if header == "[[targets]]" {
+                let closed = self.close_target()?;
+                if closed.targets.len() >= MAX_TARGETS {
+                    return Err(RuntimeManifestError::InvalidDocument);
+                }
+                return Ok(Self {
+                    current: Some(TargetBuilder::default()),
+                    section: Section::Target,
+                    ..closed
+                });
+            }
+            if header.starts_with('[') && header.ends_with(']') {
+                let closed = self.close_target()?;
+                return Ok(Self {
+                    section: Section::Other,
+                    ..closed
+                });
+            }
+        }
+        if self.section == Section::Other {
+            return Ok(self);
+        }
+        let line = strip_comment(raw)?.trim();
+        if line.is_empty() {
+            return Ok(self);
+        }
+        let (key, value) = line
+            .split_once('=')
+            .ok_or(RuntimeManifestError::InvalidDocument)?;
+        self.assign(key.trim(), value.trim())
+    }
+
+    fn assign(self, key: &str, value: &str) -> Result<Self, RuntimeManifestError> {
+        match self.section {
+            Section::Root => match key {
+                "schema_version" => Ok(Self {
+                    version: set_once(self.version, parse_u32(value)?)?,
+                    ..self
+                }),
+                "repository_mode" => Ok(Self {
+                    repository_mode: set_once(self.repository_mode, parse_string(value)?)?,
+                    ..self
+                }),
+                "default_target" => Ok(Self {
+                    default_target: set_once(self.default_target, parse_string(value)?)?,
+                    ..self
+                }),
+                "allow_overlapping_roots" => parse_bool(value).map(|_| self),
+                _ => Err(RuntimeManifestError::InvalidDocument),
+            },
+            Section::Target if matches!(key, "roots" | "propagate_headers") => Ok(Self {
+                pending_array_depth: start_array(value)?,
+                ..self
+            }),
+            Section::Target => {
+                let current = self
+                    .current
+                    .ok_or(RuntimeManifestError::InvalidDocument)?
+                    .with(key, value)?;
+                Ok(Self {
+                    current: Some(current),
+                    ..self
+                })
+            }
+            Section::Other => unreachable!("other sections are skipped before key parsing"),
+        }
+    }
+
+    /// Close the in-progress target (if any) into the target list, returning the
+    /// new state. Ownership of the list moves through the state, so appending here
+    /// creates no aliasing and needs no `&mut` parameter.
+    fn close_target(self) -> Result<Self, RuntimeManifestError> {
+        match self.current {
+            None => Ok(self),
+            Some(builder) => {
+                let target = builder.finish()?;
+                let targets = self.targets.into_iter().chain(Some(target)).collect();
+                Ok(Self {
+                    current: None,
+                    targets,
+                    ..self
+                })
+            }
+        }
+    }
+
+    fn finish(self) -> Result<ParsedManifest, RuntimeManifestError> {
+        if self.pending_array_depth != 0 {
+            return Err(RuntimeManifestError::InvalidDocument);
+        }
+        let closed = self.close_target()?;
+        Ok(ParsedManifest {
+            version: closed.version,
+            repository_mode: closed.repository_mode,
+            default_target: closed.default_target,
+            targets: closed.targets,
+        })
+    }
+}
+
+impl ParsedManifest {
+    fn parse(source: &str) -> Result<Self, RuntimeManifestError> {
+        source
+            .lines()
+            .try_fold(ParseState::default(), ParseState::step)?
+            .finish()
+    }
+
+    fn checked(self) -> Result<Self, RuntimeManifestError> {
+        if self.version != Some(1) {
+            return Err(RuntimeManifestError::UnsupportedVersion);
+        }
+        match self.repository_mode.as_deref() {
+            Some("server-only" | "hybrid") => {}
+            Some("client-only") => return Err(RuntimeManifestError::ClientTarget),
+            _ => return Err(RuntimeManifestError::InvalidRepositoryMode),
+        }
+        let distinct_names: BTreeSet<&str> = self
+            .targets
+            .iter()
+            .map(|target| target.name.as_str())
+            .collect();
+        if distinct_names.len() != self.targets.len() {
+            return Err(RuntimeManifestError::DuplicateTarget);
+        }
+        Ok(self)
+    }
+
+    fn select(&self, target_name: Option<&str>) -> Result<&Target, RuntimeManifestError> {
+        let selected_name = target_name
+            .or(self.default_target.as_deref())
+            .ok_or(RuntimeManifestError::MissingTarget)?;
+        if !valid_target_name(selected_name) {
+            return Err(RuntimeManifestError::InvalidTarget);
+        }
+        self.targets
+            .iter()
+            .find(|target| target.name == selected_name)
+            .ok_or(RuntimeManifestError::MissingTarget)
+    }
+}
+
+impl Target {
+    fn admit_stack(&self, expected_stack_config: &str) -> Result<(), RuntimeManifestError> {
+        if !self.enabled {
+            return Err(RuntimeManifestError::DisabledTarget);
+        }
+        if self.role != "server" {
+            return Err(RuntimeManifestError::ClientTarget);
+        }
+        if self.middleware != "stack" {
+            return Err(RuntimeManifestError::NonStackTarget);
+        }
+        if self.stack_config.as_deref() != Some(expected_stack_config) {
+            return Err(RuntimeManifestError::StackConfigMismatch);
+        }
+        Ok(())
+    }
 }
 
 /// Admit the runtime-relevant selection encoded in an already peer-authority-validated
@@ -136,142 +358,19 @@ pub fn admit_server_stack(
     {
         return Err(RuntimeManifestError::InvalidDocument);
     }
-
-    let mut section = Section::Root;
-    let mut version = None;
-    let mut repository_mode = None;
-    let mut default_target = None;
-    let mut targets = Vec::new();
-    let mut current = None;
-    let mut pending_array_depth = 0_usize;
-
-    for raw in source.lines() {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if pending_array_depth > 0 {
-            let line = strip_comment(raw)?.trim();
-            if !line.is_empty() {
-                pending_array_depth = advance_array_depth(line, pending_array_depth)?;
-            }
-            continue;
-        }
-
-        if trimmed.starts_with('[') {
-            let header = strip_comment(raw)?.trim();
-            if header == "[[targets]]" {
-                finish_target(&mut current, &mut targets)?;
-                if targets.len() >= MAX_TARGETS {
-                    return Err(RuntimeManifestError::InvalidDocument);
-                }
-                current = Some(TargetBuilder::default());
-                section = Section::Target;
-                continue;
-            }
-            if header.starts_with('[') && header.ends_with(']') {
-                finish_target(&mut current, &mut targets)?;
-                section = Section::Other;
-                continue;
-            }
-        }
-
-        if section == Section::Other {
-            continue;
-        }
-
-        let line = strip_comment(raw)?.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or(RuntimeManifestError::InvalidDocument)?;
-        let key = key.trim();
-        let value = value.trim();
-        match section {
-            Section::Root => match key {
-                "schema_version" => set_once(&mut version, parse_u32(value)?),
-                "repository_mode" => set_once(&mut repository_mode, parse_string(value)?),
-                "default_target" => set_once(&mut default_target, parse_string(value)?),
-                "allow_overlapping_roots" => {
-                    let _ = parse_bool(value)?;
-                    Ok(())
-                }
-                _ => Err(RuntimeManifestError::InvalidDocument),
-            }?,
-            Section::Target if matches!(key, "roots" | "propagate_headers") => {
-                pending_array_depth = start_array(value)?;
-            }
-            Section::Target => current
-                .as_mut()
-                .ok_or(RuntimeManifestError::InvalidDocument)?
-                .assign(key, value)?,
-            Section::Other => unreachable!("other sections are skipped before key parsing"),
-        }
-    }
-    if pending_array_depth != 0 {
-        return Err(RuntimeManifestError::InvalidDocument);
-    }
-    finish_target(&mut current, &mut targets)?;
-
-    if version != Some(1) {
-        return Err(RuntimeManifestError::UnsupportedVersion);
-    }
-    match repository_mode.as_deref() {
-        Some("server-only" | "hybrid") => {}
-        Some("client-only") => return Err(RuntimeManifestError::ClientTarget),
-        _ => return Err(RuntimeManifestError::InvalidRepositoryMode),
-    }
-
-    let mut names = BTreeSet::new();
-    for target in &targets {
-        if !names.insert(target.name.as_str()) {
-            return Err(RuntimeManifestError::DuplicateTarget);
-        }
-    }
-
-    let selected_name = target_name
-        .or(default_target.as_deref())
-        .ok_or(RuntimeManifestError::MissingTarget)?;
-    if !valid_target_name(selected_name) {
-        return Err(RuntimeManifestError::InvalidTarget);
-    }
-    let selected = targets
-        .iter()
-        .find(|target| target.name == selected_name)
-        .ok_or(RuntimeManifestError::MissingTarget)?;
-    if !selected.enabled {
-        return Err(RuntimeManifestError::DisabledTarget);
-    }
-    if selected.role != "server" {
-        return Err(RuntimeManifestError::ClientTarget);
-    }
-    if selected.middleware != "stack" {
-        return Err(RuntimeManifestError::NonStackTarget);
-    }
-    if selected.stack_config.as_deref() != Some(expected_stack_config) {
-        return Err(RuntimeManifestError::StackConfigMismatch);
-    }
-    Ok(())
+    ParsedManifest::parse(source)?
+        .checked()?
+        .select(target_name)?
+        .admit_stack(expected_stack_config)
 }
 
-fn finish_target(
-    current: &mut Option<TargetBuilder>,
-    targets: &mut Vec<Target>,
-) -> Result<(), RuntimeManifestError> {
-    if let Some(builder) = current.take() {
-        targets.push(builder.finish()?);
+/// Value-in/value-out "assign exactly once": returns the filled slot or a document
+/// error if it was already filled.
+fn set_once<T>(slot: Option<T>, value: T) -> Result<Option<T>, RuntimeManifestError> {
+    match slot {
+        Some(_) => Err(RuntimeManifestError::InvalidDocument),
+        None => Ok(Some(value)),
     }
-    Ok(())
-}
-
-fn set_once<T>(slot: &mut Option<T>, value: T) -> Result<(), RuntimeManifestError> {
-    if slot.is_some() {
-        return Err(RuntimeManifestError::InvalidDocument);
-    }
-    *slot = Some(value);
-    Ok(())
 }
 
 fn parse_u32(value: &str) -> Result<u32, RuntimeManifestError> {
@@ -304,20 +403,28 @@ fn parse_string(value: &str) -> Result<String, RuntimeManifestError> {
 }
 
 fn strip_comment(line: &str) -> Result<&str, RuntimeManifestError> {
-    let mut quoted = false;
-    for (index, byte) in line.bytes().enumerate() {
-        if byte == b'"' {
-            quoted = !quoted;
-        } else if byte == b'#' && !quoted {
-            return Ok(&line[..index]);
-        } else if byte == b'\\' && quoted {
-            return Err(RuntimeManifestError::InvalidDocument);
-        }
+    /// Scanner state: `Open(quoted)` while no unquoted `#` has been seen, or
+    /// `CommentAt(index)` once one has.
+    enum Scan {
+        Open { quoted: bool },
+        CommentAt(usize),
     }
-    if quoted {
-        Err(RuntimeManifestError::InvalidDocument)
-    } else {
-        Ok(line)
+    let scan = line.bytes().enumerate().try_fold(
+        Scan::Open { quoted: false },
+        |scan, (index, byte)| match scan {
+            Scan::CommentAt(_) => Ok(scan),
+            Scan::Open { quoted } => match byte {
+                b'"' => Ok(Scan::Open { quoted: !quoted }),
+                b'#' if !quoted => Ok(Scan::CommentAt(index)),
+                b'\\' if quoted => Err(RuntimeManifestError::InvalidDocument),
+                _ => Ok(Scan::Open { quoted }),
+            },
+        },
+    )?;
+    match scan {
+        Scan::CommentAt(index) => Ok(&line[..index]),
+        Scan::Open { quoted: false } => Ok(line),
+        Scan::Open { quoted: true } => Err(RuntimeManifestError::InvalidDocument),
     }
 }
 
@@ -329,21 +436,21 @@ fn start_array(value: &str) -> Result<usize, RuntimeManifestError> {
 }
 
 fn advance_array_depth(line: &str, initial: usize) -> Result<usize, RuntimeManifestError> {
-    let mut depth = initial;
-    let mut quoted = false;
-    for byte in line.bytes() {
-        match byte {
-            b'"' => quoted = !quoted,
-            b'\\' if quoted => return Err(RuntimeManifestError::InvalidDocument),
-            b'[' if !quoted => depth = depth.saturating_add(1),
-            b']' if !quoted => {
-                depth = depth
+    let (depth, quoted) = line.bytes().try_fold(
+        (initial, false),
+        |(depth, quoted), byte| -> Result<(usize, bool), RuntimeManifestError> {
+            match byte {
+                b'"' => Ok((depth, !quoted)),
+                b'\\' if quoted => Err(RuntimeManifestError::InvalidDocument),
+                b'[' if !quoted => Ok((depth.saturating_add(1), quoted)),
+                b']' if !quoted => depth
                     .checked_sub(1)
-                    .ok_or(RuntimeManifestError::InvalidDocument)?;
+                    .map(|next| (next, quoted))
+                    .ok_or(RuntimeManifestError::InvalidDocument),
+                _ => Ok((depth, quoted)),
             }
-            _ => {}
-        }
-    }
+        },
+    )?;
     if quoted {
         return Err(RuntimeManifestError::InvalidDocument);
     }

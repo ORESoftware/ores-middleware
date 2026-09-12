@@ -371,6 +371,12 @@ pub fn derive_rate_limit_principal(
     auth: &AuthDecision,
     effective_client_ip: Option<&str>,
 ) -> Result<RateLimitPrincipal, IntegrationError> {
+    // HOT-PATH (imperative by design): this canonical key material is built once
+    // per request and must be zeroized (`fill(0)`) on the failure path because it
+    // can contain principal identifiers. Streaming into one pre-sized buffer keeps
+    // exactly one copy of that material in memory; an iterator/`collect` chain would
+    // create intermediate `Vec`s that cannot be reliably zeroized. The result that
+    // leaves this function is an immutable `RateLimitPrincipal` value.
     let mut canonical = Vec::with_capacity(signals.len() * 48);
     let mut has_principal_material = false;
 
@@ -449,6 +455,9 @@ fn ip_prefix(value: &str) -> Option<String> {
     }
 }
 
+// HOT-PATH (imperative by design): the `hmac` crate's `Mac` API is a streaming
+// (state-mutating) interface; wrapping each `update` in a value-returning helper
+// would only hide the mutation, not remove it. Kept as a thin imperative shim.
 fn update_length_prefixed(mac: &mut HmacSha256, value: &[u8]) {
     mac.update(&(value.len() as u64).to_be_bytes());
     mac.update(value);

@@ -221,224 +221,296 @@ impl ValidationIssue {
     }
 }
 
-pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
-    let mut issues = Vec::new();
-    if config.contract_version != CONTRACT_VERSION {
-        issues.push(ValidationIssue::new(
+/// A single validation rule: a pure function from the config to at most one issue.
+///
+/// Rules are composed by [`validate_config`]; none of them touches shared state, so
+/// each rule can be read, tested and reordered on its own.
+type Rule = fn(&MiddlewareConfig) -> Option<ValidationIssue>;
+
+/// Build an issue when `failed` holds. The message is built lazily so rules pay for
+/// formatting only on the failure path.
+fn issue_if(
+    failed: bool,
+    path: impl Into<String>,
+    code: &'static str,
+    message: impl FnOnce() -> String,
+) -> Option<ValidationIssue> {
+    failed.then(|| ValidationIssue::new(path, code, message()))
+}
+
+const CONFIG_RULES: &[Rule] = &[
+    |config| {
+        issue_if(
+            config.contract_version != CONTRACT_VERSION,
             "/contractVersion",
             "unsupported_version",
-            format!("expected {CONTRACT_VERSION}"),
-        ));
-    }
-    if config.settings.timeout_ms == 0 {
-        issues.push(ValidationIssue::new(
+            || format!("expected {CONTRACT_VERSION}"),
+        )
+    },
+    |config| {
+        issue_if(
+            config.settings.timeout_ms == 0,
             "/settings/timeoutMs",
             "range",
-            "timeout must be positive",
-        ));
-    }
-    if config.settings.max_body_bytes == 0 {
-        issues.push(ValidationIssue::new(
+            || "timeout must be positive".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.settings.max_body_bytes == 0,
             "/settings/maxBodyBytes",
             "range",
-            "body limit must be positive",
-        ));
-    }
+            || "body limit must be positive".into(),
+        )
+    },
+];
 
-    issues.extend(validate_rate_limit_policy(config));
-
-    if !(0.0..=1.0).contains(&config.settings.fault_injection.error_rate)
-        || !(0.0..=1.0).contains(&config.settings.fault_injection.drop_rate)
-    {
-        issues.push(ValidationIssue::new(
+const FAULT_AND_AUTH_RULES: &[Rule] = &[
+    |config| {
+        let fault = &config.settings.fault_injection;
+        issue_if(
+            !(0.0..=1.0).contains(&fault.error_rate) || !(0.0..=1.0).contains(&fault.drop_rate),
             "/settings/faultInjection",
             "range",
-            "fault rates must be within 0..=1",
-        ));
-    }
-    if matches!(config.environment, RuntimeEnvironment::Production) {
-        if config.settings.fault_injection.enabled {
-            issues.push(ValidationIssue::new(
-                "/settings/faultInjection/enabled",
-                "production_forbidden",
-                "fault injection is forbidden in production",
-            ));
-        }
-        if config.settings.test_auth_bypass.enabled {
-            issues.push(ValidationIssue::new(
-                "/settings/testAuthBypass/enabled",
-                "production_forbidden",
-                "test auth bypass is forbidden in production",
-            ));
-        }
-    }
-    if config.integrations.shared_auth.fail_open {
-        issues.push(ValidationIssue::new(
+            || "fault rates must be within 0..=1".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.is_production() && config.settings.fault_injection.enabled,
+            "/settings/faultInjection/enabled",
+            "production_forbidden",
+            || "fault injection is forbidden in production".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.is_production() && config.settings.test_auth_bypass.enabled,
+            "/settings/testAuthBypass/enabled",
+            "production_forbidden",
+            || "test auth bypass is forbidden in production".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.integrations.shared_auth.fail_open,
             "/integrations/sharedAuth/failOpen",
             "auth_fail_open",
-            "shared-auth must fail closed",
-        ));
-    }
+            || "shared-auth must fail closed".into(),
+        )
+    },
+];
 
-    match config.settings.tls.mode.as_str() {
-        "disabled" => {
-            if config.settings.tls.require_https {
-                issues.push(ValidationIssue::new(
-                    "/settings/tls/requireHttps",
-                    "disabled_tls_requires_false",
-                    "TLS mode disabled cannot enforce HTTPS",
-                ));
-            }
-        }
-        "in-process" => {}
-        "trusted-proxy" => {
-            if config.settings.tls.trusted_proxy_cidrs.is_empty() {
-                issues.push(ValidationIssue::new(
-                    "/settings/tls/trustedProxyCidrs",
-                    "trusted_proxy_required",
-                    "trusted-proxy mode requires an explicit CIDR allowlist",
-                ));
-            }
-        }
-        _ => issues.push(ValidationIssue::new(
+fn tls_mode_issue(config: &MiddlewareConfig) -> Option<ValidationIssue> {
+    let tls = &config.settings.tls;
+    match tls.mode.as_str() {
+        "disabled" => issue_if(
+            tls.require_https,
+            "/settings/tls/requireHttps",
+            "disabled_tls_requires_false",
+            || "TLS mode disabled cannot enforce HTTPS".into(),
+        ),
+        "in-process" => None,
+        "trusted-proxy" => issue_if(
+            tls.trusted_proxy_cidrs.is_empty(),
+            "/settings/tls/trustedProxyCidrs",
+            "trusted_proxy_required",
+            || "trusted-proxy mode requires an explicit CIDR allowlist".into(),
+        ),
+        _ => Some(ValidationIssue::new(
             "/settings/tls/mode",
             "unknown_tls_mode",
             "TLS mode must be disabled, in-process, or trusted-proxy",
         )),
     }
+}
 
-    for (index, cidr) in config.settings.tls.trusted_proxy_cidrs.iter().enumerate() {
-        if !valid_cidr(cidr) {
-            issues.push(ValidationIssue::new(
+fn invalid_cidr_issues(config: &MiddlewareConfig) -> impl Iterator<Item = ValidationIssue> + '_ {
+    config
+        .settings
+        .tls
+        .trusted_proxy_cidrs
+        .iter()
+        .enumerate()
+        .filter(|(_, cidr)| !valid_cidr(cidr))
+        .map(|(index, cidr)| {
+            ValidationIssue::new(
                 format!("/settings/tls/trustedProxyCidrs/{index}"),
                 "invalid_cidr",
                 cidr.clone(),
-            ));
-        }
-    }
+            )
+        })
+}
 
-    for capability in &config.required_capabilities {
-        if !CAPABILITIES.contains(&capability.as_str()) {
-            issues.push(ValidationIssue::new(
+fn unknown_capability_issues(
+    config: &MiddlewareConfig,
+) -> impl Iterator<Item = ValidationIssue> + '_ {
+    config
+        .required_capabilities
+        .iter()
+        .filter(|capability| !CAPABILITIES.contains(&capability.as_str()))
+        .map(|capability| {
+            ValidationIssue::new(
                 "/requiredCapabilities",
                 "unknown_capability",
                 capability.clone(),
-            ));
-        }
-    }
-    issues
+            )
+        })
 }
 
-fn validate_rate_limit_policy(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
-    let policy = &config.settings.rate_limit;
-    if !policy.enabled {
-        return Vec::new();
+impl MiddlewareConfig {
+    #[must_use]
+    pub fn is_production(&self) -> bool {
+        matches!(self.environment, RuntimeEnvironment::Production)
     }
+}
 
-    let mut issues = Vec::new();
-    if policy.capacity == 0
-        || !policy.refill_per_second.is_finite()
-        || policy.refill_per_second <= 0.0
-    {
-        issues.push(ValidationIssue::new(
+/// Validate a config by composing independent pure rules.
+///
+/// The output order is the composition order, which the tests rely on; every rule
+/// is a value-in/value-out function so no accumulator is threaded through the code.
+pub fn validate_config(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
+    CONFIG_RULES
+        .iter()
+        .filter_map(|rule| rule(config))
+        .chain(validate_rate_limit_policy(config))
+        .chain(FAULT_AND_AUTH_RULES.iter().filter_map(|rule| rule(config)))
+        .chain(tls_mode_issue(config))
+        .chain(invalid_cidr_issues(config))
+        .chain(unknown_capability_issues(config))
+        .collect()
+}
+
+const RATE_LIMIT_RULES: &[Rule] = &[
+    |config| {
+        let policy = &config.settings.rate_limit;
+        issue_if(
+            policy.capacity == 0
+                || !policy.refill_per_second.is_finite()
+                || policy.refill_per_second <= 0.0,
             "/settings/rateLimit",
             "invalid_rate_limit",
-            "enabled rate limits require positive finite capacity and refill",
-        ));
-    }
-    if policy.policy_id.trim().is_empty() {
-        issues.push(ValidationIssue::new(
+            || "enabled rate limits require positive finite capacity and refill".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.settings.rate_limit.policy_id.trim().is_empty(),
             "/settings/rateLimit/policyId",
             "required",
-            "rate-limit policy IDs must not be empty",
-        ));
-    }
-    if policy.key_by.is_empty() {
-        issues.push(ValidationIssue::new(
+            || "rate-limit policy IDs must not be empty".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.settings.rate_limit.key_by.is_empty(),
             "/settings/rateLimit/keyBy",
             "required",
-            "at least one rate-limit signal is required",
-        ));
-    }
-    if !policy
-        .key_by
-        .iter()
-        .copied()
-        .any(RateLimitSignal::is_principal_signal)
-    {
-        issues.push(ValidationIssue::new(
+            || "at least one rate-limit signal is required".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            !config
+                .settings
+                .rate_limit
+                .key_by
+                .iter()
+                .copied()
+                .any(RateLimitSignal::is_principal_signal),
             "/settings/rateLimit/keyBy",
             "principal_required",
-            "route and method alone cannot identify a rate-limit principal",
-        ));
-    }
-    if matches!(policy.layer, RateLimitLayer::CloudflareEdge)
-        && policy
-            .key_by
-            .iter()
-            .copied()
-            .any(|signal| !signal.is_edge_safe())
-    {
-        issues.push(ValidationIssue::new(
+            || "route and method alone cannot identify a rate-limit principal".into(),
+        )
+    },
+    |config| {
+        let policy = &config.settings.rate_limit;
+        issue_if(
+            matches!(policy.layer, RateLimitLayer::CloudflareEdge)
+                && policy
+                    .key_by
+                    .iter()
+                    .copied()
+                    .any(|signal| !signal.is_edge_safe()),
             "/settings/rateLimit/keyBy",
             "edge_identity_forbidden",
-            "Cloudflare edge policies may use only IP, IP prefix, route, and method signals",
-        ));
-    }
-    if matches!(policy.layer, RateLimitLayer::Authorization)
-        && matches!(policy.failure_mode, RateLimitFailureMode::FailOpen)
-    {
-        issues.push(ValidationIssue::new(
+            || {
+                "Cloudflare edge policies may use only IP, IP prefix, route, and method signals"
+                    .into()
+            },
+        )
+    },
+    |config| {
+        let policy = &config.settings.rate_limit;
+        issue_if(
+            matches!(policy.layer, RateLimitLayer::Authorization)
+                && matches!(policy.failure_mode, RateLimitFailureMode::FailOpen),
             "/settings/rateLimit/failureMode",
             "authorization_fail_open_forbidden",
-            "authorization-layer rate limiting must not fail open",
-        ));
-    }
-    if policy.window_ms == 0 {
-        issues.push(ValidationIssue::new(
+            || "authorization-layer rate limiting must not fail open".into(),
+        )
+    },
+    |config| {
+        issue_if(
+            config.settings.rate_limit.window_ms == 0,
             "/settings/rateLimit/windowMs",
             "range",
-            "rate-limit windows must be positive",
-        ));
-    }
-    if policy.local_cache_max_entries == 0
-        || policy.local_cache_max_entries > MAX_LOCAL_RATE_LIMIT_ENTRIES
-    {
-        issues.push(ValidationIssue::new(
+            || "rate-limit windows must be positive".into(),
+        )
+    },
+    |config| {
+        let entries = config.settings.rate_limit.local_cache_max_entries;
+        issue_if(
+            entries == 0 || entries > MAX_LOCAL_RATE_LIMIT_ENTRIES,
             "/settings/rateLimit/localCacheMaxEntries",
             "range",
-            format!(
-                "local rate-limit caches must contain between 1 and {MAX_LOCAL_RATE_LIMIT_ENTRIES} entries"
-            ),
-        ));
-    }
-    if policy.local_cache_ttl_ms < policy.window_ms {
-        issues.push(ValidationIssue::new(
+            || {
+                format!(
+                    "local rate-limit caches must contain between 1 and {MAX_LOCAL_RATE_LIMIT_ENTRIES} entries"
+                )
+            },
+        )
+    },
+    |config| {
+        let policy = &config.settings.rate_limit;
+        issue_if(
+            policy.local_cache_ttl_ms < policy.window_ms,
             "/settings/rateLimit/localCacheTtlMs",
             "ttl_shorter_than_window",
-            "local cache TTL must be at least one policy window",
-        ));
-    }
-    if policy.key_namespace.trim().is_empty() || policy.key_version.trim().is_empty() {
-        issues.push(ValidationIssue::new(
+            || "local cache TTL must be at least one policy window".into(),
+        )
+    },
+    |config| {
+        let policy = &config.settings.rate_limit;
+        issue_if(
+            policy.key_namespace.trim().is_empty() || policy.key_version.trim().is_empty(),
             "/settings/rateLimit",
             "key_domain_required",
-            "rate-limit key namespace and version must not be empty",
-        ));
-    }
-    if matches!(config.environment, RuntimeEnvironment::Production)
-        && matches!(
-            policy.key_derivation,
-            RateLimitKeyDerivationMode::EphemeralHmacSha256
+            || "rate-limit key namespace and version must not be empty".into(),
         )
-    {
-        issues.push(ValidationIssue::new(
+    },
+    |config| {
+        issue_if(
+            config.is_production()
+                && matches!(
+                    config.settings.rate_limit.key_derivation,
+                    RateLimitKeyDerivationMode::EphemeralHmacSha256
+                ),
             "/settings/rateLimit/keyDerivation",
             "production_requires_external_hmac",
-            "production rate limiting requires a stable external HMAC key",
-        ));
+            || "production rate limiting requires a stable external HMAC key".into(),
+        )
+    },
+];
+
+fn validate_rate_limit_policy(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
+    if !config.settings.rate_limit.enabled {
+        return Vec::new();
     }
-    issues
+    RATE_LIMIT_RULES
+        .iter()
+        .filter_map(|rule| rule(config))
+        .collect()
 }
 
 pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
