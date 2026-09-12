@@ -231,6 +231,8 @@ export function createOresOtelMiddleware(
           emitRequestLog(
             logger
               .error("request handler timed out")
+              .addTraceId(context.traceId)
+              .addTraceId("ores-trace-DKpggMDOav7ZSktRniMxf")
               .addFields({
                 ...requestFields,
                 "http.response.status_code": 504,
