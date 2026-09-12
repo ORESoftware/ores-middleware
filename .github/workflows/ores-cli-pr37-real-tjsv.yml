@@ -1,0 +1,151 @@
+name: Canonical TJSV producer-consumer probe
+
+on:
+  push:
+    branches:
+      - DEN-390-ores-cli-pr37-real-tjsv-probe
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-tjsv-producer-consumer-probe
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out canonical validator at reviewed immutable revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 2281843126ab644607b11cf8281d84f382d68dfc
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify immutable validator identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 2281843126ab644607b11cf8281d84f382d68dfc
+          git diff --check
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          package-manager-cache: false
+
+      - name: Install canonical validator from committed lockfile
+        run: npm ci
+
+      - name: Run canonical producer and consumer admission
+        run: |
+          set -euo pipefail
+          run_dir=$(mktemp -d "$RUNNER_TEMP/tjsv-pass.XXXXXXXX")
+          executable="$GITHUB_WORKSPACE/bin/typespec-json-schema-validator.mjs"
+          typespec="$GITHUB_WORKSPACE/test/fixtures/pass/main.tsp"
+          authored="$GITHUB_WORKSPACE/test/fixtures/pass/authored.schema.json"
+          generated="$run_dir/generated"
+          report="$run_dir/report.json"
+          sarif="$run_dir/report.sarif"
+          ir="$run_dir/contract-ir.json"
+          verification="$run_dir/consumer-verification.json"
+
+          node "$executable" check \
+            --typespec="$typespec" \
+            --schema="$authored" \
+            --output-dir="$generated" \
+            --report="$report" \
+            --sarif="$sarif" \
+            --contract-ir="$ir" \
+            --quiet
+
+          expected=$(node - "$ir" <<'NODE'
+          const fs = require('node:fs');
+          const ir = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const ids = ir.declarations.map((value) => value.id).sort();
+          if (ids.length === 0 || new Set(ids).size !== ids.length) process.exit(2);
+          process.stdout.write(JSON.stringify(ids));
+          NODE
+          )
+
+          node "$executable" verify-ir \
+            --contract-ir="$ir" \
+            --parity-receipt="$report" \
+            --typespec="$typespec" \
+            --generated-schema="$generated/typespec.generated.schema.json" \
+            --schema="$authored" \
+            --expected-declarations="$expected" \
+            --verification="$verification"
+
+          node - "$report" "$ir" "$verification" <<'NODE'
+          const fs = require('node:fs');
+          const [report, ir, verification] = process.argv.slice(2).map((path) => JSON.parse(fs.readFileSync(path, 'utf8')));
+          if (report.schema !== 'ores.typespec-json-schema-validator.report/v1') process.exit(3);
+          if (report.status !== 'passed' || report.zeroUnexplainedFindings !== true) process.exit(4);
+          if (report.toolchain?.validator?.name !== '@oresoftware/typespec-json-schema-validator') process.exit(5);
+          if (ir.schema !== 'ores.typespec-json-schema-validator.contract-ir/v1') process.exit(6);
+          if (ir.status !== 'passed' || ir.admissible !== true || ir.editableAuthority !== false) process.exit(7);
+          if (verification.schema !== 'ores.typespec-json-schema-validator.consumer-verification-receipt/v1') process.exit(8);
+          if (verification.status !== 'passed' || verification.admissible !== true || verification.failureCode !== null) process.exit(9);
+          if (verification.receiptRunId !== report.runId) process.exit(10);
+          if (verification.suppliedIrId !== ir.irId || verification.computedIrId !== ir.irId || verification.expectedIrId !== ir.irId) process.exit(11);
+          NODE
+
+          test -s "$sarif"
+          test -s "$generated/typespec.generated.schema.json"
+          sha256sum "$report" "$ir" "$verification" "$generated/typespec.generated.schema.json"
+
+      - name: Prove retained producer evidence remains valid after relocation
+        run: |
+          set -euo pipefail
+          executable="$GITHUB_WORKSPACE/bin/typespec-json-schema-validator.mjs"
+          source_dir=$(mktemp -d "$RUNNER_TEMP/tjsv-source.XXXXXXXX")
+          retained=$(mktemp -d "$RUNNER_TEMP/tjsv-retained.XXXXXXXX")
+          mkdir -p "$source_dir/generated" "$retained/generated"
+          cp test/fixtures/pass/main.tsp "$source_dir/main.tsp"
+          cp test/fixtures/pass/authored.schema.json "$source_dir/authored.schema.json"
+
+          node "$executable" check \
+            --typespec="$source_dir/main.tsp" \
+            --schema="$source_dir/authored.schema.json" \
+            --output-dir="$source_dir/generated" \
+            --report="$source_dir/report.json" \
+            --contract-ir="$source_dir/contract-ir.json" \
+            --quiet
+
+          cp "$source_dir/report.json" "$retained/report.json"
+          cp "$source_dir/contract-ir.json" "$retained/contract-ir.json"
+          cp "$source_dir/generated/typespec.generated.schema.json" "$retained/generated/typespec.generated.schema.json"
+          expected=$(node -e 'const fs=require("node:fs");const ir=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(JSON.stringify(ir.declarations.map(x=>x.id).sort()))' "$retained/contract-ir.json")
+
+          node "$executable" verify-ir \
+            --contract-ir="$retained/contract-ir.json" \
+            --parity-receipt="$retained/report.json" \
+            --typespec="$source_dir/main.tsp" \
+            --generated-schema="$retained/generated/typespec.generated.schema.json" \
+            --schema="$source_dir/authored.schema.json" \
+            --expected-declarations="$expected" \
+            --verification="$retained/consumer-verification.json"
+
+          node -e 'const fs=require("node:fs");const r=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(r.status!=="passed"||r.admissible!==true)process.exit(1)' "$retained/consumer-verification.json"
+
+      - name: Prove authored-schema drift stops producer admission
+        run: |
+          set -euo pipefail
+          run_dir=$(mktemp -d "$RUNNER_TEMP/tjsv-drift.XXXXXXXX")
+          set +e
+          node "$GITHUB_WORKSPACE/bin/typespec-json-schema-validator.mjs" check \
+            --typespec="$GITHUB_WORKSPACE/test/fixtures/drift/main.tsp" \
+            --schema="$GITHUB_WORKSPACE/test/fixtures/drift/authored.schema.json" \
+            --output-dir="$run_dir/generated" \
+            --report="$run_dir/report.json" \
+            --contract-ir="$run_dir/contract-ir.json" \
+            --quiet
+          status=$?
+          set -e
+          test "$status" -eq 2
+          node -e 'const fs=require("node:fs");const r=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(r.status==="passed"||r.zeroUnexplainedFindings===true)process.exit(1)' "$run_dir/report.json"
