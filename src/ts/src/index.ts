@@ -250,7 +250,7 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     try {
       request = await boundRequestBody(request, config.settings.maxBodyBytes, config.settings.timeoutMs);
     } catch (error) {
-      if (error instanceof PayloadTooLargeError) return problem(413, "payload_too_large", "request body exceeds configured limit");
+      if (error instanceof PayloadTooLargeError) return early(problem(413, "payload_too_large", "request body exceeds configured limit"));
       throw error;
     }
 
