@@ -158,9 +158,12 @@ export function runWithCapturedOperationContext<T>(
  * separately audited reporter when redacted stack capture is required.
  */
 export const reportOresOperationFailure: OperationFailureReporter = async ({ failure }) => {
+  const routineId = "ores-routine-r9dy-_JOH4UeTrlGnosV2";
   try {
     await defaultLogger
       .error("operation failed")
+      .addTraceId("ores-trace-_QI8lHiKINWQEHT-6P77i")
+      .addRoutineId(routineId)
       .addFields({
         "operation.name": failure.operation,
         "operation.transport": failure.transport,
