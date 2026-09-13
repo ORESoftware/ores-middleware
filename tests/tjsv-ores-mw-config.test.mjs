@@ -11,8 +11,8 @@ import {
 } from '../scripts/check-tjsv-ores-mw.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const CORPUS_INSTANCES = 12;
-const SNAPSHOT_FILES = 14;
+const CORPUS_INSTANCES = 30;
+const SNAPSHOT_FILES = 32;
 
 function successfulReport(corpusInstances) {
   const rows = DECLARATIONS.map((name, index) => ({

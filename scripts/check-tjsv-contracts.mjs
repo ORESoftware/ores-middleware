@@ -51,7 +51,11 @@ for (const scope of scopes) {
     }
     const options = {
       typespec, authoredSchema, instances, probes: true, maxProbes: 128,
-      maxFindings: 1000, sealObjectSchemas: true,
+      maxFindings: 1000,
+      // Both peer authorities already express their own object-closure policy.
+      // Do not let the comparison emitter inject an extra unevaluatedProperties
+      // assertion: generated Schema B is evidence only, never a third authority.
+      sealObjectSchemas: false,
       outputDir: resolve(output, scope.name, 'generated')
     };
     const report = await runCheck(options);
