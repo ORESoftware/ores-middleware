@@ -86,6 +86,7 @@ export function createOresContractDriftObserver(root: OresLogger): ContractDrift
     const event = toContractDriftEvent(finding);
     const fields: OresLogFields = {
       "event.name": "ores.contract.drift",
+      "contract.drift_schema": event.schema,
       "contract.drift_kind": event.drift_kind
     };
     addBoundedField(fields, "contract.operation_id", event.operation_id);
