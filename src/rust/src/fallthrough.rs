@@ -9,25 +9,25 @@ pub const UNMATCHED_ROUTE_PROBLEM_TYPE: &str = "urn:ores:error:route-unmatched";
 pub const UNMATCHED_ROUTE_TITLE: &str = "No route matched";
 pub const UNMATCHED_ROUTE_DETAIL: &str = "The request target is not handled by this server.";
 
-/// Selects the HTTP status used at the *final server/router ownership boundary*.
+/// Selects the HTTP status used at the final server/router boundary.
 ///
-/// This is intentionally not a replacement for ordinary resource-level 404s,
-/// nor for 405 responses when a route exists but does not allow the request
-/// method. `MisdirectedRequest` is the ORES default for the outermost handler;
-/// `NotFoundCompatibility` exists for frameworks and deployments that require
-/// conventional 404 behavior at that boundary.
+/// `NotFound` is the standards-correct default when the request reached the
+/// intended origin but no application route claims its target resource.
+/// `MisdirectedAuthority` is only for an origin/connection mismatch where HTTP
+/// 421 is actually appropriate. A known route with an unsupported method
+/// remains a router-owned 405 response with `Allow`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FallthroughStatusMode {
     #[default]
-    MisdirectedRequest,
-    NotFoundCompatibility,
+    NotFound,
+    MisdirectedAuthority,
 }
 
 impl FallthroughStatusMode {
     pub const fn status_code(self) -> StatusCode {
         match self {
-            Self::MisdirectedRequest => StatusCode::MISDIRECTED_REQUEST,
-            Self::NotFoundCompatibility => StatusCode::NOT_FOUND,
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::MisdirectedAuthority => StatusCode::MISDIRECTED_REQUEST,
         }
     }
 }
@@ -38,9 +38,11 @@ pub struct FallthroughConfig {
 }
 
 impl FallthroughConfig {
-    pub const fn not_found_compatibility() -> Self {
+    /// Select HTTP 421 only when the request was directed at an origin or
+    /// connection context for which this server is not authoritative.
+    pub const fn misdirected_authority() -> Self {
         Self {
-            status_mode: FallthroughStatusMode::NotFoundCompatibility,
+            status_mode: FallthroughStatusMode::MisdirectedAuthority,
         }
     }
 }
@@ -66,7 +68,8 @@ struct ProblemDetails<'a> {
 ///
 /// No request path, query, method, route table, or framework detail is echoed.
 /// HEAD receives the same metadata and would-be Content-Length as GET, but no
-/// body bytes.
+/// body bytes. The stable `ores.route.unmatched` code distinguishes this
+/// router fall-through from resource-level 404 responses in telemetry.
 pub fn final_fallthrough_response(
     method: &Method,
     config: FallthroughConfig,
@@ -122,27 +125,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_misdirected_request_at_final_boundary() {
+    fn defaults_to_not_found_with_stable_fallthrough_code() {
         let response = final_fallthrough_response(&Method::GET, FallthroughConfig::default());
-        assert_eq!(response.status, StatusCode::MISDIRECTED_REQUEST);
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
         assert_eq!(
             response.headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok()),
             Some("no-store")
         );
         let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(body["code"], UNMATCHED_ROUTE_ERROR_CODE);
-        assert_eq!(body["status"], 421);
+        assert_eq!(body["status"], 404);
     }
 
     #[test]
-    fn supports_explicit_not_found_compatibility() {
+    fn supports_explicit_misdirected_authority_mode() {
         let response = final_fallthrough_response(
             &Method::GET,
-            FallthroughConfig::not_found_compatibility(),
+            FallthroughConfig::misdirected_authority(),
         );
-        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert_eq!(response.status, StatusCode::MISDIRECTED_REQUEST);
         let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
-        assert_eq!(body["status"], 404);
+        assert_eq!(body["status"], 421);
         assert_eq!(body["code"], UNMATCHED_ROUTE_ERROR_CODE);
     }
 
