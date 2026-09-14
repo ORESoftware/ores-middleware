@@ -15,9 +15,9 @@ use ores_middleware::{
     hardening::{
         BreakerKey, CircuitBreakerRegistry, CircuitBreakerRegistryConfig, FetchMetadataPolicy,
         FetchMetadataStage, FinalizerFailureMode, FinalizerOutcome, HardenedStagePipeline,
-        LifecycleFailureKind, MAX_BREAKER_REGISTRY_ENTRIES, MAX_STAGE_ATTRIBUTE_KEY_BYTES,
-        MAX_STAGE_ATTRIBUTE_VALUE_BYTES, admit_raw_headers, sanitized_problem_response,
-        validate_stage_attributes,
+        LifecycleFailureKind, MAX_BREAKER_REGISTRY_ENTRIES, MAX_HARDENED_STAGES,
+        MAX_STAGE_ATTRIBUTE_KEY_BYTES, MAX_STAGE_ATTRIBUTE_VALUE_BYTES, admit_raw_headers,
+        sanitized_problem_response, validate_stage_attributes,
     },
 };
 use serde_json::{Value, json};
@@ -436,4 +436,21 @@ async fn breaker_registry_capacity_is_hard_bounded_and_invalid_capacities_fail_c
         .unwrap();
     assert_eq!(registry.len().await, 1);
     assert_eq!(registry.eviction_count(), 1);
+}
+
+#[test]
+fn hardened_pipeline_accepts_exact_stage_bound_and_rejects_one_more() {
+    let mut pipeline = HardenedStagePipeline::new();
+    for _ in 0..MAX_HARDENED_STAGES {
+        pipeline = pipeline
+            .try_with_stage(Arc::new(PassStage("pass")), FinalizerFailureMode::FailOpen)
+            .unwrap();
+    }
+    assert_eq!(
+        pipeline
+            .try_with_stage(Arc::new(PassStage("overflow")), FinalizerFailureMode::FailOpen)
+            .unwrap_err()
+            .code,
+        "stage_count_exceeded"
+    );
 }
