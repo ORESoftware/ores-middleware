@@ -13,10 +13,17 @@ vcs = "git"
 url = "https://github.com/ORESoftware/ores-middleware"
 
 [dependencies]
-# Cross-repository runtime code is resolved through an immutable Zed artifact,
-# never through an unauthenticated private Cargo Git URL. The frozen lock must
-# bind version, digest, tag, source commit, archive format, size, and source.
+# Shared request/header/payload semantic contracts. Runtime adapters project
+# these into idiomatic language maps without redefining the wire vocabulary.
+"oresoftware/ores-interfaces" = "^0.1.0"
+# Admission/rate-limit policy belongs to the rate-limit core; middleware only
+# orchestrates it at the HTTP/RPC lifecycle boundary.
 "ores-rate-limit/ores-rl-lib-core" = "^0.1.0"
+# Bounded LRU/Redis cache profiles are an integration dependency rather than a
+# second cache implementation hidden in the middleware package.
+"ores-redis-lru-cache/ores-lru-redis-lib-core" = "^0.1.0"
+# Authentication/session semantics remain owned by Shared Auth.
+"shared-auth/shared-auth-lib-core" = "^0.1.0"
 
 [build]
 command = "python3 scripts/build_targets.py"
