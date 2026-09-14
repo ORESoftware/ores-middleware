@@ -9,6 +9,7 @@ mod compat;
 mod config;
 mod context;
 pub mod docs_serving;
+pub mod fallthrough;
 pub mod frameworks;
 mod integrations;
 pub mod middleware_order;

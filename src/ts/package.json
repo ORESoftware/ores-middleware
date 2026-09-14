@@ -13,6 +13,10 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
     },
+    "./fallthrough": {
+      "types": "./dist/fallthrough.d.ts",
+      "import": "./dist/fallthrough.js"
+    },
     "./koa": {
       "types": "./dist/koa.d.ts",
       "import": "./dist/koa.js"
