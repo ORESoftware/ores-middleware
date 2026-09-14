@@ -31,6 +31,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+impl std::fmt::Debug for hardening::HardenedStagePipeline {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HardenedStagePipeline")
+            .finish_non_exhaustive()
+    }
+}
+
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
 pub use config::{
     MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
