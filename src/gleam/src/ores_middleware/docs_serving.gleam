@@ -8,9 +8,9 @@ import gleam/string
 
 pub const contract_id = "ores.docs-serving/v1"
 
-pub const docs_format_header = "X-Ores-Docs-Format"
+pub const docs_format_header = "x-ores-docs-format"
 
-pub const contract_digest_header = "X-Ores-Contract-SHA256"
+pub const contract_digest_header = "x-ores-contract-sha256"
 
 pub type Representation {
   Html
