@@ -11,10 +11,11 @@ pub const unmatched_route_title = "No route matched"
 pub const unmatched_route_detail = "The request target is not handled by this server."
 
 /// The status policy for the outermost server/router fall-through boundary.
-/// This is not a replacement for resource-level 404 or known-route 405 handling.
+/// `NotFound` is the default for an intended origin with no matching route.
+/// `MisdirectedAuthority` is only for a true origin/connection mismatch.
 pub type FallthroughStatusMode {
-  MisdirectedRequest
-  NotFoundCompatibility
+  NotFound
+  MisdirectedAuthority
 }
 
 pub type FallthroughResponse {
@@ -28,14 +29,15 @@ pub type FallthroughResponse {
 
 fn status_code(mode: FallthroughStatusMode) -> Int {
   case mode {
-    MisdirectedRequest -> 421
-    NotFoundCompatibility -> 404
+    NotFound -> 404
+    MisdirectedAuthority -> 421
   }
 }
 
 /// Build the framework-neutral final/fall-through response value.
 /// The request target itself is never accepted, so path/query/route details
-/// cannot accidentally be reflected into the response.
+/// cannot accidentally be reflected into the response. Known-route method
+/// mismatches remain router-owned 405 responses.
 pub fn final_fallthrough(
   method: String,
   mode: FallthroughStatusMode,
@@ -71,5 +73,5 @@ pub fn final_fallthrough(
 }
 
 pub fn default_final_fallthrough(method: String) -> FallthroughResponse {
-  final_fallthrough(method, MisdirectedRequest)
+  final_fallthrough(method, NotFound)
 }
