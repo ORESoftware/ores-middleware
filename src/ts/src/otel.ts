@@ -4,9 +4,10 @@ import {
   runWithLogContext
 } from "@oresoftware/next-loggers/context";
 
-import type {
-  ContractDriftFinding,
-  ContractDriftObserver
+import {
+  toContractDriftEvent,
+  type ContractDriftFinding,
+  type ContractDriftObserver
 } from "./contract-drift.js";
 import type { RequestContractValidator } from "./request-contract.js";
 import {
@@ -82,16 +83,17 @@ function addBoundedField(fields: OresLogFields, key: string, value: string | und
  */
 export function createOresContractDriftObserver(root: OresLogger): ContractDriftObserver {
   return (finding: ContractDriftFinding): void => {
+    const event = toContractDriftEvent(finding);
     const fields: OresLogFields = {
       "event.name": "ores.contract.drift",
-      "contract.drift_kind": finding.kind
+      "contract.drift_kind": event.drift_kind
     };
-    addBoundedField(fields, "contract.operation_id", finding.operationId);
-    addBoundedField(fields, "contract.declaration", finding.declaration);
-    addBoundedField(fields, "contract.language", finding.language);
-    addBoundedField(fields, "contract.runtime", finding.runtime);
-    addBoundedField(fields, "contract.runtime_verdict", finding.runtimeVerdict);
-    addBoundedField(fields, "contract.reference_verdict", finding.referenceVerdict);
+    addBoundedField(fields, "contract.operation_id", event.operation_id);
+    addBoundedField(fields, "contract.declaration", event.declaration);
+    addBoundedField(fields, "contract.language", event.language);
+    addBoundedField(fields, "contract.runtime", event.runtime);
+    addBoundedField(fields, "contract.runtime_verdict", event.runtime_verdict);
+    addBoundedField(fields, "contract.reference_verdict", event.reference_verdict);
     emitRequestLog(
       root.warn("contract runtime drift").addFields(fields),
       "contract-drift"
