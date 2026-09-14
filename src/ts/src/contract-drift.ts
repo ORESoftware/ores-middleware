@@ -1,5 +1,7 @@
 export const TJSV_LANGUAGE_BOUNDARY_EVIDENCE_SCHEMA =
   "ores.typespec-json-schema-validator.language-boundary-evidence/v1" as const;
+export const CONTRACT_DRIFT_EVENT_SCHEMA =
+  "ores.middleware.contract-drift/v1" as const;
 
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const SHA256_PREFIXED_RE = /^sha256:[a-f0-9]{64}$/;
@@ -56,9 +58,9 @@ export interface ExpectedContractBinding {
 }
 
 /**
- * Deliberately bounded drift metadata. Raw payloads, headers, schema fragments,
- * credentials, user IDs, and digest values are excluded so the same object is
- * safe to hand to telemetry sinks.
+ * Deliberately bounded language-local drift metadata. Raw payloads, headers,
+ * schema fragments, credentials, user IDs, and digest values are excluded so
+ * the same object is safe to hand to telemetry sinks.
  */
 export interface ContractDriftFinding {
   readonly kind: ContractDriftKind;
@@ -68,6 +70,18 @@ export interface ContractDriftFinding {
   readonly runtime?: string;
   readonly runtimeVerdict?: Exclude<ContractRuntimeVerdict, "refused">;
   readonly referenceVerdict?: ContractRuntimeVerdict;
+}
+
+/** Exact snake_case wire projection admitted by the peer TypeSpec/JSON Schema contract. */
+export interface ContractDriftEvent {
+  readonly schema: typeof CONTRACT_DRIFT_EVENT_SCHEMA;
+  readonly drift_kind: ContractDriftKind;
+  readonly operation_id?: string;
+  readonly declaration?: string;
+  readonly language?: string;
+  readonly runtime?: string;
+  readonly runtime_verdict?: Exclude<ContractRuntimeVerdict, "refused">;
+  readonly reference_verdict?: ContractRuntimeVerdict;
 }
 
 export type ContractDriftObserver = (
@@ -111,6 +125,22 @@ function evidenceIsWellFormed(
     validTool(value.generator) &&
     (value.validation.ingress === "passed" || value.validation.ingress === "failed") &&
     (value.validation.egress === "passed" || value.validation.egress === "failed");
+}
+
+/** Convert an idiomatic TypeScript finding into the exact shared wire contract. */
+export function toContractDriftEvent(
+  finding: ContractDriftFinding
+): Readonly<ContractDriftEvent> {
+  return Object.freeze({
+    schema: CONTRACT_DRIFT_EVENT_SCHEMA,
+    drift_kind: finding.kind,
+    ...(finding.operationId !== undefined ? { operation_id: finding.operationId } : {}),
+    ...(finding.declaration !== undefined ? { declaration: finding.declaration } : {}),
+    ...(finding.language !== undefined ? { language: finding.language } : {}),
+    ...(finding.runtime !== undefined ? { runtime: finding.runtime } : {}),
+    ...(finding.runtimeVerdict !== undefined ? { runtime_verdict: finding.runtimeVerdict } : {}),
+    ...(finding.referenceVerdict !== undefined ? { reference_verdict: finding.referenceVerdict } : {})
+  });
 }
 
 /**
