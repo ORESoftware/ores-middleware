@@ -105,7 +105,7 @@ impl StageRejection {
 
 #[derive(Debug, Clone)]
 pub enum StageDecision {
-    Continue(StageInput),
+    Continue(Box<StageInput>),
     Respond(StageResponse),
     Reject(StageRejection),
 }
@@ -161,6 +161,7 @@ impl StagePipeline {
             let received = input.clone();
             match stage.request(input).await {
                 StageDecision::Continue(next) => {
+                    let next = *next;
                     entered.push((Arc::clone(stage), next.clone()));
                     input = next;
                 }
@@ -263,7 +264,7 @@ mod tests {
             input: StageInput,
         ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async move { StageDecision::Continue(input) })
+            Box::pin(async move { StageDecision::Continue(Box::new(input)) })
         }
     }
 
@@ -313,7 +314,7 @@ mod tests {
             &'a self,
             input: StageInput,
         ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
-            Box::pin(async move { StageDecision::Continue(input) })
+            Box::pin(async move { StageDecision::Continue(Box::new(input)) })
         }
 
         fn response<'a>(
@@ -365,7 +366,9 @@ mod tests {
             input: StageInput,
         ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
             Box::pin(async move {
-                StageDecision::Continue(input.with_attribute("auth.level", json!("strong")))
+                StageDecision::Continue(Box::new(
+                    input.with_attribute("auth.level", json!("strong")),
+                ))
             })
         }
     }
