@@ -1,0 +1,134 @@
+[help]
+url = "https://github.com/ORESoftware/ores-middleware"
+
+# Only non-secret runtime controls are exposed as CLI flags. Secret material such
+# as HMAC keys, Redis credentials, TLS private-key contents, tokens, cookies, and
+# auth credentials must remain environment/secret-store only.
+
+[flags.environment]
+env = "ORES_MIDDLEWARE_ENV"
+aliases = ["environment", "env"]
+type = "string"
+help = "Runtime environment: development, test, staging, or production."
+
+[flags.tls_mode]
+env = "ORES_MIDDLEWARE_TLS_MODE"
+aliases = ["tls-mode"]
+type = "string"
+help = "TLS mode: disabled, in-process, or trusted-proxy."
+
+[flags.trusted_proxy_cidrs]
+env = "ORES_MIDDLEWARE_TRUSTED_PROXY_CIDRS"
+aliases = ["trusted-proxy-cidrs"]
+type = "string"
+help = "Comma-separated trusted proxy CIDRs."
+
+[flags.timeout_ms]
+env = "ORES_MIDDLEWARE_TIMEOUT_MS"
+aliases = ["timeout-ms"]
+type = "integer"
+help = "Middleware request timeout in milliseconds."
+
+[flags.max_body_bytes]
+env = "ORES_MIDDLEWARE_MAX_BODY_BYTES"
+aliases = ["max-body-bytes"]
+type = "integer"
+help = "Maximum admitted request body size in bytes."
+
+[flags.rate_limit_enabled]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_ENABLED"
+aliases = ["rate-limit-enabled"]
+type = "bool"
+true_aliases = ["t", "1", "yes"]
+false_aliases = ["f", "0", "no"]
+help = "Enable middleware rate limiting."
+
+[flags.rate_limit_capacity]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_CAPACITY"
+aliases = ["rate-limit-capacity"]
+type = "integer"
+help = "Rate-limit bucket/window capacity."
+
+[flags.rate_limit_refill_per_second]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_REFILL_PER_SECOND"
+aliases = ["rate-limit-refill-per-second"]
+type = "double"
+help = "Rate-limit refill rate per second."
+
+[flags.rate_limit_policy_id]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_POLICY_ID"
+aliases = ["rate-limit-policy-id"]
+type = "string"
+help = "Stable low-cardinality rate-limit policy identifier."
+
+[flags.rate_limit_algorithm]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM"
+aliases = ["rate-limit-algorithm"]
+type = "string"
+help = "Rate-limit algorithm."
+
+[flags.rate_limit_layer]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_LAYER"
+aliases = ["rate-limit-layer"]
+type = "string"
+help = "Rate-limit enforcement layer."
+
+[flags.rate_limit_failure_mode]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE"
+aliases = ["rate-limit-failure-mode"]
+type = "string"
+help = "Rate-limit failure mode."
+
+[flags.rate_limit_window_ms]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_WINDOW_MS"
+aliases = ["rate-limit-window-ms"]
+type = "integer"
+help = "Rate-limit window in milliseconds."
+
+[flags.rate_limit_local_cache_max_entries]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES"
+aliases = ["rate-limit-local-cache-max-entries"]
+type = "integer"
+help = "Maximum local rate-limit fallback entries."
+
+[flags.rate_limit_local_cache_ttl_ms]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS"
+aliases = ["rate-limit-local-cache-ttl-ms"]
+type = "integer"
+help = "Local rate-limit fallback TTL in milliseconds."
+
+[flags.rate_limit_key_namespace]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_NAMESPACE"
+aliases = ["rate-limit-key-namespace"]
+type = "string"
+help = "Stable rate-limit key namespace."
+
+[flags.rate_limit_key_version]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_VERSION"
+aliases = ["rate-limit-key-version"]
+type = "string"
+help = "Rate-limit key derivation version."
+
+[flags.rate_limit_key_derivation]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION"
+aliases = ["rate-limit-key-derivation"]
+type = "string"
+help = "Rate-limit key derivation mode."
+
+[flags.rate_limit_key_by]
+env = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY"
+aliases = ["rate-limit-key-by"]
+type = "string"
+help = "Comma-separated bounded rate-limit identity signals."
+
+[flags.context_registry_max_entries]
+env = "ORES_MIDDLEWARE_CONTEXT_REGISTRY_MAX_ENTRIES"
+aliases = ["context-registry-max-entries"]
+type = "integer"
+help = "Maximum bounded diagnostic context registry entries."
+
+[flags.context_registry_ttl_ms]
+env = "ORES_MIDDLEWARE_CONTEXT_REGISTRY_TTL_MS"
+aliases = ["context-registry-ttl-ms"]
+type = "integer"
+help = "Diagnostic context registry TTL in milliseconds."
