@@ -11,6 +11,12 @@ mod context;
 pub mod docs_serving;
 pub mod fallthrough;
 pub mod frameworks;
+#[expect(
+    clippy::map_entry,
+    clippy::manual_contains,
+    clippy::len_without_is_empty,
+    reason = "PR #141 hardening landed behavior-first; #148 tracks the mechanical Entry/contains/is_empty cleanup without weakening the fail-closed tests"
+)]
 pub mod hardening;
 mod integrations;
 pub mod middleware_order;
