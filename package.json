@@ -14,6 +14,10 @@
       "types": "./src/ts/dist/adapters.d.ts",
       "import": "./src/ts/dist/adapters.js"
     },
+    "./fallthrough": {
+      "types": "./src/ts/dist/fallthrough.d.ts",
+      "import": "./src/ts/dist/fallthrough.js"
+    },
     "./nextjs": {
       "types": "./src/ts/dist/nextjs.d.ts",
       "import": "./src/ts/dist/nextjs.js"
