@@ -30,7 +30,7 @@ pass through or receive one of those already-built artifacts.
 host framework request
         |
         v
-thin adapter: method/path/Accept/X-Ores-Docs-Format
+thin adapter: method/path/Accept/x-ores-docs-format
         |
         v
 ores-middleware docs selector
@@ -159,7 +159,7 @@ parameters.
 
 Generic HTML aliases negotiate in this order:
 
-1. valid `X-Ores-Docs-Format`;
+1. valid `x-ores-docs-format`;
 2. highest-quality recognized `Accept` media range;
 3. HTML when headers are absent or accept `*/*`.
 
@@ -192,7 +192,7 @@ status = 503
 ```
 
 There is no representation fallback. A valid digest is returned as
-`X-Ores-Contract-SHA256`.
+`x-ores-contract-sha256`.
 
 Adapters inject a provider equivalent to:
 
