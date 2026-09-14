@@ -4,6 +4,170 @@ schema_version = 1
 repository_mode = "server-only"
 default_target = "portable-adapters"
 
+[flags2env]
+contract = ".cli-flags.toml"
+require_audit = true
+precedence = "argv-over-env"
+
+# Runtime environment metadata. Values are resolved at the runtime/secret-store
+# boundary; this manifest never contains credentials or secret values.
+[[env]]
+name = "runtime_environment"
+key = "ORES_MIDDLEWARE_ENV"
+kind = "string"
+required = true
+secret = false
+description = "Runtime environment: development, test, staging, or production."
+
+[[env]]
+name = "tls_mode"
+key = "ORES_MIDDLEWARE_TLS_MODE"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "trusted_proxy_cidrs"
+key = "ORES_MIDDLEWARE_TRUSTED_PROXY_CIDRS"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "timeout_ms"
+key = "ORES_MIDDLEWARE_TIMEOUT_MS"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "max_body_bytes"
+key = "ORES_MIDDLEWARE_MAX_BODY_BYTES"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_enabled"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_ENABLED"
+kind = "bool"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_capacity"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_CAPACITY"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_refill_per_second"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_REFILL_PER_SECOND"
+kind = "double"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_policy_id"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_POLICY_ID"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_algorithm"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_ALGORITHM"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_layer"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_LAYER"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_failure_mode"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_FAILURE_MODE"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_window_ms"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_WINDOW_MS"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_local_cache_max_entries"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_MAX_ENTRIES"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_local_cache_ttl_ms"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_LOCAL_CACHE_TTL_MS"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_key_namespace"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_NAMESPACE"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_key_version"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_VERSION"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_key_derivation"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_DERIVATION"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "rate_limit_key_by"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_KEY_BY"
+kind = "string"
+required = false
+secret = false
+
+[[env]]
+name = "context_registry_max_entries"
+key = "ORES_MIDDLEWARE_CONTEXT_REGISTRY_MAX_ENTRIES"
+kind = "integer"
+required = false
+secret = false
+
+[[env]]
+name = "context_registry_ttl_ms"
+key = "ORES_MIDDLEWARE_CONTEXT_REGISTRY_TTL_MS"
+kind = "integer"
+required = false
+secret = false
+
+# Secret-store-only binding: deliberately absent from `.cli-flags.toml`.
+[[env]]
+name = "rate_limit_hmac_secret"
+key = "ORES_MIDDLEWARE_RATE_LIMIT_HMAC_SECRET"
+kind = "string"
+required = false
+secret = true
+description = "Stable production rate-limit HMAC key supplied by the approved secret boundary."
+
 [[targets]]
 name = "portable-adapters"
 role = "server"
