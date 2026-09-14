@@ -13,14 +13,19 @@ const textExtensions = new Set([
   '.exs',
   '.gleam',
   '.go',
+  '.js',
   '.json',
   '.md',
   '.mjs',
+  '.py',
   '.rs',
+  '.sh',
   '.toml',
   '.ts',
   '.tsp',
   '.txt',
+  '.yaml',
+  '.yml',
 ]);
 
 function effectiveExtension(path) {
