@@ -30,6 +30,6 @@ export interface DocsDecision {
   headers: Readonly<Record<string, string>>;
 }
 
-export declare const DOCS_FORMAT_HEADER: "X-Ores-Docs-Format";
-export declare const CONTRACT_DIGEST_HEADER: "X-Ores-Contract-SHA256";
+export declare const DOCS_FORMAT_HEADER: "x-ores-docs-format";
+export declare const CONTRACT_DIGEST_HEADER: "x-ores-contract-sha256";
 export declare function decideDocs(request: Readonly<DocsRequest>): DocsDecision;
