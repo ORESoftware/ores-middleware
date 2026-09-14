@@ -102,6 +102,13 @@ jobs:
           npm run ores-mw:tjsv
           npm run runtime-drift:tjsv
 
+      - name: Build and test TypeScript consumer after TJSV admission
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+          npm --prefix src/ts test
+
       - name: Prove authored/config sources were not rewritten by the gates
         shell: bash
         run: |
@@ -123,7 +130,13 @@ jobs:
             tests/tjsv-runtime-drift.test.mjs \
             docs/ores-mw-config.md \
             docs/TJSV_CROSS_LANGUAGE_DRIFT.md \
-            package.json package-lock.json
+            package.json package-lock.json \
+            src/ts/package.json src/ts/package-lock.json \
+            src/ts/src/contract-drift.ts \
+            src/ts/src/request-contract.ts \
+            src/ts/src/otel.ts \
+            src/ts/test/contract-drift.test.mjs \
+            src/ts/test/contract-drift-otel.test.mjs
 
       - name: Record exact checked revisions
         if: ${{ always() }}
