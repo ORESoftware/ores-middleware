@@ -6,19 +6,19 @@ pub fn main() {
   gleeunit.main()
 }
 
-pub fn default_fallthrough_is_421_test() {
+pub fn default_fallthrough_is_404_test() {
   let response = fallthrough.default_final_fallthrough("GET")
-  assert response.status == 421
+  assert response.status == 404
   assert response.content_length > 0
   assert string.contains(response.body, fallthrough.unmatched_route_error_code)
   assert string.contains(response.body, "/private/secret") == False
 }
 
-pub fn not_found_compatibility_is_explicit_test() {
+pub fn authority_mismatch_can_use_421_test() {
   let response =
-    fallthrough.final_fallthrough("GET", fallthrough.NotFoundCompatibility)
-  assert response.status == 404
-  assert string.contains(response.body, "\"status\":404")
+    fallthrough.final_fallthrough("GET", fallthrough.MisdirectedAuthority)
+  assert response.status == 421
+  assert string.contains(response.body, "\"status\":421")
   assert string.contains(response.body, fallthrough.unmatched_route_error_code)
 }
 
