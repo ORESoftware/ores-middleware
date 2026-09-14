@@ -11,6 +11,7 @@ mod context;
 pub mod docs_serving;
 pub mod fallthrough;
 pub mod frameworks;
+pub mod hardening;
 mod integrations;
 pub mod middleware_order;
 mod net;
