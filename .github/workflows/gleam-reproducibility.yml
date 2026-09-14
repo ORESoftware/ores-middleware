@@ -66,12 +66,14 @@ jobs:
           gleam build
           git diff --exit-code -- gleam.toml manifest.toml
 
-      - name: Enforce Gleam source formatting
+      - name: Diagnose Gleam source formatting
         shell: bash
         run: |
           set -euo pipefail
           cd src/gleam
-          gleam format --check src test
+          gleam format src test
+          git diff -- src/ores_middleware/fallthrough.gleam test/fallthrough_test.gleam
+          exit 1
 
       - name: Run native Gleam middleware suite repeatedly
         shell: bash
