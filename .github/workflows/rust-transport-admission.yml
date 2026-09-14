@@ -63,16 +63,16 @@ jobs:
           set -euo pipefail
           node --version | tee target/transport-evidence/node-version.txt
           node --test tests/rust-operation-binding.test.mjs 2>&1 | tee target/transport-evidence/source-binding.log
-      - name: Check formatting of the new transport regression suites
+      - name: Check formatting of transport and hardening regression suites
         shell: bash
         run: |
           set -euo pipefail
-          for file in src/rust/tests/operation_admission.rs src/rust/tests/operation_controlled.rs src/rust/tests/tcp_lifecycle.rs; do
+          for file in src/rust/tests/operation_admission.rs src/rust/tests/operation_controlled.rs src/rust/tests/tcp_lifecycle.rs src/rust/tests/hardening_adversarial.rs; do
             mkdir -p "target/transport-evidence/formatted/$(dirname "$file")"
             rustfmt --edition 2024 --emit stdout < "$file" > "target/transport-evidence/formatted/$file"
             cmp "$file" "target/transport-evidence/formatted/$file"
           done
-      - name: Run actual Rust operation and transport tests
+      - name: Run actual Rust operation, transport, and hardening tests
         shell: bash
         run: |
           set -euo pipefail
