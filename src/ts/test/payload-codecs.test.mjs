@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { gzipSync } from "node:zlib";
+import { deflateSync, gzipSync } from "node:zlib";
 
 import {
   PayloadDecodeError,
@@ -42,6 +42,69 @@ test("decompresses gzip before JSON parsing and rewrites transport headers", asy
   assert.deepEqual(decoded.jsonPayload, { compressed: true });
   assert.equal(decoded.request.headers.get("content-encoding"), null);
   assert.equal(Number(decoded.request.headers.get("content-length")), decoded.bytes.byteLength);
+});
+
+test("decompresses deflate before JSON parsing", async () => {
+  const body = deflateSync(Buffer.from(JSON.stringify({ compressed: "deflate" })));
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "content-encoding": "deflate" },
+    body
+  });
+  const decoded = await decodeRequestPayload(request, limits);
+  assert.deepEqual(decoded.jsonPayload, { compressed: "deflate" });
+  assert.equal(decoded.request.headers.get("content-encoding"), null);
+});
+
+test("expanded payload limit stops decompression bombs before parsing", async () => {
+  const body = gzipSync(Buffer.from(JSON.stringify({ value: "x".repeat(8192) })));
+  assert.ok(body.byteLength < 1024, "fixture must stay below compressed byte limit");
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "content-encoding": "gzip" },
+    body
+  });
+  await assert.rejects(
+    () => decodeRequestPayload(request, { ...limits, maxDecodedBytes: 128 }),
+    (error) => error?.name === "PayloadTooLargeError"
+  );
+});
+
+test("compressed payload limit is enforced before decompression", async () => {
+  const body = gzipSync(Buffer.from(JSON.stringify({ value: "x".repeat(128) })));
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "content-encoding": "gzip" },
+    body
+  });
+  await assert.rejects(
+    () => decodeRequestPayload(request, { ...limits, maxCompressedBytes: Math.max(1, body.byteLength - 1) }),
+    (error) => error?.name === "PayloadTooLargeError"
+  );
+});
+
+test("invalid UTF-8 JSON is a sanitized malformed-body error", async () => {
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: new Uint8Array([0xff, 0xfe, 0xfd])
+  });
+  await assert.rejects(
+    () => decodeRequestPayload(request, limits),
+    (error) => error instanceof PayloadDecodeError && error.code === "malformed_request_body" && error.status === 400
+  );
+});
+
+test("corrupt compressed bytes fail without leaking decompressor detail", async () => {
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/json", "content-encoding": "gzip" },
+    body: new Uint8Array([0x00, 0x01, 0x02, 0x03])
+  });
+  await assert.rejects(
+    () => decodeRequestPayload(request, limits),
+    (error) => error instanceof PayloadDecodeError && error.code === "invalid_content_encoding" && error.status === 400
+  );
 });
 
 test("dispatches MessagePack decoder without treating bytes as JSON", async () => {
