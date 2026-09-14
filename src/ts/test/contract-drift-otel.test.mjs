@@ -41,6 +41,7 @@ test("ores-otel drift event is bounded and excludes receipt digests", () => {
   assert.equal(records[0].message, "contract runtime drift");
   assert.deepEqual(records[0].fields, {
     "event.name": "ores.contract.drift",
+    "contract.drift_schema": "ores.middleware.contract-drift/v1",
     "contract.drift_kind": "runtime_verdict_divergence",
     "contract.operation_id": "items.create",
     "contract.declaration": "CreateItemRequest",
@@ -67,6 +68,7 @@ test("ores-otel wrapper preserves validator resolution and adds a drift observer
 
   wrapped.driftObserver({ kind: "reference_validation_refused", operationId: "health.get" });
   assert.equal(records.length, 1);
+  assert.equal(records[0].fields["contract.drift_schema"], "ores.middleware.contract-drift/v1");
   assert.equal(records[0].fields["contract.drift_kind"], "reference_validation_refused");
 });
 
