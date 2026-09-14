@@ -156,10 +156,13 @@ mod tests {
             head.headers.get(CONTENT_LENGTH),
             get.headers.get(CONTENT_LENGTH)
         );
-        assert_eq!(
-            get.headers.get(CONTENT_LENGTH).and_then(|v| v.to_str().ok()),
-            Some(get.body.len().to_string().as_str())
-        );
+        let advertised_length = get
+            .headers
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap();
+        assert_eq!(advertised_length, get.body.len());
     }
 
     #[test]
