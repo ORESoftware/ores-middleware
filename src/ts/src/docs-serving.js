@@ -1,5 +1,5 @@
-export const DOCS_FORMAT_HEADER = "X-Ores-Docs-Format";
-export const CONTRACT_DIGEST_HEADER = "X-Ores-Contract-SHA256";
+export const DOCS_FORMAT_HEADER = "x-ores-docs-format";
+export const CONTRACT_DIGEST_HEADER = "x-ores-contract-sha256";
 
 const HTML_PATHS = new Set(["/docs/api", "/api/docs", "/api-docs"]);
 const PATH_REPRESENTATIONS = new Map([
