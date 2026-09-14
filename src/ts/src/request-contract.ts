@@ -99,6 +99,8 @@ export interface RequestContractMatch {
 }
 
 export interface RequestContractValidator {
+  /** Optional detached drift sink, normally backed by ores-otel. */
+  readonly driftObserver?: ContractDriftObserver;
   /**
    * Resolve an operation from routing identity only. Deliberately no query,
    * headers, body, or request object is available at this stage.
@@ -218,6 +220,7 @@ export async function checkRequestContract(
   driftObserver?: ContractDriftObserver
 ): Promise<RequestContractFailure | undefined> {
   if (!validator) return undefined;
+  const observer = driftObserver ?? validator.driftObserver;
 
   const method = request.method.toUpperCase();
   const pathname = url.pathname;
@@ -261,7 +264,7 @@ export async function checkRequestContract(
       referenceVerdict = "refused";
     }
     observeContractDrift(
-      driftObserver,
+      observer,
       compareRuntimeContractVerdicts({
         runtimeAccepted: issues.length === 0,
         referenceVerdict,
