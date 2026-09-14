@@ -34,6 +34,10 @@
       "types": "./src/ts/dist/operation.d.ts",
       "import": "./src/ts/dist/operation.js"
     },
+    "./contract-drift": {
+      "types": "./src/ts/dist/contract-drift.d.ts",
+      "import": "./src/ts/dist/contract-drift.js"
+    },
     "./request-contract": {
       "types": "./src/ts/dist/request-contract.d.ts",
       "import": "./src/ts/dist/request-contract.js"
@@ -57,6 +61,8 @@
     "contracts:compare": "node scripts/compare-authorities.mjs && cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml -- && npm run contracts:constraint-parity && npm run contracts:polyglot-generate && npm run contracts:generated-check && npm run contracts:cross-translate",
     "contracts:validate": "node scripts/validate-contracts.mjs && node scripts/validate-docs-serving.mjs && node scripts/validate-rate-limit-v2.mjs",
     "contracts:check": "npm run contracts:compare && npm run contracts:validate && npm run function-bodies:check",
+    "contracts:tjsv:policy": "npm run ores-mw:tjsv:test && npm run docs-serving:tjsv:test",
+    "contracts:admitted-build": "npm run ores-mw:tjsv && python3 scripts/build_targets.py",
     "function-bodies:compile": "tsp compile contracts/function-bodies/typespec --no-emit",
     "function-bodies:runtime": "node scripts/validate-function-bodies.mjs",
     "function-bodies:e2e": "node --test tests/e2e/function-body-contract.e2e.mjs",
@@ -74,7 +80,7 @@
     "ores-mw:check": "python3 -m unittest tests/test_ores_mw_config.py tests/test_ores_mw_output_hardening.py tests/test_ores_mw_env_config.py -v && python3 scripts/ores_mw_config.py check && tsp compile contracts/ores-mw-config/typespec --no-emit && npm run ores-mw:compile && npm run ores-mw:validate",
     "ores-mw:tjsv": "node scripts/check-tjsv-ores-mw.mjs",
     "ores-mw:tjsv:test": "node --test tests/tjsv-ores-mw-config.test.mjs",
-    "verify": "npm run contracts:compile && npm run contracts:check && npm run ores-mw:check && npm run zpkg:check && node scripts/check-source-layout.mjs",
+    "verify": "npm run contracts:compile && npm run contracts:check && npm run contracts:tjsv:policy && npm run ores-mw:check && npm run zpkg:check && node scripts/check-source-layout.mjs",
     "docs-serving:tjsv": "node scripts/check-tjsv-docs.mjs",
     "docs-serving:tjsv:test": "node --test tests/tjsv-docs-*.test.mjs"
   },
