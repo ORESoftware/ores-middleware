@@ -19,8 +19,12 @@ pub mod otel;
 mod pipeline;
 pub mod rate_limit;
 pub mod rate_limit_v2;
+pub mod resilience;
 pub mod runtime_manifest;
+pub mod security;
 pub mod shared_auth;
+pub mod stage;
+pub mod validation;
 
 use std::collections::BTreeMap;
 
@@ -60,7 +64,12 @@ pub use rate_limit_v2::{
     RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError, RateLimitPolicyV2,
     RateLimitPolicyViolation,
 };
+pub use resilience::{
+    Bulkhead, BulkheadRejected, CircuitAdmission, CircuitBreaker, CircuitBreakerConfig,
+    CircuitStateSnapshot, ResilienceConfigError,
+};
 pub use runtime_manifest::{RuntimeManifestError, admit_server_stack};
+pub use security::{CorsPolicy, CorsStage, CsrfPolicy, CsrfStage};
 pub use shared_auth::{
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
     SUPABASE_AUTH_DATABASE_URL_ENV, SharedAuthDataPlane, SharedAuthDatabaseEnvKeys,
@@ -69,6 +78,10 @@ pub use shared_auth::{
     SharedAuthProviderVerifier, SharedAuthReadyStack, SharedAuthRuntimeTopology,
     SharedAuthServerRole, SharedAuthVerifiedPrincipal,
 };
+pub use stage::{
+    MiddlewareStageHandler, StageDecision, StageInput, StagePipeline, StageRejection, StageResponse,
+};
+pub use validation::{ContractViolation, RequestContractValidator, ValidationStage};
 
 pub const CONTRACT_VERSION: &str = "1.0.0";
 pub const CAPABILITIES: &[&str] = &[
