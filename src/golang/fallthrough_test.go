@@ -9,13 +9,13 @@ import (
 	"testing"
 )
 
-func TestFinalFallthroughDefaultsTo421(t *testing.T) {
+func TestFinalFallthroughDefaultsTo404WithStableCode(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://example.test/private/secret?x=1", nil)
 	rec := httptest.NewRecorder()
 	DefaultFinalFallthroughHandler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusMisdirectedRequest {
-		t.Fatalf("status = %d, want 421", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", got)
@@ -27,18 +27,21 @@ func TestFinalFallthroughDefaultsTo421(t *testing.T) {
 	if problem["code"] != UnmatchedRouteErrorCode {
 		t.Fatalf("code = %#v", problem["code"])
 	}
+	if problem["status"] != float64(http.StatusNotFound) {
+		t.Fatalf("problem status = %#v, want 404", problem["status"])
+	}
 	if strings.Contains(rec.Body.String(), "/private/secret") || strings.Contains(rec.Body.String(), "x=1") {
 		t.Fatal("fallthrough body leaked request target")
 	}
 }
 
-func TestFinalFallthroughSupports404Compatibility(t *testing.T) {
+func TestFinalFallthroughSupports421ForAuthorityMismatch(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://example.test/no-route", nil)
 	rec := httptest.NewRecorder()
-	FinalFallthroughHandler(FallthroughOptions{NotFoundCompatibility: true}).ServeHTTP(rec, req)
+	FinalFallthroughHandler(FallthroughOptions{MisdirectedAuthority: true}).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusMisdirectedRequest {
+		t.Fatalf("status = %d, want 421", rec.Code)
 	}
 }
 
