@@ -18,6 +18,18 @@
       "types": "./src/ts/dist/fallthrough.d.ts",
       "import": "./src/ts/dist/fallthrough.js"
     },
+    "./payload-codecs": {
+      "types": "./src/ts/dist/payload-codecs.d.ts",
+      "import": "./src/ts/dist/payload-codecs.js"
+    },
+    "./body-crypto": {
+      "types": "./src/ts/dist/body-crypto.d.ts",
+      "import": "./src/ts/dist/body-crypto.js"
+    },
+    "./redirect": {
+      "types": "./src/ts/dist/redirect.d.ts",
+      "import": "./src/ts/dist/redirect.js"
+    },
     "./nextjs": {
       "types": "./src/ts/dist/nextjs.d.ts",
       "import": "./src/ts/dist/nextjs.js"
