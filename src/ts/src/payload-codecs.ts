@@ -58,6 +58,12 @@ export class PayloadDecodeError extends Error {
 
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 
+function copyArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(value.byteLength);
+  new Uint8Array(buffer).set(value);
+  return buffer;
+}
+
 export function canonicalHeaderMap(headers: Headers): HeaderMap {
   const result: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [name, value] of headers.entries()) result[name.toLowerCase()] = value;
@@ -166,7 +172,7 @@ async function decodeContentEncoding(request: Request, options: DecodePayloadOpt
   headers.delete("content-encoding");
   headers.delete("transfer-encoding");
   headers.set("content-length", String(bytes.byteLength));
-  return copySupportedCarriers(bounded, new Request(bounded, { body: bytes, headers }));
+  return copySupportedCarriers(bounded, new Request(bounded, { body: copyArrayBuffer(bytes), headers }));
 }
 
 function requireDecoder(decoder: PayloadDecoder | undefined, code: string): PayloadDecoder {
@@ -232,7 +238,7 @@ export async function decodeRequestPayload(
 
   const headers = canonicalHeaderMap(decodedRequest.headers);
   return {
-    request: copySupportedCarriers(decodedRequest, new Request(decodedRequest, { body: bytes })),
+    request: copySupportedCarriers(decodedRequest, new Request(decodedRequest, { body: copyArrayBuffer(bytes) })),
     headers,
     representation,
     bytes,
