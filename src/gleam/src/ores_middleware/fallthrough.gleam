@@ -5,8 +5,7 @@ import gleam/string
 pub const unmatched_route_error_code = "ores.route.unmatched"
 pub const unmatched_route_problem_type = "urn:ores:error:route-unmatched"
 pub const unmatched_route_title = "No route matched"
-pub const unmatched_route_detail =
-  "The request target is not handled by this server."
+pub const unmatched_route_detail = "The request target is not handled by this server."
 
 /// The status policy for the outermost server/router fall-through boundary.
 /// This is not a replacement for resource-level 404 or known-route 405 handling.
