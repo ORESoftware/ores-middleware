@@ -26,7 +26,7 @@ export interface TjsvToolIdentity {
 }
 
 /**
- * Runtime-safe subset of the public TJSV language-boundary evidence contract.
+ * Runtime-safe projection of the public TJSV language-boundary evidence contract.
  * The full object is produced at build/promotion time; runtime only compares
  * immutable identities and verdicts. It never needs the TypeSpec compiler.
  */
@@ -80,34 +80,37 @@ function freezeFinding(
   return Object.freeze({ ...finding });
 }
 
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function validToken(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256 && value.trim() === value;
 }
 
 function validTool(value: unknown): value is TjsvToolIdentity {
-  if (!value || typeof value !== "object") return false;
-  const tool = value as Partial<TjsvToolIdentity>;
-  return validToken(tool.name) && validToken(tool.version);
+  if (!object(value)) return false;
+  return validToken(value.name) && validToken(value.version);
 }
 
 function evidenceIsWellFormed(
-  evidence: TjsvLanguageBoundaryEvidence
-): boolean {
-  return evidence.schema === TJSV_LANGUAGE_BOUNDARY_EVIDENCE_SCHEMA &&
-    validToken(evidence.language) &&
-    validToken(evidence.runtime) &&
-    (evidence.status === "passed" ||
-      evidence.status === "failed" ||
-      evidence.status === "stopped_for_evaluation") &&
-    REVISION_RE.test(evidence.sourceRevision) &&
-    SHA256_PREFIXED_RE.test(evidence.artifactDigest) &&
-    SHA256_RE.test(evidence.receiptRunId) &&
-    SHA256_RE.test(evidence.contractIrId) &&
-    validTool(evidence.toolchain) &&
-    validTool(evidence.generator) &&
-    !!evidence.validation &&
-    (evidence.validation.ingress === "passed" || evidence.validation.ingress === "failed") &&
-    (evidence.validation.egress === "passed" || evidence.validation.egress === "failed");
+  value: unknown
+): value is TjsvLanguageBoundaryEvidence {
+  if (!object(value) || !object(value.validation)) return false;
+  return value.schema === TJSV_LANGUAGE_BOUNDARY_EVIDENCE_SCHEMA &&
+    validToken(value.language) &&
+    validToken(value.runtime) &&
+    (value.status === "passed" ||
+      value.status === "failed" ||
+      value.status === "stopped_for_evaluation") &&
+    typeof value.sourceRevision === "string" && REVISION_RE.test(value.sourceRevision) &&
+    typeof value.artifactDigest === "string" && SHA256_PREFIXED_RE.test(value.artifactDigest) &&
+    typeof value.receiptRunId === "string" && SHA256_RE.test(value.receiptRunId) &&
+    typeof value.contractIrId === "string" && SHA256_RE.test(value.contractIrId) &&
+    validTool(value.toolchain) &&
+    validTool(value.generator) &&
+    (value.validation.ingress === "passed" || value.validation.ingress === "failed") &&
+    (value.validation.egress === "passed" || value.validation.egress === "failed");
 }
 
 /**
@@ -117,14 +120,17 @@ function evidenceIsWellFormed(
  */
 export function compareContractArtifactEvidence(
   expected: ExpectedContractBinding,
-  evidence: TjsvLanguageBoundaryEvidence
+  evidence: unknown
 ): readonly Readonly<ContractDriftFinding>[] {
   const findings: Readonly<ContractDriftFinding>[] = [];
+  const candidate = object(evidence) ? evidence : undefined;
+  const candidateLanguage = validToken(candidate?.language) ? candidate.language : expected.language;
+  const candidateRuntime = validToken(candidate?.runtime) ? candidate.runtime : expected.runtime;
   const add = (kind: ContractDriftKind): void => {
     findings.push(freezeFinding({
       kind,
-      language: validToken(evidence?.language) ? evidence.language : expected.language,
-      runtime: validToken(evidence?.runtime) ? evidence.runtime : expected.runtime
+      language: candidateLanguage,
+      runtime: candidateRuntime
     }));
   };
 
@@ -196,4 +202,15 @@ export function observeContractDrift(
   } catch {
     // Drift delivery failure is deliberately detached from request admission.
   }
+}
+
+/** Compare one artifact binding and emit each bounded drift category. */
+export function observeContractArtifactEvidence(
+  expected: ExpectedContractBinding,
+  evidence: unknown,
+  observer?: ContractDriftObserver
+): readonly Readonly<ContractDriftFinding>[] {
+  const findings = compareContractArtifactEvidence(expected, evidence);
+  for (const finding of findings) observeContractDrift(observer, finding);
+  return findings;
 }
