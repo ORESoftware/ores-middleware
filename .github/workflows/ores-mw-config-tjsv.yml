@@ -61,11 +61,19 @@ jobs:
           npm run ores-mw:compile
           npm run ores-mw:validate
 
-      - name: Compile the independent TypeSpec authority
-        run: npx tsp compile contracts/ores-mw-config/typespec --no-emit
+      - name: Compile independent TypeSpec authorities
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsp compile contracts/ores-mw-config/typespec --no-emit
+          npm run runtime-drift:compile
 
-      - name: Test local TJSV receipt admission policy
-        run: npm run ores-mw:tjsv:test
+      - name: Test local TJSV receipt admission policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run ores-mw:tjsv:test
+          npm run runtime-drift:tjsv:test
 
       - name: Check out exact upstream TJSV source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,8 +95,12 @@ jobs:
           npm rebuild @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
           test -s node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
 
-      - name: Require source and differential .ores-mw contract parity
-        run: npm run ores-mw:tjsv
+      - name: Require source and differential peer-authority parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run ores-mw:tjsv
+          npm run runtime-drift:tjsv
 
       - name: Prove authored/config sources were not rewritten by the gates
         shell: bash
@@ -97,15 +109,20 @@ jobs:
           git diff --exit-code -- \
             .ores-mw.toml \
             contracts/ores-mw-config \
+            contracts/runtime-drift \
             contracts/tjsv-instances/ores-mw-config \
+            contracts/tjsv-instances/runtime-drift \
             fixtures/ores-mw \
             scripts/ores_mw_config.py \
             scripts/check-tjsv-ores-mw.mjs \
+            scripts/check-tjsv-runtime-drift.mjs \
             scripts/validate-ores-mw-config.mjs \
             tests/test_ores_mw_config.py \
             tests/test_ores_mw_output_hardening.py \
             tests/tjsv-ores-mw-config.test.mjs \
+            tests/tjsv-runtime-drift.test.mjs \
             docs/ores-mw-config.md \
+            docs/TJSV_CROSS_LANGUAGE_DRIFT.md \
             package.json package-lock.json
 
       - name: Record exact checked revisions
@@ -129,6 +146,7 @@ jobs:
           path: |
             target/ores-mw/**/*
             target/tjsv/ores-mw-config-*/**/*
+            target/tjsv/runtime-drift-*/**/*
             target/tjsv/*-commit.txt
           if-no-files-found: error
           retention-days: 90
