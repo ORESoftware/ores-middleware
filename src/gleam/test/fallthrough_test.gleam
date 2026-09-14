@@ -11,7 +11,7 @@ pub fn default_fallthrough_is_421_test() {
   assert response.status == 421
   assert response.content_length > 0
   assert string.contains(response.body, fallthrough.unmatched_route_error_code)
-  assert !string.contains(response.body, "/private/secret")
+  assert string.contains(response.body, "/private/secret") == False
 }
 
 pub fn not_found_compatibility_is_explicit_test() {
