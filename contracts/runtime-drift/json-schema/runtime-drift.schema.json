@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/runtime-drift/v1.json",
+  "title": "ORES middleware runtime contract-drift event",
+  "description": "Independent JSON Schema peer authority for the bounded cross-language runtime drift telemetry envelope.",
+  "$ref": "#/$defs/ContractDriftEvent",
+  "$defs": {
+    "ContractDriftEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "drift_kind"],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "ores.middleware.contract-drift/v1"
+        },
+        "drift_kind": {
+          "anyOf": [
+            { "type": "string", "const": "evidence_malformed" },
+            { "type": "string", "const": "evidence_not_passed" },
+            { "type": "string", "const": "ingress_validation_failed" },
+            { "type": "string", "const": "egress_validation_failed" },
+            { "type": "string", "const": "receipt_run_id_mismatch" },
+            { "type": "string", "const": "contract_ir_id_mismatch" },
+            { "type": "string", "const": "source_revision_mismatch" },
+            { "type": "string", "const": "language_mismatch" },
+            { "type": "string", "const": "runtime_mismatch" },
+            { "type": "string", "const": "runtime_verdict_divergence" },
+            { "type": "string", "const": "reference_validation_refused" }
+          ]
+        },
+        "operation_id": { "type": "string" },
+        "declaration": { "type": "string" },
+        "language": { "type": "string" },
+        "runtime": { "type": "string" },
+        "runtime_verdict": {
+          "anyOf": [
+            { "type": "string", "const": "accepted" },
+            { "type": "string", "const": "rejected" }
+          ]
+        },
+        "reference_verdict": {
+          "anyOf": [
+            { "type": "string", "const": "accepted" },
+            { "type": "string", "const": "rejected" },
+            { "type": "string", "const": "refused" }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -5,6 +5,12 @@ import {
 } from "@oresoftware/next-loggers/context";
 
 import {
+  toContractDriftEvent,
+  type ContractDriftFinding,
+  type ContractDriftObserver
+} from "./contract-drift.js";
+import type { RequestContractValidator } from "./request-contract.js";
+import {
   createMiddleware,
   currentContext,
   type MiddlewareConfig,
@@ -65,6 +71,53 @@ function reportRequestLogFailure(phase: string, error: unknown): void {
  */
 function emitRequestLog(event: SendableLogEvent, phase: string): void {
   void event.send().catch((error: unknown) => reportRequestLogFailure(phase, error));
+}
+
+function addBoundedField(fields: OresLogFields, key: string, value: string | undefined): void {
+  if (value !== undefined && value.length > 0 && value.length <= 256) fields[key] = value;
+}
+
+/**
+ * Build the canonical low-cardinality drift event. Full TJSV receipts retain
+ * digests and source identities; runtime telemetry deliberately does not.
+ */
+export function createOresContractDriftObserver(root: OresLogger): ContractDriftObserver {
+  return (finding: ContractDriftFinding): void => {
+    const event = toContractDriftEvent(finding);
+    const fields: OresLogFields = {
+      "event.name": "ores.contract.drift",
+      "contract.drift_schema": event.schema,
+      "contract.drift_kind": event.drift_kind
+    };
+    addBoundedField(fields, "contract.operation_id", event.operation_id);
+    addBoundedField(fields, "contract.declaration", event.declaration);
+    addBoundedField(fields, "contract.language", event.language);
+    addBoundedField(fields, "contract.runtime", event.runtime);
+    addBoundedField(fields, "contract.runtime_verdict", event.runtime_verdict);
+    addBoundedField(fields, "contract.reference_verdict", event.reference_verdict);
+    emitRequestLog(
+      root.warn("contract runtime drift").addFields(fields),
+      "contract-drift"
+    );
+  };
+}
+
+/**
+ * Attach ores-otel drift reporting without changing validator semantics or
+ * forcing generated validators to import the logging package themselves.
+ */
+export function withOresContractDriftLogging(
+  validator: RequestContractValidator,
+  root: OresLogger
+): RequestContractValidator {
+  if (validator.driftObserver) return validator;
+  const driftObserver = createOresContractDriftObserver(root);
+  return Object.freeze({
+    driftObserver,
+    resolve(method: string, pathname: string) {
+      return validator.resolve(method, pathname);
+    }
+  });
 }
 
 export interface RequestWithLog extends Request {
@@ -183,8 +236,12 @@ export function createOresOtelMiddleware(
   ensureOresLogContextProvider();
 
   const telemetry = dependencies.telemetry;
+  const requestContractValidator = dependencies.requestContractValidator
+    ? withOresContractDriftLogging(dependencies.requestContractValidator, dependencies.logger)
+    : undefined;
   const middleware = createMiddleware(config, {
     ...dependencies,
+    ...(requestContractValidator ? { requestContractValidator } : {}),
     ...(telemetry
       ? {
           telemetry: {

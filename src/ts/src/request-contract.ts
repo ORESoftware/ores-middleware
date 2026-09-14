@@ -6,6 +6,13 @@
  * readers are exposed only after a method/path match, so the public API cannot
  * use them as alternate dispatch selectors.
  */
+import {
+  compareRuntimeContractVerdicts,
+  observeContractDrift,
+  type ContractDriftObserver,
+  type ContractRuntimeVerdict
+} from "./contract-drift.js";
+
 export type MaybePromise<T> = T | Promise<T>;
 
 const HTTP_HEADER_NAME_RE = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
@@ -65,6 +72,11 @@ export interface RequestContractValidationInput {
 export interface RequestContractMatch {
   readonly pathTemplate: string;
   readonly pathParams?: Readonly<Record<string, string>>;
+  /** Stable, bounded identifiers used only for diagnostics/telemetry. */
+  readonly operationId?: string;
+  readonly declaration?: string;
+  readonly language?: string;
+  readonly runtime?: string;
   /**
    * Canonical lower-case, application-owned headers declared by the operation.
    * Runtime-owned authentication, tracing, proxy, framing, and cookie headers
@@ -74,9 +86,21 @@ export interface RequestContractMatch {
   validate(
     input: RequestContractValidationInput
   ): MaybePromise<readonly RequestContractIssue[]>;
+  /**
+   * Optional cheap shadow verdict from a parity-approved TJSV/reference lane.
+   * It is observational only: the primary runtime validator still owns request
+   * admission, while disagreement is reported as contract drift.
+   *
+   * A normal invalid request is not drift when both lanes reject it.
+   */
+  referenceValidate?(
+    input: RequestContractValidationInput
+  ): MaybePromise<ContractRuntimeVerdict>;
 }
 
 export interface RequestContractValidator {
+  /** Optional detached drift sink, normally backed by ores-otel. */
+  readonly driftObserver?: ContractDriftObserver;
   /**
    * Resolve an operation from routing identity only. Deliberately no query,
    * headers, body, or request object is available at this stage.
@@ -183,12 +207,20 @@ function normalizeIssues(
   );
 }
 
+function normalizeReferenceVerdict(value: unknown): ContractRuntimeVerdict {
+  return value === "accepted" || value === "rejected" || value === "refused"
+    ? value
+    : "refused";
+}
+
 export async function checkRequestContract(
   validator: RequestContractValidator | undefined,
   request: Request,
-  url: URL = new URL(request.url)
+  url: URL = new URL(request.url),
+  driftObserver?: ContractDriftObserver
 ): Promise<RequestContractFailure | undefined> {
   if (!validator) return undefined;
+  const observer = driftObserver ?? validator.driftObserver;
 
   const method = request.method.toUpperCase();
   const pathname = url.pathname;
@@ -222,6 +254,28 @@ export async function checkRequestContract(
     body: createBodyReaders(request)
   });
   const issues = normalizeIssues(await match.validate(input));
+
+  if (match.referenceValidate) {
+    let referenceVerdict: ContractRuntimeVerdict = "refused";
+    try {
+      referenceVerdict = normalizeReferenceVerdict(await match.referenceValidate(input));
+    } catch {
+      // A crashing/refusing reference lane is missing evidence, not a rejection.
+      referenceVerdict = "refused";
+    }
+    observeContractDrift(
+      observer,
+      compareRuntimeContractVerdicts({
+        runtimeAccepted: issues.length === 0,
+        referenceVerdict,
+        operationId: match.operationId,
+        declaration: match.declaration,
+        language: match.language,
+        runtime: match.runtime
+      })
+    );
+  }
+
   if (issues.length === 0) return undefined;
 
   return Object.freeze({

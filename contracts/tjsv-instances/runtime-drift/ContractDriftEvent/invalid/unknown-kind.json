@@ -1,0 +1,4 @@
+{
+  "schema": "ores.middleware.contract-drift/v1",
+  "drift_kind": "something_else"
+}

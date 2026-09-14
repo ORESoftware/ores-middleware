@@ -1,0 +1,10 @@
+{
+  "schema": "ores.middleware.contract-drift/v1",
+  "drift_kind": "runtime_verdict_divergence",
+  "operation_id": "items.create",
+  "declaration": "CreateItemRequest",
+  "language": "rust",
+  "runtime": "tokio-1",
+  "runtime_verdict": "accepted",
+  "reference_verdict": "rejected"
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "ores.middleware.contract-drift/v1",
+  "drift_kind": "evidence_not_passed",
+  "raw_payload": { "secret": "must-not-be-admitted" }
+}
