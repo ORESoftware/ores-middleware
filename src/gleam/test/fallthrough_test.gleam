@@ -16,10 +16,7 @@ pub fn default_fallthrough_is_421_test() {
 
 pub fn not_found_compatibility_is_explicit_test() {
   let response =
-    fallthrough.final_fallthrough(
-      "GET",
-      fallthrough.NotFoundCompatibility,
-    )
+    fallthrough.final_fallthrough("GET", fallthrough.NotFoundCompatibility)
   assert response.status == 404
   assert string.contains(response.body, "\"status\":404")
   assert string.contains(response.body, fallthrough.unmatched_route_error_code)
