@@ -56,7 +56,7 @@ impl MiddlewareStageHandler for CorsStage {
     ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
         Box::pin(async move {
             let Some(origin) = header(&input.request.headers, "origin") else {
-                return StageDecision::Continue(input);
+                return StageDecision::Continue(Box::new(input));
             };
             if !self.policy.origin_allowed(origin) {
                 return StageDecision::Reject(StageRejection::new(
@@ -73,7 +73,7 @@ impl MiddlewareStageHandler for CorsStage {
             let is_preflight = input.request.method.eq_ignore_ascii_case("OPTIONS")
                 && requested_method.is_some();
             if !is_preflight {
-                return StageDecision::Continue(input);
+                return StageDecision::Continue(Box::new(input));
             }
 
             let requested_method = requested_method.unwrap_or_default();
@@ -131,7 +131,11 @@ impl MiddlewareStageHandler for CorsStage {
             }
             merge_vary(
                 &mut response.headers,
-                &["origin", "access-control-request-method", "access-control-request-headers"],
+                &[
+                    "origin",
+                    "access-control-request-method",
+                    "access-control-request-headers",
+                ],
             );
             StageDecision::Respond(response)
         })
@@ -205,14 +209,14 @@ impl MiddlewareStageHandler for CsrfStage {
     ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
         Box::pin(async move {
             if !self.is_unsafe_method(&input.request.method) {
-                return StageDecision::Continue(input);
+                return StageDecision::Continue(Box::new(input));
             }
 
             let cookies = header(&input.request.headers, "cookie")
                 .map(parse_cookie_header)
                 .unwrap_or_default();
             if !uses_protected_cookie(&self.policy, &cookies) {
-                return StageDecision::Continue(input);
+                return StageDecision::Continue(Box::new(input));
             }
 
             let Some(origin) = header(&input.request.headers, "origin") else {
@@ -231,10 +235,7 @@ impl MiddlewareStageHandler for CsrfStage {
             }
 
             let cookie_token = cookies.get(&self.policy.token_cookie_name);
-            let header_token = header(
-                &input.request.headers,
-                &self.policy.token_header_name,
-            );
+            let header_token = header(&input.request.headers, &self.policy.token_header_name);
             if cookie_token.is_none()
                 || header_token.is_none()
                 || cookie_token.map(String::as_str) != header_token
@@ -247,7 +248,7 @@ impl MiddlewareStageHandler for CsrfStage {
                 ));
             }
 
-            StageDecision::Continue(input)
+            StageDecision::Continue(Box::new(input))
         })
     }
 }
@@ -322,7 +323,10 @@ fn merge_vary(headers: &mut BTreeMap<String, String>, names: &[&str]) {
             .or_insert_with(|| (*name).to_owned());
     }
     if !values.is_empty() {
-        headers.insert("vary".into(), values.into_values().collect::<Vec<_>>().join(", "));
+        headers.insert(
+            "vary".into(),
+            values.into_values().collect::<Vec<_>>().join(", "),
+        );
     }
 }
 
@@ -382,7 +386,10 @@ mod tests {
                     &[
                         ("origin", "https://app.example.test"),
                         ("access-control-request-method", "POST"),
-                        ("access-control-request-headers", "Content-Type, X-ORES-Request-ID"),
+                        (
+                            "access-control-request-headers",
+                            "Content-Type, X-ORES-Request-ID",
+                        ),
                     ],
                 ),
                 |_| async { panic!("preflight must not reach application handler") },
@@ -390,7 +397,10 @@ mod tests {
             .await;
         assert_eq!(response.status, 204);
         assert_eq!(
-            response.headers.get("access-control-allow-origin").map(String::as_str),
+            response
+                .headers
+                .get("access-control-allow-origin")
+                .map(String::as_str),
             Some("https://app.example.test")
         );
         let vary = response.headers.get("vary").expect("vary header");
@@ -421,11 +431,17 @@ mod tests {
             )
             .await;
         assert_eq!(
-            response.headers.get("access-control-allow-origin").map(String::as_str),
+            response
+                .headers
+                .get("access-control-allow-origin")
+                .map(String::as_str),
             Some("https://app.example.test")
         );
         assert_eq!(
-            response.headers.get("access-control-allow-credentials").map(String::as_str),
+            response
+                .headers
+                .get("access-control-allow-credentials")
+                .map(String::as_str),
             Some("true")
         );
     }
