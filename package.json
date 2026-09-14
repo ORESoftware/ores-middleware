@@ -18,6 +18,10 @@
       "types": "./src/ts/dist/fallthrough.d.ts",
       "import": "./src/ts/dist/fallthrough.js"
     },
+    "./payload-codecs": {
+      "types": "./src/ts/dist/payload-codecs.d.ts",
+      "import": "./src/ts/dist/payload-codecs.js"
+    },
     "./nextjs": {
       "types": "./src/ts/dist/nextjs.d.ts",
       "import": "./src/ts/dist/nextjs.js"
