@@ -21,6 +21,14 @@
       "types": "./dist/payload-codecs.d.ts",
       "import": "./dist/payload-codecs.js"
     },
+    "./body-crypto": {
+      "types": "./dist/body-crypto.d.ts",
+      "import": "./dist/body-crypto.js"
+    },
+    "./redirect": {
+      "types": "./dist/redirect.d.ts",
+      "import": "./dist/redirect.js"
+    },
     "./koa": {
       "types": "./dist/koa.d.ts",
       "import": "./dist/koa.js"
