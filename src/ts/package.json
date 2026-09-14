@@ -17,6 +17,10 @@
       "types": "./dist/fallthrough.d.ts",
       "import": "./dist/fallthrough.js"
     },
+    "./payload-codecs": {
+      "types": "./dist/payload-codecs.d.ts",
+      "import": "./dist/payload-codecs.js"
+    },
     "./koa": {
       "types": "./dist/koa.d.ts",
       "import": "./dist/koa.js"
