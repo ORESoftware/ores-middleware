@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CONTRACT_DRIFT_EVENT_SCHEMA,
   TJSV_LANGUAGE_BOUNDARY_EVIDENCE_SCHEMA,
   compareContractArtifactEvidence,
-  compareRuntimeContractVerdicts
+  compareRuntimeContractVerdicts,
+  toContractDriftEvent
 } from "../dist/contract-drift.js";
 import { checkRequestContract } from "../dist/request-contract.js";
 
@@ -73,6 +75,7 @@ test("malformed evidence fails closed as one bounded category", () => {
     artifactDigest: "not-a-digest"
   }));
   assert.deepEqual(findings.map((finding) => finding.kind), ["evidence_malformed"]);
+  assert.deepEqual(compareContractArtifactEvidence(expected, null).map((finding) => finding.kind), ["evidence_malformed"]);
 });
 
 test("ordinary invalid input is not drift when both validators reject it", () => {
@@ -100,6 +103,20 @@ test("runtime/reference disagreement produces payload-free drift metadata", () =
     Object.keys(finding).sort(),
     ["declaration", "kind", "language", "operationId", "referenceVerdict", "runtime", "runtimeVerdict"].sort()
   );
+
+  const event = toContractDriftEvent(finding);
+  assert.deepEqual(event, {
+    schema: CONTRACT_DRIFT_EVENT_SCHEMA,
+    drift_kind: "runtime_verdict_divergence",
+    operation_id: "items.create",
+    declaration: "CreateItemRequest",
+    language: "typescript",
+    runtime: "node@22",
+    runtime_verdict: "accepted",
+    reference_verdict: "rejected"
+  });
+  assert.equal("operationId" in event, false);
+  assert.equal("runtimeVerdict" in event, false);
 });
 
 test("reference refusal is drift evidence, not an invalid-input verdict", () => {
