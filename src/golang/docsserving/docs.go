@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	DocsFormatHeader     = "X-Ores-Docs-Format"
-	ContractDigestHeader = "X-Ores-Contract-SHA256"
+	DocsFormatHeader      = "x-ores-docs-format"
+	ContractDigestHeader = "x-ores-contract-sha256"
 )
 
 type Representation string
