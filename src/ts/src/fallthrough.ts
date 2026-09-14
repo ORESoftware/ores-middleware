@@ -5,16 +5,17 @@ export const unmatchedRouteProblemType = "urn:ores:error:route-unmatched" as con
 export const unmatchedRouteTitle = "No route matched" as const;
 export const unmatchedRouteDetail = "The request target is not handled by this server." as const;
 
-export type FallthroughStatus = 421 | 404;
+export type FallthroughStatusMode = "not-found" | "misdirected-authority";
+export type FallthroughStatus = 404 | 421;
 
 export interface FallthroughOptions {
   /**
-   * 421 is the ORES default at the outermost server/router ownership boundary.
-   * Use 404 only when framework/deployment compatibility requires conventional
-   * not-found behavior at that boundary. Known-route wrong-method handling is
-   * still 405 and belongs to the router, not this final handler.
+   * `not-found` is the standards-correct default when the intended origin was
+   * reached but no application route claims the target. Select
+   * `misdirected-authority` only for an origin/connection mismatch where 421
+   * is appropriate. Known-route wrong-method handling remains router-owned 405.
    */
-  status?: FallthroughStatus;
+  statusMode?: FallthroughStatusMode;
 }
 
 export interface UnmatchedRouteProblem {
@@ -28,7 +29,7 @@ export interface UnmatchedRouteProblem {
 const encoder = new TextEncoder();
 
 export function unmatchedRouteProblem(options: FallthroughOptions = {}): UnmatchedRouteProblem {
-  const status = options.status ?? 421;
+  const status: FallthroughStatus = options.statusMode === "misdirected-authority" ? 421 : 404;
   return {
     type: unmatchedRouteProblemType,
     title: unmatchedRouteTitle,
