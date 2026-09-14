@@ -208,9 +208,7 @@ fn invalid_header_name_and_del_value_are_rejected_before_map_projection() {
     );
     let del = format!("safe{}", '\u{7f}');
     assert_eq!(
-        admit_raw_headers(&[pair("x-test", &del)])
-            .unwrap_err()
-            .code,
+        admit_raw_headers(&[pair("x-test", &del)]).unwrap_err().code,
         "header_value_invalid"
     );
 }
@@ -249,7 +247,10 @@ fn problem_response_preserves_only_safe_bounded_metadata() {
     let body: Value = serde_json::from_slice(&response.body).unwrap();
     assert_eq!(response.status, 429);
     assert_eq!(
-        response.headers.get("x-ores-request-id").map(String::as_str),
+        response
+            .headers
+            .get("x-ores-request-id")
+            .map(String::as_str),
         Some("ores-123")
     );
     assert_eq!(
@@ -397,7 +398,8 @@ async fn attributes_added_by_a_stage_are_revalidated_before_the_handler_runs() {
 
 #[tokio::test]
 async fn breaker_registry_reuses_existing_key_without_unbounded_growth() {
-    let registry = CircuitBreakerRegistry::new(registry_config(2, Duration::from_secs(60))).unwrap();
+    let registry =
+        CircuitBreakerRegistry::new(registry_config(2, Duration::from_secs(60))).unwrap();
     let key = BreakerKey::new("shared-auth", "verify").unwrap();
     registry.get_or_insert(key.clone()).await.unwrap();
     registry.get_or_insert(key).await.unwrap();
@@ -425,7 +427,8 @@ async fn breaker_registry_capacity_is_hard_bounded_and_invalid_capacities_fail_c
         "circuit_registry_capacity_invalid"
     );
 
-    let registry = CircuitBreakerRegistry::new(registry_config(1, Duration::from_secs(60))).unwrap();
+    let registry =
+        CircuitBreakerRegistry::new(registry_config(1, Duration::from_secs(60))).unwrap();
     registry
         .get_or_insert(BreakerKey::new("auth", "verify").unwrap())
         .await
@@ -448,7 +451,10 @@ fn hardened_pipeline_accepts_exact_stage_bound_and_rejects_one_more() {
     }
     assert_eq!(
         pipeline
-            .try_with_stage(Arc::new(PassStage("overflow")), FinalizerFailureMode::FailOpen)
+            .try_with_stage(
+                Arc::new(PassStage("overflow")),
+                FinalizerFailureMode::FailOpen
+            )
             .unwrap_err()
             .code,
         "stage_count_exceeded"
