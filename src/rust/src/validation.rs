@@ -36,7 +36,7 @@ impl MiddlewareStageHandler for ValidationStage {
     ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
         Box::pin(async move {
             match self.validator.validate(&input).await {
-                Ok(()) => StageDecision::Continue(input),
+                Ok(()) => StageDecision::Continue(Box::new(input)),
                 Err(violations) => StageDecision::Reject(
                     StageRejection::new(
                         422,
