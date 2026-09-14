@@ -39,8 +39,20 @@ function assertAesGcmKey(key: CryptoKey, usage: KeyUsage): void {
   }
 }
 
+/**
+ * WebCrypto's BufferSource boundary requires ArrayBuffer-backed data. Copying
+ * here deliberately rejects any SharedArrayBuffer provenance and keeps this
+ * package portable across Node, browsers, Bun, Deno, and workers with TS 5.9's
+ * generic typed-array definitions.
+ */
+function copyArrayBuffer(value: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(value.byteLength);
+  new Uint8Array(buffer).set(value);
+  return buffer;
+}
+
 function copyBytes(value: Uint8Array): Uint8Array {
-  return Uint8Array.from(value);
+  return new Uint8Array(copyArrayBuffer(value));
 }
 
 /**
@@ -62,11 +74,13 @@ export async function encryptPayloadAesGcm(
   }
   const algorithm: AesGcmParams = {
     name: "AES-GCM",
-    iv,
+    iv: copyArrayBuffer(iv),
     tagLength: AES_GCM_TAG_BITS,
-    ...(options.additionalData ? { additionalData: options.additionalData } : {}),
+    ...(options.additionalData ? { additionalData: copyArrayBuffer(options.additionalData) } : {}),
   };
-  const ciphertext = new Uint8Array(await globalThis.crypto.subtle.encrypt(algorithm, key, plaintext));
+  const ciphertext = new Uint8Array(
+    await globalThis.crypto.subtle.encrypt(algorithm, key, copyArrayBuffer(plaintext)),
+  );
   return Object.freeze({
     version: ENVELOPE_VERSION,
     algorithm: "AES-GCM" as const,
@@ -97,12 +111,14 @@ export async function decryptPayloadAesGcm(
   }
   const algorithm: AesGcmParams = {
     name: "AES-GCM",
-    iv: envelope.iv,
+    iv: copyArrayBuffer(envelope.iv),
     tagLength: AES_GCM_TAG_BITS,
-    ...(options.additionalData ? { additionalData: options.additionalData } : {}),
+    ...(options.additionalData ? { additionalData: copyArrayBuffer(options.additionalData) } : {}),
   };
   try {
-    return new Uint8Array(await globalThis.crypto.subtle.decrypt(algorithm, key, envelope.ciphertext));
+    return new Uint8Array(
+      await globalThis.crypto.subtle.decrypt(algorithm, key, copyArrayBuffer(envelope.ciphertext)),
+    );
   } catch {
     throw new PayloadCryptoError("payload_authentication_failed", "encrypted payload authentication failed");
   }
