@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     future::Future,
     sync::{
         Arc,
@@ -80,20 +80,25 @@ pub fn admit_raw_headers(
         }
 
         let name = raw_name.to_ascii_lowercase();
-        if admitted.contains_key(&name) {
-            if is_singleton_or_security_sensitive(&name) {
-                return Err(HeaderAdmissionError::new("duplicate_header_forbidden"));
+        let singleton = is_singleton_or_security_sensitive(&name);
+        let joinable = is_joinable_list_header(&name);
+        match admitted.entry(name) {
+            Entry::Occupied(mut entry) => {
+                if singleton {
+                    return Err(HeaderAdmissionError::new("duplicate_header_forbidden"));
+                }
+                if !joinable {
+                    return Err(HeaderAdmissionError::new("duplicate_header_ambiguous"));
+                }
+                let existing = entry.get_mut();
+                if !existing.is_empty() && !raw_value.is_empty() {
+                    existing.push_str(", ");
+                }
+                existing.push_str(raw_value);
             }
-            if !is_joinable_list_header(&name) {
-                return Err(HeaderAdmissionError::new("duplicate_header_ambiguous"));
+            Entry::Vacant(entry) => {
+                entry.insert(raw_value.clone());
             }
-            let existing = admitted.get_mut(&name).expect("known header");
-            if !existing.is_empty() && !raw_value.is_empty() {
-                existing.push_str(", ");
-            }
-            existing.push_str(raw_value);
-        } else {
-            admitted.insert(name, raw_value.clone());
         }
     }
 
@@ -259,16 +264,15 @@ pub fn sanitized_problem_response(
 }
 
 fn sanitize_problem_code(value: &str) -> String {
-    let filtered = value
-        .bytes()
-        .take(64)
-        .filter(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_')
-        .map(char::from)
-        .collect::<String>();
-    if filtered.is_empty() {
-        "middleware_rejection".to_owned()
+    let is_internal_code = !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+    if is_internal_code {
+        value.to_owned()
     } else {
-        filtered
+        "middleware_rejection".to_owned()
     }
 }
 
@@ -368,8 +372,7 @@ impl MiddlewareStageHandler for FetchMetadataStage {
             ] {
                 if let Some(value) = header(&input, name)
                     && (!valid_fetch_token(value)
-                        || closed_values
-                            .is_some_and(|values| !values.iter().any(|item| *item == value)))
+                        || closed_values.is_some_and(|values| !values.contains(&value)))
                 {
                     return StageDecision::Reject(crate::stage::StageRejection::new(
                         403,
@@ -792,7 +795,10 @@ impl CircuitBreakerRegistry {
         })
     }
 
-    pub async fn get_or_insert(&self, key: BreakerKey) -> Result<CircuitBreaker, ResilienceConfigError> {
+    pub async fn get_or_insert(
+        &self,
+        key: BreakerKey,
+    ) -> Result<CircuitBreaker, ResilienceConfigError> {
         let now = Instant::now();
         let mut entries = self.entries.lock().await;
         let before = entries.len();
@@ -837,6 +843,10 @@ impl CircuitBreakerRegistry {
         self.entries.lock().await.len()
     }
 
+    pub async fn is_empty(&self) -> bool {
+        self.entries.lock().await.is_empty()
+    }
+
     pub fn eviction_count(&self) -> u64 {
         self.evictions.load(Ordering::Relaxed)
     }
@@ -844,11 +854,7 @@ impl CircuitBreakerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        panic::AssertUnwindSafe,
-        pin::Pin,
-        sync::{Arc, atomic::AtomicUsize},
-    };
+    use std::{panic::AssertUnwindSafe, pin::Pin, sync::Arc};
 
     use serde_json::json;
 
@@ -915,7 +921,10 @@ mod tests {
     #[test]
     fn canonicalizes_header_names_to_lowercase_after_admission() {
         let admitted = admit_raw_headers(&[pair("X-ORES-Request-ID", "r1")]).unwrap();
-        assert_eq!(admitted.get("x-ores-request-id").map(String::as_str), Some("r1"));
+        assert_eq!(
+            admitted.get("x-ores-request-id").map(String::as_str),
+            Some("r1")
+        );
         assert!(!admitted.contains_key("X-ORES-Request-ID"));
     }
 
@@ -1018,9 +1027,13 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(!body.contains("SQL ERROR"));
         assert!(!body.contains("bearer"));
+        assert!(body.contains("middleware_rejection"));
         assert!(!response.headers.contains_key("set-cookie"));
         assert!(!response.headers.contains_key("x-request-id"));
-        assert_eq!(response.headers.get("retry-after").map(String::as_str), Some("5"));
+        assert_eq!(
+            response.headers.get("retry-after").map(String::as_str),
+            Some("5")
+        );
     }
 
     fn stage_input(method: &str, headers: &[(&str, &str)]) -> StageInput {
@@ -1289,12 +1302,5 @@ mod tests {
             )
         }));
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn atomic_counter_type_is_lock_free_irrelevant_but_bounded_metric_is_numeric() {
-        let metric = AtomicUsize::new(0);
-        metric.fetch_add(1, Ordering::Relaxed);
-        assert_eq!(metric.load(Ordering::Relaxed), 1);
     }
 }
