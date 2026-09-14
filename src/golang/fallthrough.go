@@ -14,11 +14,13 @@ const (
 )
 
 // FallthroughOptions configures the outermost server/router fall-through.
-// The zero value uses HTTP 421. Set NotFoundCompatibility only when a
-// framework or deployment requires conventional 404 behavior at this boundary.
-// A known route with an unsupported method remains a router-owned 405 response.
+// The zero value uses the standards-correct HTTP 404 when the intended origin
+// was reached but no route claims the target. Set MisdirectedAuthority only
+// when the request was received on an origin/connection context for which the
+// server is not authoritative. A known route with an unsupported method remains
+// a router-owned 405 response with Allow.
 type FallthroughOptions struct {
-	NotFoundCompatibility bool
+	MisdirectedAuthority bool
 }
 
 type unmatchedRouteProblem struct {
@@ -30,10 +32,10 @@ type unmatchedRouteProblem struct {
 }
 
 func fallthroughStatus(options FallthroughOptions) int {
-	if options.NotFoundCompatibility {
-		return http.StatusNotFound
+	if options.MisdirectedAuthority {
+		return http.StatusMisdirectedRequest
 	}
-	return http.StatusMisdirectedRequest
+	return http.StatusNotFound
 }
 
 func encodeFallthroughProblem(options FallthroughOptions) (int, []byte) {
@@ -52,7 +54,8 @@ func encodeFallthroughProblem(options FallthroughOptions) (int, []byte) {
 }
 
 // FinalFallthroughHandler returns the canonical ORES last handler. It does not
-// inspect or echo the request target, route inventory, or query string.
+// inspect or echo the request target, route inventory, or query string. The
+// stable problem code distinguishes router fall-through from other 404s.
 func FinalFallthroughHandler(options FallthroughOptions) http.Handler {
 	status, body := encodeFallthroughProblem(options)
 	contentLength := strconv.Itoa(len(body))
@@ -70,7 +73,7 @@ func FinalFallthroughHandler(options FallthroughOptions) http.Handler {
 	})
 }
 
-// DefaultFinalFallthroughHandler uses the ORES outer-boundary default: 421.
+// DefaultFinalFallthroughHandler uses HTTP 404 plus ores.route.unmatched.
 func DefaultFinalFallthroughHandler() http.Handler {
 	return FinalFallthroughHandler(FallthroughOptions{})
 }
