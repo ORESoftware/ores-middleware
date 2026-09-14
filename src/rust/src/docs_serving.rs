@@ -7,8 +7,8 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
-pub const DOCS_FORMAT_HEADER: &str = "X-Ores-Docs-Format";
-pub const CONTRACT_DIGEST_HEADER: &str = "X-Ores-Contract-SHA256";
+pub const DOCS_FORMAT_HEADER: &str = "x-ores-docs-format";
+pub const CONTRACT_DIGEST_HEADER: &str = "x-ores-contract-sha256";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Representation {
