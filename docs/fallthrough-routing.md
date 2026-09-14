@@ -1,30 +1,32 @@
 # Final route fall-through contract
 
-`ores-middleware` provides one shared response for the **outermost server/router ownership boundary**: the point reached only after every application route has declined the request target.
+`ores-middleware` provides one shared response for the **final unmatched-route boundary**: the point reached only after every application route has declined the request target.
 
-This boundary is intentionally different from normal resource and method errors:
+There is no standards-defined status code that is more specific than 404 for "the request reached the intended origin, but no route/resource matches this target." The stronger distinction therefore lives in the problem type and machine-readable error code, not in a non-standard or misleading HTTP status.
 
-- **404 Not Found** remains correct inside a matched route when the requested resource does not exist, and is available as a compatibility status for the final boundary.
+The boundary rules are:
+
+- **404 Not Found** is the default for the final unmatched-route handler. The stable `ores.route.unmatched` code distinguishes router fall-through from a resource-level 404 in telemetry and clients.
 - **405 Method Not Allowed** remains correct when the router knows the target route but that route does not support the request method. The router should emit its normal `Allow` header. Do not pass a known-route method mismatch into this fall-through handler.
-- **421 Misdirected Request** is the ORES default only for the final ownership boundary: this server has no route that claims the target URI. RFC 9110 also says a proxy MUST NOT generate 421, so install this in the origin/application server, not in a generic forward proxy.
+- **421 Misdirected Request** is available only as an explicit authority-mismatch mode. RFC 9110 uses 421 when the target URI does not match an origin for which the server is configured, or does not match the connection context. Clients may retry a 421 on another connection, and a proxy must not generate it, so it is not the generic no-route response.
 
 ## Stable wire response
 
 Default GET-style response:
 
 ```http
-HTTP/1.1 421 Misdirected Request
+HTTP/1.1 404 Not Found
 Content-Type: application/problem+json; charset=utf-8
 Cache-Control: no-store
 X-Content-Type-Options: nosniff
 Content-Length: ...
 
-{"type":"urn:ores:error:route-unmatched","title":"No route matched","status":421,"code":"ores.route.unmatched","detail":"The request target is not handled by this server."}
+{"type":"urn:ores:error:route-unmatched","title":"No route matched","status":404,"code":"ores.route.unmatched","detail":"The request target is not handled by this server."}
 ```
 
 The response deliberately does not echo the path, query, method, route inventory, framework name, or upstream topology. `HEAD` returns the same status and headers, including the would-be GET `Content-Length`, with an empty body.
 
-For deployments that must preserve conventional framework behavior at the outer boundary, select 404 compatibility. The problem `code` remains `ores.route.unmatched`, so telemetry can distinguish final router fall-through from a resource-level 404.
+For a true origin/connection mismatch, select the explicit 421 mode. The problem `code` remains `ores.route.unmatched`, while the HTTP status communicates that the current authority/connection is not appropriate.
 
 ## Rust / Axum
 
@@ -45,7 +47,7 @@ let app = Router::<()>::new()
     .fallback(final_route);
 ```
 
-`FallthroughResponse` implements Axum `IntoResponse` when the `axum` feature is enabled. Use `FallthroughConfig::not_found_compatibility()` for 404 compatibility.
+`FallthroughResponse` implements Axum `IntoResponse` when the `axum` feature is enabled. Use `FallthroughConfig::misdirected_authority()` only at an authority/connection mismatch boundary.
 
 ## Node.js / TypeScript
 
@@ -65,7 +67,13 @@ import { nodeFinalFallthroughHandler } from "@oresoftware/ores-middleware/fallth
 app.use(nodeFinalFallthroughHandler());
 ```
 
-Use `{ status: 404 }` only for explicit compatibility.
+For a true authority mismatch only:
+
+```ts
+return createFinalFallthroughResponse(request, {
+  statusMode: "misdirected-authority"
+});
+```
 
 ## Go
 
@@ -79,11 +87,11 @@ final := oresmiddleware.DefaultFinalFallthroughHandler()
 _ = final
 ```
 
-For 404 compatibility:
+For an authority mismatch only:
 
 ```go
 final := oresmiddleware.FinalFallthroughHandler(
-    oresmiddleware.FallthroughOptions{NotFoundCompatibility: true},
+    oresmiddleware.FallthroughOptions{MisdirectedAuthority: true},
 )
 ```
 
@@ -99,8 +107,10 @@ import ores_middleware/fallthrough
 let response = fallthrough.default_final_fallthrough("GET")
 ```
 
-Adapters copy `status`, `headers`, and `body` into their framework response. `NotFoundCompatibility` selects 404.
+Adapters copy `status`, `headers`, and `body` into their framework response. `MisdirectedAuthority` selects 421 only for an origin/connection mismatch.
 
 ## Rollout rule
 
-Install this only as the **last unmatched-route handler** in each server. Keep resource-level 404 logic and router-native 405 logic unchanged. Record `ores.route.unmatched` separately in request metrics so a rise in fall-through traffic is visible without exposing requested paths in the response body.
+Install the default handler only as the **last unmatched-route handler** in each server. Keep resource-level 404 logic and router-native 405 logic unchanged. Record `ores.route.unmatched` separately in request metrics so a rise in fall-through traffic is visible without exposing requested paths in the response body.
+
+If a server also owns virtual-host or connection-authority dispatch, it may use the explicit 421 mode at that earlier boundary, before normal application routing. Do not use that mode from a generic forward proxy.
