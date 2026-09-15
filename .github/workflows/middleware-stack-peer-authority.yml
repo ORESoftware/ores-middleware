@@ -92,15 +92,42 @@ jobs:
           node scripts/compare-authorities.mjs
           node scripts/validate-contracts.mjs
 
-      - name: Enforce independent TypeSpec and JSON Schema parity
+      - name: Derive one-declaration witness from authored JSON Schema
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p target/middleware-stack-tjsv/generated
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source = JSON.parse(fs.readFileSync('contracts/json-schema/middleware-stack.schema.json', 'utf8'));
+          const values = source?.$defs?.settings?.properties?.contentRepresentations?.items?.enum;
+          if (!Array.isArray(values) || values.length === 0 || values.some((value) => typeof value !== 'string')) {
+            throw new Error('authored contentRepresentations enum is missing or malformed');
+          }
+          const witness = {
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            $id: 'content-representation.authored.schema.json',
+            $defs: {
+              ContentRepresentation: {
+                type: 'string',
+                enum: values,
+              },
+            },
+          };
+          fs.writeFileSync(
+            'target/middleware-stack-tjsv/content-representation.authored.schema.json',
+            `${JSON.stringify(witness, null, 2)}\n`,
+          );
+          NODE
+
+      - name: Enforce ContentRepresentation peer-authority parity through TJSV
+        shell: bash
+        run: |
+          set -euo pipefail
           NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
             node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
               --typespec=contracts/typespec/main.tsp \
-              --schema=contracts/json-schema/middleware-stack.schema.json \
+              --schema=target/middleware-stack-tjsv/content-representation.authored.schema.json \
               --mapping=contracts/tjsv/middleware-stack.mapping.json \
               --output-dir=target/middleware-stack-tjsv/generated \
               --bundle-id=middleware-stack.generated.schema.json \
@@ -114,9 +141,10 @@ jobs:
           set -euo pipefail
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const source = JSON.parse(fs.readFileSync('contracts/json-schema/middleware-stack.schema.json', 'utf8'));
-          source.$defs.settings.properties.contentRepresentations.items.enum =
-            source.$defs.settings.properties.contentRepresentations.items.enum.filter((value) => value !== 'text/html');
+          const path = 'target/middleware-stack-tjsv/content-representation.authored.schema.json';
+          const source = JSON.parse(fs.readFileSync(path, 'utf8'));
+          source.$defs.ContentRepresentation.enum =
+            source.$defs.ContentRepresentation.enum.filter((value) => value !== 'text/html');
           fs.writeFileSync('target/middleware-stack-tjsv/drifted.schema.json', `${JSON.stringify(source, null, 2)}\n`);
           NODE
           set +e
@@ -134,7 +162,7 @@ jobs:
             exit 1
           fi
 
-      - name: Require reviewed source unchanged
+      - name: Require reviewed authorities unchanged
         run: |
           git diff --check
           git diff --exit-code HEAD -- \
