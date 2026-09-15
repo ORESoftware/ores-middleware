@@ -1,0 +1,145 @@
+name: middleware-stack-peer-authority
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/middleware-stack-peer-authority.yml'
+      - 'contracts/typespec/main.tsp'
+      - 'contracts/json-schema/middleware-stack.schema.json'
+      - 'contracts/fixtures/stack.ssr.json'
+      - 'scripts/compare-authorities.mjs'
+      - 'scripts/validate-contracts.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches: [main, dev]
+    paths:
+      - '.github/workflows/middleware-stack-peer-authority.yml'
+      - 'contracts/typespec/main.tsp'
+      - 'contracts/json-schema/middleware-stack.schema.json'
+      - 'contracts/fixtures/stack.ssr.json'
+      - 'scripts/compare-authorities.mjs'
+      - 'scripts/validate-contracts.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: middleware-stack-peer-authority-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      TJSV_REVISION: 4473504c4c9d2831d825919f70c03994d8ce01d2
+    steps:
+      - name: Check out exact source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          show-progress: false
+
+      - name: Verify exact source revision
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+
+      - name: Check out exact TJSV source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: ${{ env.TJSV_REVISION }}
+          path: target/tools/tjsv
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix target/tools/tjsv --ignore-scripts --no-audit --no-fund
+          ln -s "$GITHUB_WORKSPACE/target/tools/tjsv/node_modules" "$GITHUB_WORKSPACE/target/tools/tjsv-node-modules"
+
+      - name: Verify local peer-authority and fixture invariants
+        run: |
+          node scripts/compare-authorities.mjs
+          node scripts/validate-contracts.mjs
+
+      - name: Enforce independent TypeSpec and JSON Schema parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/middleware-stack-tjsv/generated
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$GITHUB_WORKSPACE/target/tools/tjsv/node_modules-root" || true
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+              --typespec=contracts/typespec/main.tsp \
+              --schema=contracts/json-schema/middleware-stack.schema.json \
+              --output-dir=target/middleware-stack-tjsv/generated \
+              --bundle-id=middleware-stack.generated.schema.json \
+              --report=target/middleware-stack-tjsv/parity-report.json \
+              --contract-ir=target/middleware-stack-tjsv/contract-ir.json \
+              --quiet
+
+      - name: Prove representation drift fails closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source = JSON.parse(fs.readFileSync('contracts/json-schema/middleware-stack.schema.json', 'utf8'));
+          source.$defs.settings.properties.contentRepresentations.items.enum =
+            source.$defs.settings.properties.contentRepresentations.items.enum.filter((value) => value !== 'text/html');
+          fs.writeFileSync('target/middleware-stack-tjsv/drifted.schema.json', `${JSON.stringify(source, null, 2)}\n`);
+          NODE
+          set +e
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
+              --schema=target/middleware-stack-tjsv/drifted.schema.json \
+              --generated-schema=target/middleware-stack-tjsv/generated/middleware-stack.generated.schema.json \
+              --report=target/middleware-stack-tjsv/drift-report.json \
+              --quiet
+          rc=$?
+          set -e
+          if [ "$rc" -ne 2 ]; then
+            echo "expected semantic drift to stop evaluation with exit 2, got $rc" >&2
+            exit 1
+          fi
+
+      - name: Require reviewed source unchanged
+        run: |
+          git diff --check
+          git diff --exit-code HEAD -- \
+            contracts/typespec/main.tsp \
+            contracts/json-schema/middleware-stack.schema.json \
+            contracts/fixtures/stack.ssr.json \
+            scripts/compare-authorities.mjs \
+            scripts/validate-contracts.mjs \
+            .github/workflows/middleware-stack-peer-authority.yml
+
+      - name: Retain parity evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: middleware-stack-tjsv-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/middleware-stack-tjsv/
+          if-no-files-found: warn
+          retention-days: 30
