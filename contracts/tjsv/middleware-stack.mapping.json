@@ -1,0 +1,53 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    { "typespec": "Ores.Middleware.MiddlewareCapability", "generated": "MiddlewareCapability", "authored": "capability" },
+    { "typespec": "Ores.Middleware.RateLimitKey", "generated": "RateLimitKey", "authored": "rateLimitSignal" },
+    { "typespec": "Ores.Middleware.RateLimitAlgorithm", "generated": "RateLimitAlgorithm", "authored": "rateLimitAlgorithm" },
+    { "typespec": "Ores.Middleware.RateLimitLayer", "generated": "RateLimitLayer", "authored": "rateLimitLayer" },
+    { "typespec": "Ores.Middleware.RateLimitFailureMode", "generated": "RateLimitFailureMode", "authored": "rateLimitFailureMode" },
+    { "typespec": "Ores.Middleware.RateLimitKeyDerivationMode", "generated": "RateLimitKeyDerivationMode", "authored": "rateLimitKeyDerivationMode" },
+    { "typespec": "Ores.Middleware.RateLimitDecisionKind", "generated": "RateLimitDecisionKind", "authored": "rateLimitDecisionKind" },
+    { "typespec": "Ores.Middleware.RateLimitDecisionSource", "generated": "RateLimitDecisionSource", "authored": "rateLimitDecisionSource" },
+    { "typespec": "Ores.Middleware.RateLimitPolicy", "generated": "RateLimitPolicy", "authored": "rateLimit" },
+    { "typespec": "Ores.Middleware.RateLimitPrincipal", "generated": "RateLimitPrincipal", "authored": "rateLimitPrincipal" },
+    { "typespec": "Ores.Middleware.RateLimitDecision", "generated": "RateLimitDecision", "authored": "rateLimitDecision" },
+    { "typespec": "Ores.Middleware.CompressionPolicy", "generated": "CompressionPolicy", "authored": "compression" },
+    { "typespec": "Ores.Middleware.TlsPolicy", "generated": "TlsPolicy", "authored": "tls" },
+    { "typespec": "Ores.Middleware.SecurityHeaderPolicy", "generated": "SecurityHeaderPolicy", "authored": "securityHeaders" },
+    { "typespec": "Ores.Middleware.IdempotencyPolicy", "generated": "IdempotencyPolicy", "authored": "idempotency" },
+    { "typespec": "Ores.Middleware.FaultInjectionPolicy", "generated": "FaultInjectionPolicy", "authored": "faultInjection" },
+    { "typespec": "Ores.Middleware.TestAuthBypassPolicy", "generated": "TestAuthBypassPolicy", "authored": "testAuthBypass" },
+    { "typespec": "Ores.Middleware.MiddlewareSettings", "generated": "MiddlewareSettings", "authored": "settings" },
+    { "typespec": "Ores.Middleware.IntegrationMode", "generated": "IntegrationMode", "authored": "integrationMode" },
+    { "typespec": "Ores.Middleware.SharedAuthIntegration", "generated": "SharedAuthIntegration", "authored": "sharedAuth" },
+    { "typespec": "Ores.Middleware.OptoSyncIntegration", "generated": "OptoSyncIntegration", "authored": "optoSync" },
+    { "typespec": "Ores.Middleware.OresOtelIntegration", "generated": "OresOtelIntegration", "authored": "oresOtel" },
+    { "typespec": "Ores.Middleware.MiddlewareIntegrations", "generated": "MiddlewareIntegrations", "authored": "integrations" }
+  ],
+  "ignore": {
+    "typespec": [
+      "Ores.Middleware.ContentRepresentation",
+      "Ores.Middleware.RuntimeEnvironment",
+      "Ores.Middleware.SdkOperation",
+      "Ores.Middleware.StringMap",
+      "Ores.Middleware.RequestContext",
+      "Ores.Middleware.MiddlewareStackConfig",
+      "Ores.Middleware.AdapterDescriptor",
+      "Ores.Middleware.ValidationIssue",
+      "Ores.Middleware.ValidationResult"
+    ],
+    "generated": [
+      "ContentRepresentation",
+      "RuntimeEnvironment",
+      "SdkOperation",
+      "StringMap",
+      "RequestContext",
+      "MiddlewareStackConfig",
+      "AdapterDescriptor",
+      "ValidationIssue",
+      "ValidationResult"
+    ],
+    "authored": []
+  }
+}
