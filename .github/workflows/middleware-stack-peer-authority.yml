@@ -76,7 +76,14 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm ci --prefix target/tools/tjsv --ignore-scripts --no-audit --no-fund
-          ln -s "$GITHUB_WORKSPACE/target/tools/tjsv/node_modules" "$GITHUB_WORKSPACE/target/tools/tjsv-node-modules"
+
+      - name: Build only the locked flags-2-env native dependency
+        working-directory: target/tools/tjsv
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm rebuild @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+          test -s node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
 
       - name: Verify local peer-authority and fixture invariants
         run: |
@@ -88,7 +95,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p target/middleware-stack-tjsv/generated
-          ln -s "$GITHUB_WORKSPACE/node_modules" "$GITHUB_WORKSPACE/target/tools/tjsv/node_modules-root" || true
           NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
             node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
               --typespec=contracts/typespec/main.tsp \
