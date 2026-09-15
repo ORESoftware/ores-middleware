@@ -42,7 +42,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:
-      TJSV_REVISION: 4473504c4c9d2831d825919f70c03994d8ce01d2
+      TJSV_REVISION: d60d0d79d83e075077382623ec9e23a401ab601f
     steps:
       - name: Check out exact source head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
