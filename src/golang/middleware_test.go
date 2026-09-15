@@ -210,6 +210,24 @@ func TestFinalizationPanicRetainsAuthenticatedActorContext(t *testing.T) {
 	}
 }
 
+func TestBufferedResponseRejectsWritesAfterDoneSignal(t *testing.T) {
+	done := make(chan struct{})
+	capture := newBufferedResponseWithDone(done)
+	close(done)
+
+	if _, err := capture.Write([]byte("late")); !errors.Is(err, http.ErrHandlerTimeout) {
+		t.Fatalf("late write error = %v", err)
+	}
+	capture.WriteHeader(http.StatusCreated)
+	status, _, body := capture.snapshot()
+	if status != http.StatusOK {
+		t.Fatalf("late WriteHeader changed status to %d", status)
+	}
+	if len(body) != 0 {
+		t.Fatalf("late write mutated body: %q", body)
+	}
+}
+
 func TestDeadlineSealsHandlerBufferAgainstLateWrites(t *testing.T) {
 	config := testConfig()
 	config.Settings.TimeoutMS = 5
@@ -224,8 +242,8 @@ func TestDeadlineSealsHandlerBufferAgainstLateWrites(t *testing.T) {
 	}
 
 	lateWrite := make(chan error, 1)
-	handler := stack.Wrap(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		time.Sleep(25 * time.Millisecond)
+	handler := stack.Wrap(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		<-request.Context().Done()
 		_, writeErr := writer.Write([]byte("late response must be rejected"))
 		lateWrite <- writeErr
 	}))
