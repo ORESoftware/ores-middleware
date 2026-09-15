@@ -29,4 +29,11 @@ const tspOperations = typeSpecEnum("SdkOperation");
 const schemaOperations = descriptor.$defs.sdkOperation.enum;
 sameSet("SDK operation authority", tspOperations, schemaOperations);
 
-console.log(`authority parity ok: ${tspCapabilities.length} capabilities, ${tspOperations.length} SDK operations`);
+const tspRepresentations = typeSpecEnum("ContentRepresentation");
+const schemaRepresentations = stack.$defs.settings.properties.contentRepresentations.items.enum;
+sameSet("content representation authority", tspRepresentations, schemaRepresentations);
+assert(tspRepresentations.includes("text/html"), "SSR web servers require text/html in the peer authorities");
+
+console.log(
+  `authority parity ok: ${tspCapabilities.length} capabilities, ${tspOperations.length} SDK operations, ${tspRepresentations.length} content representations`
+);
