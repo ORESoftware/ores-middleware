@@ -117,6 +117,7 @@ enum RateLimitDecisionSource {
 }
 
 enum ContentRepresentation {
+  html: "text/html",
   json: "application/json",
   problemJson: "application/problem+json",
   messagePack: "application/msgpack",

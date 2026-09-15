@@ -6,19 +6,26 @@ import addFormats from "ajv-formats";
 
 const root = new URL("../", import.meta.url);
 const loadJson = async (path) => JSON.parse(await readFile(new URL(path, root), "utf8"));
-const ajv = new Ajv2020({ allErrors: true, strict: true });
-addFormats(ajv);
 
 const cases = [
   ["contracts/json-schema/middleware-stack.schema.json", "contracts/fixtures/stack.minimal.json"],
+  ["contracts/json-schema/middleware-stack.schema.json", "contracts/fixtures/stack.ssr.json"],
   ["contracts/json-schema/adapter-descriptor.schema.json", "contracts/fixtures/adapter-descriptor.example.json"]
 ];
 
 for (const [schemaPath, fixturePath] of cases) {
   const schema = await loadJson(schemaPath);
   const fixture = await loadJson(fixturePath);
-  const validate = ajv.compile(schema);
-  assert(validate(fixture), `${fixturePath} failed ${schemaPath}: ${ajv.errorsText(validate.errors, { separator: "\n" })}`);
+  // A schema may intentionally have multiple independent fixtures. Use one
+  // validator registry per fixture so a repeated canonical $id does not look
+  // like an accidental duplicate schema registration.
+  const fixtureAjv = new Ajv2020({ allErrors: true, strict: true });
+  addFormats(fixtureAjv);
+  const validate = fixtureAjv.compile(schema);
+  assert(
+    validate(fixture),
+    `${fixturePath} failed ${schemaPath}: ${fixtureAjv.errorsText(validate.errors, { separator: "\n" })}`
+  );
   console.log(`validated ${fixturePath}`);
 }
 

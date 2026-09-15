@@ -336,7 +336,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["application/json", "application/problem+json", "application/msgpack", "application/xml"] }
+          "items": { "enum": ["text/html", "application/json", "application/problem+json", "application/msgpack", "application/xml"] }
         }
       }
     },
