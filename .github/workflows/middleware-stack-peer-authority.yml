@@ -6,6 +6,7 @@ on:
       - '.github/workflows/middleware-stack-peer-authority.yml'
       - 'contracts/typespec/main.tsp'
       - 'contracts/json-schema/middleware-stack.schema.json'
+      - 'contracts/tjsv/middleware-stack.mapping.json'
       - 'contracts/fixtures/stack.ssr.json'
       - 'scripts/compare-authorities.mjs'
       - 'scripts/validate-contracts.mjs'
@@ -17,6 +18,7 @@ on:
       - '.github/workflows/middleware-stack-peer-authority.yml'
       - 'contracts/typespec/main.tsp'
       - 'contracts/json-schema/middleware-stack.schema.json'
+      - 'contracts/tjsv/middleware-stack.mapping.json'
       - 'contracts/fixtures/stack.ssr.json'
       - 'scripts/compare-authorities.mjs'
       - 'scripts/validate-contracts.mjs'
@@ -99,6 +101,7 @@ jobs:
             node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
               --typespec=contracts/typespec/main.tsp \
               --schema=contracts/json-schema/middleware-stack.schema.json \
+              --mapping=contracts/tjsv/middleware-stack.mapping.json \
               --output-dir=target/middleware-stack-tjsv/generated \
               --bundle-id=middleware-stack.generated.schema.json \
               --report=target/middleware-stack-tjsv/parity-report.json \
@@ -121,6 +124,7 @@ jobs:
             node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
               --schema=target/middleware-stack-tjsv/drifted.schema.json \
               --generated-schema=target/middleware-stack-tjsv/generated/middleware-stack.generated.schema.json \
+              --mapping=contracts/tjsv/middleware-stack.mapping.json \
               --report=target/middleware-stack-tjsv/drift-report.json \
               --quiet
           rc=$?
@@ -136,6 +140,7 @@ jobs:
           git diff --exit-code HEAD -- \
             contracts/typespec/main.tsp \
             contracts/json-schema/middleware-stack.schema.json \
+            contracts/tjsv/middleware-stack.mapping.json \
             contracts/fixtures/stack.ssr.json \
             scripts/compare-authorities.mjs \
             scripts/validate-contracts.mjs \
