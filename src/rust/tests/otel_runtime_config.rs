@@ -59,6 +59,8 @@ async fn resolved_zero_sampling_suppresses_only_otel_transport() {
             Ok(())
         },
     ));
+    let memory_transport: Arc<dyn Transport> = memory.clone();
+    let otel_transport: Arc<dyn Transport> = otel;
 
     let config = resolved(
         r#"
@@ -82,7 +84,7 @@ protocol = "none"
         &OresOtelEnv::new(),
         "runtime-config-test",
         Some("http"),
-        vec![memory.clone() as Arc<dyn Transport>, otel as Arc<dyn Transport>],
+        vec![memory_transport, otel_transport],
     )
     .expect("resolved runtime");
 
@@ -126,7 +128,7 @@ protocol = "otlp_http"
 endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
 "#,
     );
-    let transport = Arc::new(OpenTelemetryTransport::new(
+    let transport: Arc<dyn Transport> = Arc::new(OpenTelemetryTransport::new(
         |_record: OpenTelemetryLogRecord| -> Result<(), LoggerError> { Ok(()) },
     ));
 
@@ -139,7 +141,7 @@ endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
         &valid,
         "runtime-config-test",
         Some("http"),
-        vec![transport as Arc<dyn Transport>],
+        vec![transport],
     )
     .expect("valid explicit transport");
     assert_eq!(
@@ -156,15 +158,16 @@ endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
             "OTEL_EXPORTER_OTLP_ENDPOINT".into(),
             invalid.to_owned(),
         )]);
+        let transport: Arc<dyn Transport> = Arc::new(OpenTelemetryTransport::new(
+            |_record: OpenTelemetryLogRecord| -> Result<(), LoggerError> { Ok(()) },
+        ));
         assert!(
             server_otel_runtime_from_resolved(
                 config.clone(),
                 &environment,
                 "runtime-config-test",
                 None,
-                vec![Arc::new(OpenTelemetryTransport::new(
-                    |_record: OpenTelemetryLogRecord| -> Result<(), LoggerError> { Ok(()) },
-                )) as Arc<dyn Transport>],
+                vec![transport],
             )
             .is_err()
         );
