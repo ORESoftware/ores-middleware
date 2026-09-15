@@ -23,6 +23,22 @@ for (const [schemaPath, fixturePath] of cases) {
 }
 
 const middlewareSchema = await loadJson("contracts/json-schema/middleware-stack.schema.json");
+
+const htmlStack = await loadJson("contracts/fixtures/stack.minimal.json");
+htmlStack.settings.contentRepresentations = [
+  "text/html",
+  "application/json",
+  "application/problem+json"
+];
+const htmlAjv = new Ajv2020({ allErrors: true, strict: true });
+addFormats(htmlAjv);
+const validateHtml = htmlAjv.compile(middlewareSchema);
+assert(
+  validateHtml(htmlStack),
+  `SSR middleware stack must admit text/html: ${htmlAjv.errorsText(validateHtml.errors, { separator: "\n" })}`
+);
+console.log("validated text/html SSR middleware representation");
+
 const malformedIssuer = await loadJson("contracts/fixtures/stack.minimal.json");
 malformedIssuer.integrations.sharedAuth.issuer = "not a uri";
 const malformedIssuerAjv = new Ajv2020({ allErrors: true, strict: true });
