@@ -213,7 +213,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 			s.deps.Telemetry.Started(ctx, value, request)
 		}
 		slog.InfoContext(ctx, "request started", "request_id", value.RequestID, "trace_id", value.TraceID, "method", request.Method, "path", request.URL.Path)
-		handlerCapture := newBufferedResponse()
+		handlerCapture := newBufferedResponseWithDone(ctx.Done())
 		done := make(chan any, 1)
 		go func() {
 			var panicValue any
@@ -333,16 +333,38 @@ type bufferedResponse struct {
 	status int
 	body   bytes.Buffer
 	sealed bool
+	done   <-chan struct{}
 }
 
 func newBufferedResponse() *bufferedResponse {
-	return &bufferedResponse{header: make(http.Header), status: http.StatusOK}
+	return newBufferedResponseWithDone(nil)
 }
+
+func newBufferedResponseWithDone(done <-chan struct{}) *bufferedResponse {
+	return &bufferedResponse{header: make(http.Header), status: http.StatusOK, done: done}
+}
+
+func (r *bufferedResponse) deadlineClosedLocked() bool {
+	if r.sealed {
+		return true
+	}
+	if r.done == nil {
+		return false
+	}
+	select {
+	case <-r.done:
+		r.sealed = true
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *bufferedResponse) Header() http.Header { return r.header }
 func (r *bufferedResponse) WriteHeader(status int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.sealed {
+	if r.deadlineClosedLocked() {
 		return
 	}
 	if r.status == http.StatusOK {
@@ -352,7 +374,7 @@ func (r *bufferedResponse) WriteHeader(status int) {
 func (r *bufferedResponse) Write(body []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.sealed {
+	if r.deadlineClosedLocked() {
 		return 0, http.ErrHandlerTimeout
 	}
 	return r.body.Write(body)
