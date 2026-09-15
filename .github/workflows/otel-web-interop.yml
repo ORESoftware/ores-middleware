@@ -54,7 +54,15 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
       - name: Verify checked-in lock is current
-        run: cargo metadata --locked --format-version 1 >/dev/null
+        run: |
+          if cargo metadata --locked --format-version 1 >/dev/null; then
+            exit 0
+          fi
+          echo '::group::resolver-produced Cargo.lock delta'
+          cargo metadata --format-version 1 >/dev/null
+          git diff -- Cargo.lock
+          echo '::endgroup::'
+          exit 1
       - name: Check formatting
         run: cargo fmt --manifest-path src/rust/Cargo.toml --all -- --check
       - name: Test canonical OTel runtime bridge
