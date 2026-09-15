@@ -48,6 +48,41 @@ assert(
 );
 console.log("rejected malformed Shared Auth issuer URI");
 
+const ssr = await loadJson("contracts/fixtures/stack.ssr.json");
+assert.deepEqual(
+  ssr.settings.contentRepresentations,
+  ["text/html", "application/json", "application/problem+json"],
+  "SSR fixture must exercise HTML plus structured response types"
+);
+const productionWeb = structuredClone(ssr);
+productionWeb.environment = "production";
+const productionWebAjv = new Ajv2020({ allErrors: true, strict: true });
+addFormats(productionWebAjv);
+const validateProductionWeb = productionWebAjv.compile(middlewareSchema);
+assert(
+  validateProductionWeb(productionWeb),
+  `production SSR stack must admit text/html: ${productionWebAjv.errorsText(validateProductionWeb.errors, { separator: "\n" })}`
+);
+console.log("admitted production SSR stack with text/html");
+
+const unknownRepresentation = structuredClone(ssr);
+unknownRepresentation.settings.contentRepresentations = ["application/definitely-unknown"];
+const unknownRepresentationAjv = new Ajv2020({ allErrors: true, strict: true });
+addFormats(unknownRepresentationAjv);
+const validateUnknownRepresentation = unknownRepresentationAjv.compile(middlewareSchema);
+assert.equal(
+  validateUnknownRepresentation(unknownRepresentation),
+  false,
+  "unknown content representations must fail closed"
+);
+assert(
+  validateUnknownRepresentation.errors?.some(
+    (error) => error.instancePath.startsWith("/settings/contentRepresentations")
+  ),
+  `unknown representation must fail at the content-representation boundary: ${unknownRepresentationAjv.errorsText(validateUnknownRepresentation.errors, { separator: "\n" })}`
+);
+console.log("rejected unknown content representation");
+
 const production = await loadJson("contracts/fixtures/stack.minimal.json");
 production.environment = "production";
 production.settings.faultInjection.enabled = true;
