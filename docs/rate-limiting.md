@@ -161,9 +161,9 @@ Denied responses include:
 - `RateLimit-Limit`;
 - `RateLimit-Remaining`;
 - `RateLimit-Reset` when known;
-- `X-Ores-Rate-Limit-Policy`;
-- `X-Ores-Rate-Limit-Layer`;
-- `X-Ores-Rate-Limit-Decision`.
+- `x-ores-rate-limit-policy`;
+- `x-ores-rate-limit-layer`;
+- `x-ores-rate-limit-decision`.
 
 `ores-otel` events use low-cardinality fields: policy ID, layer, algorithm,
 outcome, source, remaining bucket, retry class, and reason code. They carry the

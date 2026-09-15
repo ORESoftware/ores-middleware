@@ -3,7 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { CONTRACT_DIGEST_HEADER, decideDocs } from "../dist/docs-serving.js";
+import {
+  CONTRACT_DIGEST_HEADER,
+  DOCS_FORMAT_HEADER,
+  decideDocs,
+} from "../dist/docs-serving.js";
 
 const fixturePath = fileURLToPath(
   new URL("../../../fixtures/docs-serving-conformance.tsv", import.meta.url),
@@ -67,7 +71,9 @@ for (const item of await cases()) {
     } else {
       assert.equal(decision.headers["Cache-Control"], "no-store");
       assert.equal(decision.headers["X-Content-Type-Options"], "nosniff");
-      assert.match(decision.headers.Vary, /X-Ores-Docs-Format/);
+      assert.match(decision.headers.Vary, /x-ores-docs-format/);
+      assert.equal(DOCS_FORMAT_HEADER, "x-ores-docs-format");
+      assert.equal(CONTRACT_DIGEST_HEADER, "x-ores-contract-sha256");
     }
     if (decision.action === "method-not-allowed") {
       assert.equal(decision.headers.Allow, "GET, HEAD");
