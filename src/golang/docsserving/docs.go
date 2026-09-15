@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DocsFormatHeader      = "x-ores-docs-format"
+	DocsFormatHeader     = "x-ores-docs-format"
 	ContractDigestHeader = "x-ores-contract-sha256"
 )
 
