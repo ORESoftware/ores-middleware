@@ -6,8 +6,13 @@ use sha2::{Digest, Sha256};
 use crate::RequestContext;
 
 // Re-export the canonical Rust logger and `.ores-otel.toml` loader so downstream
-// services can use ores-middleware as the single integration surface.
-pub use next_loggers::*;
+// services can use ores-middleware as the single integration surface. The
+// protocol/log-level/environment types remain nested under next_loggers::config
+// upstream, so expose them explicitly here as part of this integration surface.
+pub use next_loggers::{
+    *,
+    config::{OresOtelEnv, OresOtelExporterProtocol, OresOtelLogLevel},
+};
 
 #[derive(Debug)]
 pub enum ServerOtelRuntimeError {
