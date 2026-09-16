@@ -1,0 +1,43 @@
+name: generic portability
+
+on:
+  pull_request:
+    paths:
+      - "src/ts/src/generic.ts"
+      - "src/ts/test/generic.test.mjs"
+      - "src/golang/generic.go"
+      - "src/golang/generic_test.go"
+      - "src/gleam/src/ores_middleware/generic.gleam"
+      - "src/gleam/test/generic_test.gleam"
+      - "scripts/check-generic-portability.mjs"
+      - "docs/GENERIC_PORTABILITY_CONTRACT.md"
+      - ".github/workflows/generic-portability.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generic-portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Check cross-language generic portability contract
+        run: node scripts/check-generic-portability.mjs
+      - name: Ensure guard and docs are tracked without generated drift
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -f docs/GENERIC_PORTABILITY_CONTRACT.md
+          test -f scripts/check-generic-portability.mjs
