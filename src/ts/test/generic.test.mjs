@@ -43,6 +43,15 @@ test("typed provider failures remain consumer-defined and SDK agnostic", async (
   });
 });
 
+test("providerFrom preserves consumer exception identity", async () => {
+  const sentinel = new Error("consumer-provider-failure");
+  const provider = providerFrom(async () => {
+    throw sentinel;
+  });
+
+  await assert.rejects(provider.verify("request"), (error) => error === sentinel);
+});
+
 test("contextual providers are generic over request, context, output, and failure", async () => {
   const provider = contextualProviderFrom(
     async (request, context) => `${context.tenant}:${request.token}`
@@ -136,6 +145,24 @@ test("named middleware metadata is preserved but never interpreted or reordered"
 
   assert.equal(await composed("request"), "request");
   assert.deepEqual(events, ["custom-z", "auth-provider-v42", "custom-a"]);
+});
+
+test("duplicate named middleware stages are preserved exactly", async () => {
+  const events = [];
+  const stage = (name) => ({
+    name,
+    middleware: (next) => async (request) => {
+      events.push(name);
+      return next(request);
+    }
+  });
+  const composed = composeNamedMiddleware(
+    async (request) => request,
+    [stage("auth"), stage("auth"), stage("audit")]
+  );
+
+  assert.equal(await composed("request"), "request");
+  assert.deepEqual(events, ["auth", "auth", "audit"]);
 });
 
 test("named contextual middleware preserves arbitrary consumer context and names", async () => {
