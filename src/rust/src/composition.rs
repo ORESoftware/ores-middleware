@@ -221,10 +221,9 @@ fn validate_policy_shape(policy: &MiddlewareOrderPolicy) -> Vec<MiddlewareOrderI
         .first
         .as_ref()
         .filter(|stage| !stage.trim().is_empty())
+        && forbidden.contains(first)
     {
-        if forbidden.contains(first) {
-            contradictory.insert(first.clone());
-        }
+        contradictory.insert(first.clone());
     }
     let mut contradictory = contradictory.into_iter().collect::<Vec<_>>();
     contradictory.sort();
