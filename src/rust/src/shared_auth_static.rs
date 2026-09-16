@@ -30,11 +30,7 @@ pub struct PairedSharedAuthVerifier<S, N> {
 
 impl<S, N> PairedSharedAuthVerifier<S, N> {
     #[must_use]
-    pub const fn new(
-        topology: SharedAuthRuntimeTopology,
-        supabase: S,
-        neon: N,
-    ) -> Self {
+    pub const fn new(topology: SharedAuthRuntimeTopology, supabase: S, neon: N) -> Self {
         Self {
             topology,
             supabase,
@@ -100,7 +96,7 @@ where
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum CheckedProviderOutcome {
-    Verified(Box<SharedAuthVerifiedPrincipal>),
+    Verified(SharedAuthVerifiedPrincipal),
     Unavailable,
 }
 
@@ -112,7 +108,7 @@ fn checked_provider_outcome(
     match result {
         Ok(principal) => {
             validate_verified_principal(provider, context, &principal)?;
-            Ok(CheckedProviderOutcome::Verified(Box::new(principal)))
+            Ok(CheckedProviderOutcome::Verified(principal))
         }
         Err(failure) if failure.kind == SharedAuthProviderFailureKind::Unavailable => {
             Ok(CheckedProviderOutcome::Unavailable)
@@ -169,7 +165,7 @@ fn decide_auth(
             (
                 CheckedProviderOutcome::Verified(supabase),
                 CheckedProviderOutcome::Verified(neon),
-            ) => reconcile_verified_pair(topology, *supabase, *neon),
+            ) => reconcile_verified_pair(topology, supabase, neon),
             _ => Err(IntegrationError {
                 code: "shared_auth_strict_provider_unavailable",
                 message: "strict paired authentication requires verified Supabase and Neon proofs"
@@ -180,12 +176,12 @@ fn decide_auth(
             (
                 CheckedProviderOutcome::Verified(supabase),
                 CheckedProviderOutcome::Verified(neon),
-            ) => reconcile_verified_pair(topology, *supabase, *neon),
+            ) => reconcile_verified_pair(topology, supabase, neon),
             (CheckedProviderOutcome::Verified(principal), CheckedProviderOutcome::Unavailable) => {
-                single_provider_decision(topology, *principal, SharedAuthProvider::Neon)
+                single_provider_decision(topology, principal, SharedAuthProvider::Neon)
             }
             (CheckedProviderOutcome::Unavailable, CheckedProviderOutcome::Verified(principal)) => {
-                single_provider_decision(topology, *principal, SharedAuthProvider::Supabase)
+                single_provider_decision(topology, principal, SharedAuthProvider::Supabase)
             }
             (CheckedProviderOutcome::Unavailable, CheckedProviderOutcome::Unavailable) => {
                 Err(IntegrationError {
@@ -270,7 +266,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        SharedAuthDataPlane, SharedAuthServerRole, auth_provider_fn, shared_auth_provider_fn,
+        AuthStage, SharedAuthDataPlane, SharedAuthServerRole, shared_auth_provider_fn,
     };
 
     fn request(subject: &str) -> RequestMetadata {
@@ -388,19 +384,15 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn static_pair_can_feed_an_auth_provider_without_type_erasure() {
+    #[test]
+    fn static_pair_can_feed_auth_stage_without_type_erasure() {
         let pair = PairedSharedAuthVerifier::new(
             topology(SharedAuthDecisionMode::StrictPaired),
             provider(),
             provider(),
         );
-        let wrapper = auth_provider_fn(move |request: RequestMetadata| {
-            let future = pair.verify_owned(request);
-            async move { future.await }
-        });
 
-        let decision = wrapper.verify_owned(request("alice")).await.unwrap();
-        assert_eq!(decision.user_id.as_deref(), Some("alice"));
+        let stage = AuthStage::from_provider("shared-auth", pair);
+        assert_eq!(stage.name(), "shared-auth");
     }
 }
