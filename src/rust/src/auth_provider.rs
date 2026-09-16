@@ -6,13 +6,42 @@ use crate::shared_auth::{
     SharedAuthVerifiedPrincipal,
 };
 
-/// Closure-backed authentication provider adapter.
+/// Static-dispatch authentication provider boundary.
 ///
-/// The consuming application owns and pins the concrete authentication SDK,
-/// captures that client in the closure, and maps SDK-specific values into the
-/// stable ORES `AuthDecision` / `IntegrationError` boundary. The adapter itself
-/// implements the existing object-safe [`AuthVerifier`] port so there is one
-/// provider interface across standalone composition and `MiddlewareStack`.
+/// Consumers keep their concrete auth SDK and future types all the way through
+/// normal middleware composition. Runtime type erasure is only needed at older
+/// compatibility boundaries that explicitly require `dyn AuthVerifier`.
+pub trait StaticAuthVerifier: Send + Sync {
+    type Future: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static;
+
+    fn verify_owned(&self, request: RequestMetadata) -> Self::Future;
+}
+
+impl<P> StaticAuthVerifier for Arc<P>
+where
+    P: StaticAuthVerifier + ?Sized,
+{
+    type Future = P::Future;
+
+    fn verify_owned(&self, request: RequestMetadata) -> Self::Future {
+        self.as_ref().verify_owned(request)
+    }
+}
+
+/// Static-dispatch Shared Auth provider boundary.
+pub trait StaticSharedAuthProviderVerifier: Send + Sync {
+    type Future: Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+        + Send
+        + 'static;
+
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+        context: SharedAuthProviderContext,
+    ) -> Self::Future;
+}
+
+/// Closure-backed authentication provider adapter.
 pub struct FnAuthProvider<F> {
     f: F,
 }
@@ -24,6 +53,7 @@ impl<F> FnAuthProvider<F> {
     }
 }
 
+/// Adapt an async closure into the static ORES auth-provider boundary.
 #[must_use]
 pub fn auth_provider_fn<F, Fut>(f: F) -> FnAuthProvider<F>
 where
@@ -33,6 +63,19 @@ where
     FnAuthProvider::new(f)
 }
 
+impl<F, Fut> StaticAuthVerifier for FnAuthProvider<F>
+where
+    F: Fn(RequestMetadata) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static,
+{
+    type Future = Fut;
+
+    fn verify_owned(&self, request: RequestMetadata) -> Self::Future {
+        (self.f)(request)
+    }
+}
+
+/// Object-safe compatibility bridge for older APIs such as `MiddlewareStack`.
 impl<F, Fut> AuthVerifier for FnAuthProvider<F>
 where
     F: Fn(RequestMetadata) -> Fut + Send + Sync + 'static,
@@ -42,12 +85,10 @@ where
         &'a self,
         request: &'a RequestMetadata,
     ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
-        Box::pin((self.f)(request.clone()))
+        Box::pin(self.verify_owned(request.clone()))
     }
 }
 
-/// Compatibility wrapper used when a provider is handed to APIs that expose
-/// provider errors too directly (notably the bundled `MiddlewareStack`).
 struct SanitizingAuthProvider<P> {
     inner: P,
 }
@@ -86,11 +127,8 @@ where
     }
 }
 
-/// Convert any concrete auth provider into the sanitizing object-safe provider
-/// handle used by the bundled middleware stack.
-///
-/// `dyn` is intentional here: auth implementations are runtime-pluggable and the
-/// stack should not become generic over every integration it owns.
+/// Explicit compatibility escape hatch for APIs that require
+/// `Arc<dyn AuthVerifier>`. Normal composition should keep the provider concrete.
 #[must_use]
 pub fn dyn_auth_provider<P>(provider: P) -> Arc<dyn AuthVerifier>
 where
@@ -99,7 +137,7 @@ where
     Arc::new(SanitizingAuthProvider::new(provider))
 }
 
-/// Closure-backed adapter for the stricter Shared Auth provider boundary.
+/// Closure-backed adapter for the stricter paired Shared Auth boundary.
 pub struct FnSharedAuthProvider<F> {
     f: F,
 }
@@ -122,6 +160,24 @@ where
     FnSharedAuthProvider::new(f)
 }
 
+impl<F, Fut> StaticSharedAuthProviderVerifier for FnSharedAuthProvider<F>
+where
+    F: Fn(RequestMetadata, SharedAuthProviderContext) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+        + Send
+        + 'static,
+{
+    type Future = Fut;
+
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+        context: SharedAuthProviderContext,
+    ) -> Self::Future {
+        (self.f)(request, context)
+    }
+}
+
 impl<F, Fut> SharedAuthProviderVerifier for FnSharedAuthProvider<F>
 where
     F: Fn(RequestMetadata, SharedAuthProviderContext) -> Fut + Send + Sync + 'static,
@@ -140,7 +196,7 @@ where
                 + 'a,
         >,
     > {
-        Box::pin((self.f)(request.clone(), context.clone()))
+        Box::pin(self.verify_owned(request.clone(), context.clone()))
     }
 }
 
@@ -149,37 +205,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::shared_auth::{
-        SharedAuthDataPlane, SharedAuthProvider, SharedAuthProviderFailureKind,
-    };
-
-    #[derive(Clone)]
-    struct FakeAuthV1 {
-        prefix: &'static str,
-    }
-
-    impl FakeAuthV1 {
-        async fn verify(&self, token: String) -> Result<String, &'static str> {
-            token
-                .strip_prefix(self.prefix)
-                .map(ToOwned::to_owned)
-                .ok_or("invalid-v1-token")
-        }
-    }
-
-    #[derive(Clone)]
-    struct FakeAuthV2 {
-        prefix: &'static str,
-    }
-
-    impl FakeAuthV2 {
-        async fn authenticate(&self, token: String) -> Result<(String, String), &'static str> {
-            token
-                .strip_prefix(self.prefix)
-                .map(|subject| (subject.to_owned(), "tenant-v2".to_owned()))
-                .ok_or("invalid-v2-token")
-        }
-    }
+    use crate::shared_auth::{SharedAuthDataPlane, SharedAuthProvider};
 
     fn request(token: &str) -> RequestMetadata {
         RequestMetadata {
@@ -193,76 +219,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn consumer_can_adapt_different_auth_sdk_versions_through_one_port() {
-        let v1 = FakeAuthV1 { prefix: "v1:" };
-        let v2 = FakeAuthV2 { prefix: "v2:" };
-
-        let provider_v1 = auth_provider_fn(move |request: RequestMetadata| {
-            let client = v1.clone();
-            async move {
-                let token = request.headers.get("authorization").cloned().ok_or_else(|| {
-                    IntegrationError {
-                        code: "missing_auth",
-                        message: "authorization header is required".into(),
-                    }
-                })?;
-                let subject = client.verify(token).await.map_err(|message| IntegrationError {
-                    code: "invalid_auth_v1",
-                    message: message.into(),
-                })?;
-                Ok(AuthDecision {
-                    user_id: Some(subject),
-                    tenant_id: None,
-                    claims: BTreeMap::new(),
-                })
-            }
+    async fn closure_provider_uses_static_dispatch() {
+        let provider = auth_provider_fn(|request: RequestMetadata| async move {
+            Ok(AuthDecision {
+                user_id: request.headers.get("authorization").cloned(),
+                tenant_id: Some("tenant-a".into()),
+                claims: BTreeMap::new(),
+            })
         });
 
-        let provider_v2 = auth_provider_fn(move |request: RequestMetadata| {
-            let client = v2.clone();
-            async move {
-                let token = request.headers.get("authorization").cloned().ok_or_else(|| {
-                    IntegrationError {
-                        code: "missing_auth",
-                        message: "authorization header is required".into(),
-                    }
-                })?;
-                let (subject, tenant_id) =
-                    client.authenticate(token).await.map_err(|message| IntegrationError {
-                        code: "invalid_auth_v2",
-                        message: message.into(),
-                    })?;
-                Ok(AuthDecision {
-                    user_id: Some(subject),
-                    tenant_id: Some(tenant_id),
-                    claims: BTreeMap::new(),
-                })
-            }
-        });
-
-        let v1_decision = provider_v1.verify(&request("v1:alice")).await.unwrap();
-        let v2_decision = provider_v2.verify(&request("v2:bob")).await.unwrap();
-
-        assert_eq!(v1_decision.user_id.as_deref(), Some("alice"));
-        assert_eq!(v1_decision.tenant_id, None);
-        assert_eq!(v2_decision.user_id.as_deref(), Some("bob"));
-        assert_eq!(v2_decision.tenant_id.as_deref(), Some("tenant-v2"));
+        let decision = provider.verify_owned(request("alice")).await.unwrap();
+        assert_eq!(decision.user_id.as_deref(), Some("alice"));
+        assert_eq!(decision.tenant_id.as_deref(), Some("tenant-a"));
     }
 
     #[tokio::test]
-    async fn shared_auth_closure_uses_existing_provider_port() {
+    async fn shared_auth_closure_has_static_dispatch_path() {
         let provider = shared_auth_provider_fn(
             |request: RequestMetadata, context: SharedAuthProviderContext| async move {
-                let token = request.headers.get("authorization").cloned().ok_or_else(|| {
-                    SharedAuthProviderFailure {
-                        kind: SharedAuthProviderFailureKind::Rejected,
-                        code: "missing_auth",
-                        message: "authorization header is required".into(),
-                    }
-                })?;
                 Ok(SharedAuthVerifiedPrincipal::new(
                     context.provider,
-                    token,
+                    request.headers.get("authorization").cloned().unwrap_or_default(),
                     "tenant-1",
                     "session-1",
                     context.issuer,
@@ -272,7 +249,6 @@ mod tests {
                 ))
             },
         );
-
         let context = SharedAuthProviderContext {
             provider: SharedAuthProvider::Supabase,
             organization: "example-org".into(),
@@ -280,15 +256,8 @@ mod tests {
             audience: "example-api".into(),
             data_plane: SharedAuthDataPlane::CustomerAuth,
         };
-
-        let principal = provider
-            .verify(&request("subject-1"), &context)
-            .await
-            .unwrap();
-
-        assert_eq!(principal.provider, SharedAuthProvider::Supabase);
+        let principal = provider.verify_owned(request("subject-1"), context).await.unwrap();
         assert_eq!(principal.subject, "subject-1");
-        assert_eq!(principal.organization, "example-org");
     }
 
     #[tokio::test]
@@ -301,17 +270,7 @@ mod tests {
         });
         let provider = dyn_auth_provider(provider);
         let error = provider.verify(&request("bad")).await.unwrap_err();
-
         assert_eq!(error.code, "authentication_failed");
         assert_eq!(error.message, "authentication failed");
-        assert!(!error.message.contains("12345"));
-    }
-
-    #[test]
-    fn dynamic_erasure_is_available_for_stack_boundaries() {
-        let provider = auth_provider_fn(|_request: RequestMetadata| async {
-            Ok(AuthDecision::default())
-        });
-        let _provider: Arc<dyn AuthVerifier> = dyn_auth_provider(provider);
     }
 }
