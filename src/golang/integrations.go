@@ -20,11 +20,11 @@ type TestIdentityResolver interface {
 	Resolve(context.Context, *http.Request, RequestContext) (AuthDecision, error)
 }
 
-// AuthContextEnricher is an explicit consumer-owned mapping boundary from an
-// authenticated provider decision into ambient request context. The middleware
-// core never copies AuthDecision.Claims automatically.
-type AuthContextEnricher interface {
-	Enrich(context.Context, *http.Request, RequestContext, AuthDecision) (RequestContext, error)
+// AuthBaggageEnricher is an explicit consumer-owned mapping boundary from an
+// authenticated provider decision into ambient baggage. The middleware core
+// never copies AuthDecision.Claims automatically.
+type AuthBaggageEnricher interface {
+	Enrich(context.Context, *http.Request, RequestContext, AuthDecision) (map[string]string, error)
 }
 
 type IPAuthorizer interface {
@@ -58,7 +58,7 @@ type StoredResponse struct {
 type Dependencies struct {
 	AuthVerifier             AuthVerifier
 	TestIdentity             TestIdentityResolver
-	AuthContextEnricher      AuthContextEnricher
+	AuthBaggageEnricher      AuthBaggageEnricher
 	IPAuthorizer             IPAuthorizer
 	SyncObserver             SyncObserver
 	Telemetry                TelemetrySink
