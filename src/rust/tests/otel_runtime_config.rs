@@ -10,14 +10,13 @@ use axum::{
     http::{Request, StatusCode},
     routing::get,
 };
-use ores_middleware::{
-    MiddlewareStack, RequestLogger, default_config,
-    frameworks::axum::install_with_ores_runtime,
-};
 use ores_middleware::otel::{
     LoggerError, MemoryTransport, OpenTelemetryLogRecord, OpenTelemetryTransport, OresOtelEnv,
-    ResolveOptions, RuntimeRole, Transport, Value, parse_ores_otel_toml,
-    resolve_ores_otel_config, server_otel_runtime_from_resolved,
+    ResolveOptions, RuntimeRole, Transport, Value, parse_ores_otel_toml, resolve_ores_otel_config,
+    server_otel_runtime_from_resolved,
+};
+use ores_middleware::{
+    MiddlewareStack, RequestLogger, default_config, frameworks::axum::install_with_ores_runtime,
 };
 use tower::ServiceExt;
 
@@ -110,7 +109,10 @@ protocol = "none"
         .expect("response");
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert!(memory.records().len() >= 3, "start, handler and completion logs expected");
+    assert!(
+        memory.records().len() >= 3,
+        "start, handler and completion logs expected"
+    );
     assert_eq!(otel_writes.load(Ordering::Relaxed), 0);
     runtime.close().expect("runtime shutdown");
     assert!(memory.is_closed());
@@ -154,10 +156,8 @@ endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
         "https://collector.example.com/v1/logs?token=secret",
         "file:///tmp/otel",
     ] {
-        let environment = OresOtelEnv::from([(
-            "OTEL_EXPORTER_OTLP_ENDPOINT".into(),
-            invalid.to_owned(),
-        )]);
+        let environment =
+            OresOtelEnv::from([("OTEL_EXPORTER_OTLP_ENDPOINT".into(), invalid.to_owned())]);
         let transport: Arc<dyn Transport> = Arc::new(OpenTelemetryTransport::new(
             |_record: OpenTelemetryLogRecord| -> Result<(), LoggerError> { Ok(()) },
         ));

@@ -10,8 +10,8 @@ use crate::RequestContext;
 // protocol/log-level/environment types remain nested under next_loggers::config
 // upstream, so expose them explicitly here as part of this integration surface.
 pub use next_loggers::{
-    *,
     config::{OresOtelEnv, OresOtelExporterProtocol, OresOtelLogLevel},
+    *,
 };
 
 #[derive(Debug)]
@@ -120,9 +120,9 @@ fn validate_exporter_endpoint(raw: &str) -> Result<(), ServerOtelRuntimeError> {
             "fragments are forbidden".into(),
         ));
     }
-    let uri = raw
-        .parse::<Uri>()
-        .map_err(|_| ServerOtelRuntimeError::InvalidExporterEndpoint("expected an absolute URI".into()))?;
+    let uri = raw.parse::<Uri>().map_err(|_| {
+        ServerOtelRuntimeError::InvalidExporterEndpoint("expected an absolute URI".into())
+    })?;
     if !matches!(uri.scheme_str(), Some("http" | "https")) {
         return Err(ServerOtelRuntimeError::InvalidExporterEndpoint(
             "only http and https schemes are supported".into(),
@@ -176,7 +176,10 @@ pub fn server_otel_runtime_from_resolved(
             ServerOtelRuntimeError::MissingExporterEndpoint(endpoint_env.to_owned())
         })?;
         validate_exporter_endpoint(&endpoint)?;
-        if !transports.iter().any(|transport| transport.is_open_telemetry()) {
+        if !transports
+            .iter()
+            .any(|transport| transport.is_open_telemetry())
+        {
             return Err(ServerOtelRuntimeError::MissingOpenTelemetryTransport);
         }
         Some(endpoint)
@@ -246,7 +249,11 @@ pub fn should_sample_trace(trace_id: &str, sample_ratio: f64) -> bool {
         return true;
     }
     let digest = Sha256::digest(trace_id.as_bytes());
-    let bucket = u64::from_be_bytes(digest[..8].try_into().expect("sha256 prefix is eight bytes"));
+    let bucket = u64::from_be_bytes(
+        digest[..8]
+            .try_into()
+            .expect("sha256 prefix is eight bytes"),
+    );
     let threshold = (sample_ratio * u64::MAX as f64) as u64;
     bucket <= threshold
 }
@@ -464,8 +471,20 @@ console = false
         )
         .expect("runtime");
         let logger = runtime.logger.expect("logger enabled");
-        assert!(logger.info(vec![Value::String("filtered".into())]).send().unwrap().is_none());
-        assert!(logger.error(vec![Value::String("kept".into())]).send().unwrap().is_some());
+        assert!(
+            logger
+                .info(vec![Value::String("filtered".into())])
+                .send()
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            logger
+                .error(vec![Value::String("kept".into())])
+                .send()
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(transport.records().len(), 1);
 
         let disabled = resolved(
@@ -500,7 +519,13 @@ auto_send = true
 "#,
         );
         assert!(matches!(
-            server_otel_runtime_from_resolved(auto_send, &OresOtelEnv::new(), "svc", None, Vec::new()),
+            server_otel_runtime_from_resolved(
+                auto_send,
+                &OresOtelEnv::new(),
+                "svc",
+                None,
+                Vec::new()
+            ),
             Err(ServerOtelRuntimeError::UnsupportedAutoSend)
         ));
 
@@ -530,7 +555,10 @@ endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
             None,
             Vec::new(),
         );
-        assert!(matches!(missing, Err(ServerOtelRuntimeError::MissingExporterEndpoint(_))));
+        assert!(matches!(
+            missing,
+            Err(ServerOtelRuntimeError::MissingExporterEndpoint(_))
+        ));
 
         let credential_env = OresOtelEnv::from([(
             "OTEL_EXPORTER_OTLP_ENDPOINT".into(),
@@ -562,11 +590,21 @@ endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
         let trace = "0123456789abcdef0123456789abcdef";
         assert!(!should_sample_trace(trace, 0.0));
         assert!(should_sample_trace(trace, 1.0));
-        assert_eq!(should_sample_trace(trace, 0.5), should_sample_trace(trace, 0.5));
+        assert_eq!(
+            should_sample_trace(trace, 0.5),
+            should_sample_trace(trace, 0.5)
+        );
         let context = request_context();
-        let logger = Logger::new(Options { console: false, ..Options::default() });
-        assert!(!RequestLogger::new_with_sampling(logger.clone(), &context, false, 1.0).otel_sampled());
-        assert!(!RequestLogger::new_with_sampling(logger.clone(), &context, true, 0.0).otel_sampled());
+        let logger = Logger::new(Options {
+            console: false,
+            ..Options::default()
+        });
+        assert!(
+            !RequestLogger::new_with_sampling(logger.clone(), &context, false, 1.0).otel_sampled()
+        );
+        assert!(
+            !RequestLogger::new_with_sampling(logger.clone(), &context, true, 0.0).otel_sampled()
+        );
         assert!(RequestLogger::new_with_sampling(logger, &context, true, 1.0).otel_sampled());
     }
 
