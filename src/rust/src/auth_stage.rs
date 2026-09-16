@@ -1,55 +1,91 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin};
 
 use crate::{
-    AuthDecision, AuthVerifier, IntegrationError,
+    AuthDecision, IntegrationError, StaticAuthVerifier,
     stage::{MiddlewareStageHandler, StageDecision, StageInput, StageRejection},
 };
 
-type DynDecisionEnricher = Arc<dyn Fn(StageInput, &AuthDecision) -> StageInput + Send + Sync>;
-
-/// Framework-neutral authentication stage backed by an injected [`AuthVerifier`].
-///
-/// The consuming service selects this stage's name and exact location in a
-/// [`crate::StagePipeline`]. The concrete auth SDK/version remains captured by
-/// the verifier adapter and never becomes a dependency of `ores-middleware`.
-pub struct AuthStage {
-    name: &'static str,
-    verifier: Arc<dyn AuthVerifier>,
-    decision_enricher: Option<DynDecisionEnricher>,
+/// Consumer hook for copying a reviewed subset of authentication decision data
+/// into generic stage attributes.
+pub trait AuthDecisionEnricher: Send + Sync {
+    fn enrich(&self, input: StageInput, decision: &AuthDecision) -> StageInput;
 }
 
-impl AuthStage {
+impl<F> AuthDecisionEnricher for F
+where
+    F: Fn(StageInput, &AuthDecision) -> StageInput + Send + Sync,
+{
+    fn enrich(&self, input: StageInput, decision: &AuthDecision) -> StageInput {
+        self(input, decision)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopAuthDecisionEnricher;
+
+impl AuthDecisionEnricher for NoopAuthDecisionEnricher {
+    fn enrich(&self, input: StageInput, _decision: &AuthDecision) -> StageInput {
+        input
+    }
+}
+
+/// Framework-neutral authentication stage backed by a concrete provider type.
+///
+/// `P` is intentionally generic. The auth provider is not converted into
+/// `Arc<dyn AuthVerifier>` here, so provider calls remain statically dispatched.
+/// If this stage is inserted into [`crate::StagePipeline`], type erasure occurs
+/// only once at the heterogeneous stage-registry boundary.
+pub struct AuthStage<P, E = NoopAuthDecisionEnricher> {
+    name: &'static str,
+    verifier: P,
+    decision_enricher: E,
+}
+
+impl<P> AuthStage<P, NoopAuthDecisionEnricher>
+where
+    P: StaticAuthVerifier,
+{
     #[must_use]
-    pub fn new(name: &'static str, verifier: Arc<dyn AuthVerifier>) -> Self {
+    pub fn from_provider(name: &'static str, provider: P) -> Self {
         Self {
             name,
-            verifier,
-            decision_enricher: None,
+            verifier: provider,
+            decision_enricher: NoopAuthDecisionEnricher,
         }
+    }
+}
+
+impl<P, E> AuthStage<P, E>
+where
+    P: StaticAuthVerifier,
+    E: AuthDecisionEnricher,
+{
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        self.name
     }
 
     #[must_use]
-    pub fn from_provider<P>(name: &'static str, provider: P) -> Self
-    where
-        P: AuthVerifier + 'static,
-    {
-        Self::new(name, Arc::new(provider))
+    pub fn provider(&self) -> &P {
+        &self.verifier
     }
 
     /// Let the consumer map selected, reviewed auth decision data into
-    /// [`StageInput::attributes`].
+    /// [`StageInput::attributes`] without allocating a dynamic callback.
     ///
     /// By default arbitrary claims are *not* copied into generic attributes or
     /// logs. The stage establishes user/tenant context and copies only `otel.*`
-    /// claims into bounded request baggage. Consumers that need extra claims for
-    /// downstream authorization can explicitly allow-list them here.
+    /// claims into bounded request baggage.
     #[must_use]
-    pub fn with_decision_enricher<F>(mut self, enricher: F) -> Self
+    pub fn with_decision_enricher<F>(self, enricher: F) -> AuthStage<P, F>
     where
-        F: Fn(StageInput, &AuthDecision) -> StageInput + Send + Sync + 'static,
+        F: AuthDecisionEnricher,
     {
-        self.decision_enricher = Some(Arc::new(enricher));
-        self
+        AuthStage {
+            name: self.name,
+            verifier: self.verifier,
+            decision_enricher: enricher,
+        }
     }
 
     fn apply_decision(&self, mut input: StageInput, decision: &AuthDecision) -> StageInput {
@@ -62,15 +98,15 @@ impl AuthStage {
                 .filter(|(key, _)| key.starts_with("otel."))
                 .map(|(key, value)| (key.clone(), value.clone())),
         );
-
-        match &self.decision_enricher {
-            Some(enricher) => enricher(input, decision),
-            None => input,
-        }
+        self.decision_enricher.enrich(input, decision)
     }
 }
 
-impl MiddlewareStageHandler for AuthStage {
+impl<P, E> MiddlewareStageHandler for AuthStage<P, E>
+where
+    P: StaticAuthVerifier + 'static,
+    E: AuthDecisionEnricher + 'static,
+{
     fn name(&self) -> &'static str {
         self.name
     }
@@ -79,8 +115,9 @@ impl MiddlewareStageHandler for AuthStage {
         &'a self,
         input: StageInput,
     ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
+        let future = self.verifier.verify_owned(input.request.clone());
         Box::pin(async move {
-            match self.verifier.verify(&input.request).await {
+            match future.await {
                 Ok(decision) => {
                     StageDecision::Continue(Box::new(self.apply_decision(input, &decision)))
                 }
@@ -105,7 +142,7 @@ fn reject_auth(stage_name: &'static str, error: IntegrationError) -> StageDecisi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use serde_json::json;
 
@@ -178,10 +215,8 @@ mod tests {
             }
         });
 
-        let pipeline = StagePipeline::new().with_stage(Arc::new(AuthStage::from_provider(
-            "company-auth-v9",
-            provider,
-        )));
+        let auth = AuthStage::from_provider("company-auth-v9", provider);
+        let pipeline = StagePipeline::new().with_stage(Arc::new(auth));
 
         assert_eq!(pipeline.stage_names(), vec!["company-auth-v9"]);
         let response = pipeline
@@ -201,7 +236,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn consumer_can_explicitly_allowlist_decision_data_for_later_stages() {
+    async fn consumer_can_use_concrete_enricher_without_dynamic_callback() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async {
             Ok(AuthDecision {
                 user_id: Some("alice".into()),
@@ -210,7 +245,7 @@ mod tests {
             })
         });
         let auth = AuthStage::from_provider("auth", provider).with_decision_enricher(
-            |input, decision| {
+            |input: StageInput, decision: &AuthDecision| {
                 decision.claims.get("role").map_or(input.clone(), |role| {
                     input.with_attribute("authorization.role", json!(role))
                 })
