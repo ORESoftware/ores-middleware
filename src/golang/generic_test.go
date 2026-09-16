@@ -167,3 +167,72 @@ func TestComposeGenericRejectsNilMiddlewareAndNilResults(t *testing.T) {
 		})
 	})
 }
+
+func TestGenericMiddlewarePropagatesConsumerContextCancellation(t *testing.T) {
+	handlerRan := false
+	handler := GenericHandler[string, string](func(ctx context.Context, request string) (string, error) {
+		handlerRan = true
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return request, nil
+	})
+	stage := GenericMiddleware[string, string](func(next GenericHandler[string, string]) GenericHandler[string, string] {
+		return func(ctx context.Context, request string) (string, error) {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			return next(ctx, request)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := ComposeGeneric(handler, stage)(ctx, "request")
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if handlerRan {
+		t.Fatal("cancelled context should not reach handler")
+	}
+}
+
+func TestGenericEmptyChainsPreserveHandlerBehavior(t *testing.T) {
+	handler := GenericHandler[string, string](func(_ context.Context, request string) (string, error) {
+		return request + ":unchanged", nil
+	})
+
+	for name, composed := range map[string]GenericHandler[string, string]{
+		"unnamed": ComposeGeneric(handler),
+		"named":   ComposeNamedGeneric(handler),
+	} {
+		got, err := composed(context.Background(), "request")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got != "request:unchanged" {
+			t.Fatalf("%s changed handler behavior: %q", name, got)
+		}
+	}
+}
+
+func TestProviderConstructorsRejectNilConsumerFunctions(t *testing.T) {
+	assertPanics := func(name string, fn func()) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			fn()
+		})
+	}
+
+	assertPanics("provider", func() {
+		ProviderFrom[string, string](nil)
+	})
+	assertPanics("contextual provider", func() {
+		ContextualProviderFrom[string, int, string](nil)
+	})
+}
