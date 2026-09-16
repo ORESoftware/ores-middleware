@@ -1,7 +1,7 @@
 [package]
 org = "oresoftware"
 name = "ores-middleware"
-version = "0.1.0"
+version = "0.1.1"
 description = "Peer-authority, polyglot request-lifecycle middleware SDK for Rust, TypeScript, Go, Gleam, Elixir, and Erlang"
 license = "MIT"
 keywords = ["middleware", "polyglot", "typespec", "json-schema", "opentelemetry", "server"]
@@ -106,7 +106,7 @@ name = "ores-middleware-erlang"
 adapter = "none"
 
 [scripts]
-# Zed 0.2.3 exposes one closed test hook. Richer commands live in package.json.
+# Zed 0.3.x exposes one closed test hook. Richer commands live in package.json.
 # This hook runs the repository audit plus independent generation/validation;
 # the database-backed four-way ORM catalog and row-level gates remain in
 # service-enabled CI.
