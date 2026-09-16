@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 use crate::{
-    AuthDecision, IntegrationError, StaticAuthVerifier,
+    AuthDecision, AuthVerifier, IntegrationError,
     stage::{MiddlewareStageHandler, StageDecision, StageInput, StageRejection},
 };
 
@@ -29,12 +29,12 @@ impl AuthDecisionEnricher for NoopAuthDecisionEnricher {
     }
 }
 
-/// Framework-neutral authentication stage backed by a concrete provider type.
+/// Framework-neutral authentication stage backed by any ORES auth provider.
 ///
-/// `P` is intentionally generic. The auth provider is not converted into
-/// `Arc<dyn AuthVerifier>` here, so provider calls remain statically dispatched.
-/// If this stage is inserted into [`crate::StagePipeline`], type erasure occurs
-/// only once at the heterogeneous stage-registry boundary.
+/// The stage is generic over the provider only because consumers commonly know
+/// that concrete type at construction time. The provider contract itself is the
+/// same object-safe [`AuthVerifier`] used by `MiddlewareStack`, so consumers do
+/// not need parallel static/dynamic auth interfaces.
 pub struct AuthStage<P, E = NoopAuthDecisionEnricher> {
     name: &'static str,
     verifier: P,
@@ -43,7 +43,7 @@ pub struct AuthStage<P, E = NoopAuthDecisionEnricher> {
 
 impl<P> AuthStage<P, NoopAuthDecisionEnricher>
 where
-    P: StaticAuthVerifier,
+    P: AuthVerifier,
 {
     #[must_use]
     pub fn from_provider(name: &'static str, provider: P) -> Self {
@@ -57,7 +57,7 @@ where
 
 impl<P, E> AuthStage<P, E>
 where
-    P: StaticAuthVerifier,
+    P: AuthVerifier,
     E: AuthDecisionEnricher,
 {
     #[must_use]
@@ -75,7 +75,7 @@ where
     ///
     /// By default arbitrary claims are *not* copied into generic attributes or
     /// logs. The stage establishes user/tenant context and copies only `otel.*`
-    /// claims into bounded request baggage.
+    /// claims into request baggage, matching the bundled stack behavior.
     #[must_use]
     pub fn with_decision_enricher<F>(self, enricher: F) -> AuthStage<P, F>
     where
@@ -88,16 +88,10 @@ where
         }
     }
 
-    /// Evaluate this stage without crossing the object-safe `StagePipeline`
-    /// boundary.
-    ///
-    /// This async method retains the concrete provider and compiler-generated
-    /// future type. Direct consumers can use it when they want static dispatch;
-    /// the `MiddlewareStageHandler` implementation below boxes only when the
-    /// stage is actually registered in the heterogeneous runtime pipeline.
+    /// Evaluate this stage directly without registering it in the heterogeneous
+    /// [`crate::StagePipeline`].
     pub async fn evaluate(&self, input: StageInput) -> StageDecision {
-        let future = self.verifier.verify_owned(input.request.clone());
-        match future.await {
+        match self.verifier.verify(&input.request).await {
             Ok(decision) => StageDecision::Continue(Box::new(self.apply_decision(input, &decision))),
             Err(error) => reject_auth(self.name, error),
         }
@@ -119,7 +113,7 @@ where
 
 impl<P, E> MiddlewareStageHandler for AuthStage<P, E>
 where
-    P: StaticAuthVerifier + 'static,
+    P: AuthVerifier + 'static,
     E: AuthDecisionEnricher + 'static,
 {
     fn name(&self) -> &'static str {
@@ -183,20 +177,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_evaluate_keeps_stage_on_static_path() {
+    async fn direct_evaluate_uses_the_same_provider_port_as_the_stack() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async {
             Ok(AuthDecision {
-                user_id: Some("static-user".into()),
-                tenant_id: Some("static-tenant".into()),
+                user_id: Some("direct-user".into()),
+                tenant_id: Some("direct-tenant".into()),
                 claims: BTreeMap::new(),
             })
         });
-        let auth = AuthStage::from_provider("static-auth", provider);
+        let auth = AuthStage::from_provider("direct-auth", provider);
 
         match auth.evaluate(input("token")).await {
             StageDecision::Continue(input) => {
-                assert_eq!(input.context.user_id.as_deref(), Some("static-user"));
-                assert_eq!(input.context.tenant_id.as_deref(), Some("static-tenant"));
+                assert_eq!(input.context.user_id.as_deref(), Some("direct-user"));
+                assert_eq!(input.context.tenant_id.as_deref(), Some("direct-tenant"));
             }
             StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
             StageDecision::Respond(response) => {
