@@ -1,6 +1,6 @@
 # ores-middleware
 
-`ores-middleware` is the cross-language request-lifecycle contract for ORESoftware services. It provides one semantic middleware surface with idiomatic adapters for Rust, TypeScript/JavaScript, Go, Gleam, Elixir, and Erlang.
+`ores-middleware` is the cross-language request-lifecycle contract and composition toolkit for ORESoftware services. It provides shared middleware primitives with idiomatic adapters for Rust, TypeScript/JavaScript, Go, Gleam, Elixir, and Erlang while leaving middleware selection and ordering to each consuming service.
 
 This repository is governed by [`ORESoftware/my-ai/AGENTS.md`](https://github.com/ORESoftware/my-ai/blob/main/AGENTS.md). TypeSpec and JSON Schema/OpenAPI are independent, peer contract authorities. Neither authority is generated from the other and treated as canonical. Generated artifacts are compared evidence; discrepancies fail closed and require human evaluation.
 
@@ -41,12 +41,14 @@ Every language exports the same seven semantic operations, using idiomatic symbo
 | `descriptor` | Describe language, runtime, adapters, capabilities, and exported symbols. |
 | `defaultConfig` | Construct secure baseline configuration for a named service. |
 | `validateConfig` | Enforce contract invariants and production safety gates. |
-| `createMiddleware` | Build the request-lifecycle middleware or stack. |
+| `createMiddleware` | Build request-lifecycle middleware/composition primitives. |
 | `runWithContext` | Execute work with request-scoped context propagation. |
 | `currentContext` | Read request context in the active task/process/goroutine chain. |
 | `capabilities` | Return the normative capability vocabulary. |
 
 The normative capabilities are request context, crash recovery, request and trace IDs, structured logging, RED metrics, deadlines, payload limits, rate limiting, authentication, sync observation, JSON, header policy, compression, TLS policy, security headers, idempotency, IP policy, ETag/cache control, content negotiation, test-only fault injection and auth bypass, and test schema capture.
+
+A runtime can expose the same capability vocabulary without forcing every consumer to enable every capability or to place it at one global position.
 
 ## Request-context model
 
@@ -63,90 +65,125 @@ A bounded, TTL-limited request-ID registry may be used for diagnostics or contro
 
 ## Consumer-owned middleware composition
 
-`ores-middleware` provides middleware primitives, adapters, validation helpers, provider ports, and reviewed ordering guidance. The consuming service owns **which middleware is enabled, its exact order, and its route/server scope**.
+`ores-middleware` provides middleware implementations, adapters, validation helpers, provider ports, and composition primitives. The consuming service owns **which middleware is enabled, its exact order, its route/server scope, and its concrete provider versions**.
 
-`DEFAULT_MIDDLEWARE_ORDER` and `validate_middleware_order(...)` are reviewed guidance/helpers; they are not an instruction that every consumer must install the same chain. A service may intentionally choose a different order or omit middleware that is not applicable. Framework-specific composition should remain explicit at the application boundary so the service can reason about request and response ordering.
+For new Rust consumers, the primary consumer-owned surfaces are:
 
-A commonly reviewed profile is:
+- `StagePipeline` — executes request stages in the exact insertion order selected by the consumer and unwinds response hooks in reverse entered order;
+- `AuthStage` — framework-neutral authentication backed by an injected `AuthVerifier`;
+- `frameworks::axum_composable::{AuthLayerState, authenticate}` — a standalone Axum auth primitive that can be placed at any router/route boundary;
+- `MiddlewareOrderPolicy` + `validate_consumer_middleware_order(...)` — validation of **consumer-authored** required/forbidden/unique/first/before/after rules using arbitrary stage names.
 
-1. panic/recovery boundary;
-2. deadline and request/trace context;
-3. trusted-proxy / transport-security checks;
-4. payload/flood controls;
-5. authentication and authorization;
-6. principal-aware rate limiting;
-7. idempotency;
-8. handler execution;
-9. response compression/security headers;
-10. telemetry finalization.
+An empty `MiddlewareOrderPolicy` imposes no stage selection, order, uniqueness, or first-stage requirement. This is intentional: a shared library cannot know the correct chain for every service.
 
-This profile is guidance, not a universal hard-coded stack. Consumers may use a different composition when semantics require it. Ordering validators should distinguish technical incompatibilities from optional/recommended policy.
+`DEFAULT_MIDDLEWARE_ORDER` and `validate_middleware_order(...)` remain only as an opt-in legacy/reference profile for consumers that deliberately choose that reviewed 16-stage sequence. They are not the default architecture for new consumers.
 
-Authentication is fail-closed when enabled. `opto-sync` observation may be configured fail-open for non-critical audit delivery, but its failure is always recorded. Test auth bypass and fault injection are configuration errors in production.
+A commonly reviewed profile may include recovery/deadline, correlation, trusted transport, payload controls, auth, rate limiting, authorization, idempotency, handler execution, response transforms, security headers, and telemetry. The service may split, omit, add, or reorder those stages. Technical dependencies should be written as explicit consumer rules—for example, a principal-aware limiter can require `auth -> rate-limit` when its key depends on authenticated identity.
+
+See [`docs/consumer-composition.md`](docs/consumer-composition.md), [`docs/MIDDLEWARE_EXECUTION_MODEL.md`](docs/MIDDLEWARE_EXECUTION_MODEL.md), and [`docs/COMPLETE_MIDDLEWARE_STACK.md`](docs/COMPLETE_MIDDLEWARE_STACK.md).
+
+Authentication is fail-closed when enabled on a protected route. `opto-sync` observation may be configured fail-open for non-critical audit delivery, but its failure is always recorded. Test auth bypass and fault injection are configuration errors in production.
 
 ## Integration ports
 
 The core packages depend on narrow ports rather than hard-coding provider SDKs:
 
-- **shared-auth / auth providers:** token/JWT verification or a configured HTTP introspection hook. The consuming service pins the concrete auth SDK/version and injects it through the stable ORES provider interface. See [`docs/provider-injection.md`](docs/provider-injection.md).
+- **auth providers / shared-auth:** the consuming service pins the concrete auth SDK/version/revision and injects it through the stable `AuthVerifier`/`AuthDecision` boundary. `auth_provider_fn(...)` supports closure adapters; `shared_auth_provider_fn(...)` supports the stricter Shared Auth provider boundary. See [`docs/provider-injection.md`](docs/provider-injection.md).
 - **opto-sync:** request-completion observer/outbox hook. Payloads contain correlation and operational metadata, not credentials or unrestricted bodies.
-- **ores-otel:** trace propagation and telemetry sink. The W3C `traceparent` and `baggage` propagators are the baseline.
+- **ores-otel:** trace propagation and telemetry sink. W3C `traceparent` and `baggage` are the baseline.
 - **rate and idempotency stores:** in-memory implementations support local development and tests; distributed services should inject Redis or another durable/consistent implementation appropriate to the endpoint semantics.
 
 The repository never embeds credentials. Endpoints, trust anchors, encrypted environment paths, and runtime secrets are deployment configuration.
 
-## Framework adapters
+## Rust examples
 
-### Rust
-
-The Rust package exposes an Axum core plus named installers for MASH, Leptos, and Dioxus full-stack servers. MASH means Maud + Axum + server-rendered HTML/HTMX conventions; the middleware does not couple domain handlers to Maud or HTMX.
+### Framework-neutral composition
 
 ```rust
 use std::sync::Arc;
-use ores_middleware::{default_config, MiddlewareStack};
+use ores_middleware::{
+    AuthDecision, AuthStage, IntegrationError, RequestMetadata,
+    StagePipeline, auth_provider_fn,
+};
 
-let mut config = default_config(env!("CARGO_PKG_NAME"));
-// Development may explicitly disable HTTPS enforcement. Production should use
-// in-process TLS or a trusted-proxy allowlist.
-config.settings.tls.require_https = false;
-config.settings.tls.mode = "disabled".into();
-let stack = Arc::new(MiddlewareStack::new(config)?);
-let app = ores_middleware::frameworks::axum::install(app, stack);
+let sdk = selected_auth_sdk::Client::new(auth_config);
+let provider = auth_provider_fn(move |request: RequestMetadata| {
+    let sdk = sdk.clone();
+    async move {
+        let verified = sdk
+            .verify(request.headers.get("authorization"))
+            .await
+            .map_err(|error| IntegrationError {
+                code: "auth_rejected",
+                message: error.to_string(),
+            })?;
+
+        Ok(AuthDecision {
+            user_id: Some(verified.user_id),
+            tenant_id: verified.tenant_id,
+            claims: Default::default(),
+        })
+    }
+});
+
+let pipeline = StagePipeline::new()
+    .with_stage(Arc::new(request_id_stage))
+    .with_stage(Arc::new(AuthStage::from_provider("company-auth-v2", provider)))
+    .with_stage(Arc::new(tenant_rate_limit_stage));
 ```
 
-Concrete auth libraries are injected by the consuming crate rather than linked into `ores-middleware` core. For closure adapters, dual-version migrations, and Shared Auth examples, see [`docs/provider-injection.md`](docs/provider-injection.md).
+The concrete `selected_auth_sdk` dependency belongs to the consuming crate and can be pinned to an exact release or Git revision. Provider-specific types stop at the adapter boundary.
+
+### Consumer-owned order validation
+
+```rust
+use ores_middleware::{
+    MiddlewareOrderPolicy, MiddlewareOrderingRule,
+    validate_consumer_middleware_order,
+};
+
+let policy = MiddlewareOrderPolicy::new()
+    .require("company-auth-v2")
+    .rule(MiddlewareOrderingRule::before(
+        "company-auth-v2",
+        "tenant-rate-limit",
+        "auth-before-tenant-limit",
+        "this service derives its limiter key from authenticated identity",
+    ));
+
+let issues = validate_consumer_middleware_order(&pipeline.stage_names(), &policy);
+assert!(issues.is_empty());
+```
+
+### Standalone Axum primitive
+
+```rust
+use axum::{Router, middleware, routing::get};
+use ores_middleware::frameworks::axum_composable::{AuthLayerState, authenticate};
+
+let protected = Router::new()
+    .route("/account", get(account))
+    .layer(middleware::from_fn_with_state(
+        AuthLayerState::from_provider(provider),
+        authenticate,
+    ));
+```
+
+The existing bundled `MiddlewareStack` + `frameworks::axum::install(...)` surface remains available for compatibility and for services that deliberately want that bundled lifecycle. It is not required for consumer-owned composition.
+
+## Framework adapters
 
 ### TypeScript / JavaScript
 
-The TypeScript package implements a Fetch `Request`/`Response` core, allowing one policy engine to serve Node.js, Deno, Bun, Next.js, Nuxt, Hapi, Hono, Express, and NestJS boundaries.
-
-```ts
-import { createMiddleware, defaultConfig } from "@oresoftware/ores-middleware";
-import { honoMiddleware } from "@oresoftware/ores-middleware/adapters";
-
-const config = defaultConfig("example-api-server");
-config.settings.tls.requireHttps = false;
-config.settings.tls.mode = "disabled";
-const middleware = createMiddleware(config, { authVerifier, telemetry });
-app.use("*", honoMiddleware(middleware));
-```
+The TypeScript package implements a Fetch `Request`/`Response` core, allowing shared middleware primitives to serve Node.js, Deno, Bun, Next.js, Nuxt, Hapi, Hono, Express, and NestJS boundaries. Consumer registration order remains explicit at the application/config boundary.
 
 ### Go
 
-The Go implementation wraps `net/http`; Gorilla Mux, Gin, Echo, and Fiber are adapted at their server boundary. The request-scoped `context.Context` remains available to handlers and downstream clients.
-
-```go
-config := oresmiddleware.DefaultConfig("example-api-server")
-config.Settings.TLS.RequireHTTPS = false
-config.Settings.TLS.Mode = "disabled"
-stack, err := oresmiddleware.New(config, oresmiddleware.Dependencies{})
-if err != nil { return err }
-http.ListenAndServe(":8080", adapters.Gin(stack, engine))
-```
+The Go implementation wraps `net/http`; Gorilla Mux, Gin, Echo, and Fiber are adapted at their server boundary. The request-scoped `context.Context` remains available to handlers and downstream clients. The application owns which wrappers are installed and their nesting order.
 
 ### Gleam, Elixir, and Erlang
 
-Gleam is a first-class implementation compiled to Erlang/OTP; it is not an Elixir wrapper. Elixir exposes Plug/Phoenix boundaries and Erlang exposes a framework-neutral around-handler plus Cowboy middleware. Each runtime uses supervised or monitored request execution for deadline/crash isolation.
+Gleam is a first-class implementation compiled to Erlang/OTP; it is not an Elixir wrapper. Elixir exposes Plug/Phoenix boundaries and Erlang exposes a framework-neutral around-handler plus Cowboy middleware. Each runtime uses supervised or monitored request execution for deadline/crash isolation while preserving consumer-selected composition.
 
 ## TLS termination
 
@@ -183,10 +220,12 @@ A release must stop when:
 A downstream server PR is complete only when it:
 
 1. pins `ores-middleware` to a reviewed release or immutable commit;
-2. installs the framework adapter at the actual router/server boundary;
-3. supplies a service name and explicit TLS/trusted-proxy policy;
-4. wires shared-auth, opto-sync, and ores-otel ports as applicable;
-5. chooses and documents the middleware selection/order appropriate to that service;
-6. adds tests for correlation headers, context propagation, payload limits, auth failure, deadlines, and production safety;
-7. documents any temporarily disabled capability and links a tracked follow-up;
-8. keeps the PR draft until its own build and tests pass.
+2. installs the needed framework-neutral stages and/or framework adapters at the actual router/server boundary;
+3. supplies a service name and explicit TLS/trusted-proxy policy where applicable;
+4. wires auth, opto-sync, ores-otel, rate-limit, cache, and other ports as applicable;
+5. owns and documents the concrete provider versions/revisions it injects;
+6. chooses and documents the middleware selection/order appropriate to that service;
+7. declares consumer-owned order invariants where static validation is useful;
+8. adds tests for the selected middleware's correlation, context, payload, auth, deadline, ordering, and production-safety behavior;
+9. documents any temporarily disabled capability and links a tracked follow-up;
+10. keeps the PR draft until its own build and tests pass.
