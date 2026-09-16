@@ -9,54 +9,63 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::{AuthDecision, AuthVerifier, RequestMetadata, TransportSecurity};
+use crate::{AuthDecision, RequestMetadata, StaticAuthVerifier, TransportSecurity};
 
 /// State for the standalone Axum authentication primitive.
 ///
-/// The consumer owns the concrete authentication SDK/version and injects its
-/// adapter through the stable [`AuthVerifier`] boundary. This state does not
-/// imply any position in the router's middleware chain.
-#[derive(Clone)]
-pub struct AuthLayerState {
-    verifier: Arc<dyn AuthVerifier>,
+/// The concrete provider type is retained inside `Arc<P>` rather than erased to
+/// `Arc<dyn AuthVerifier>`. `Arc` is used for cheap state cloning; dispatch is
+/// still static and the provider future remains its concrete associated type.
+pub struct AuthLayerState<P> {
+    verifier: Arc<P>,
 }
 
-impl AuthLayerState {
-    #[must_use]
-    pub fn new(verifier: Arc<dyn AuthVerifier>) -> Self {
-        Self { verifier }
-    }
-
-    #[must_use]
-    pub fn from_provider<P>(provider: P) -> Self
-    where
-        P: AuthVerifier + 'static,
-    {
-        Self::new(Arc::new(provider))
-    }
-
-    #[must_use]
-    pub fn verifier(&self) -> &Arc<dyn AuthVerifier> {
-        &self.verifier
+impl<P> Clone for AuthLayerState<P> {
+    fn clone(&self) -> Self {
+        Self {
+            verifier: Arc::clone(&self.verifier),
+        }
     }
 }
 
-/// Standalone Axum authentication middleware.
+impl<P> AuthLayerState<P>
+where
+    P: StaticAuthVerifier,
+{
+    #[must_use]
+    pub fn from_provider(provider: P) -> Self {
+        Self {
+            verifier: Arc::new(provider),
+        }
+    }
+
+    #[must_use]
+    pub fn from_shared(provider: Arc<P>) -> Self {
+        Self { verifier: provider }
+    }
+
+    #[must_use]
+    pub fn verifier(&self) -> &P {
+        self.verifier.as_ref()
+    }
+}
+
+/// Standalone Axum authentication middleware with static provider dispatch.
 ///
 /// Compose this with `middleware::from_fn_with_state` at the exact route/router
 /// boundary and ordering selected by the consuming service. On success the
 /// stable [`AuthDecision`] is inserted into request extensions for downstream
 /// middleware and handlers.
-///
-/// Provider-specific error messages are deliberately not returned to clients.
-/// They may contain SDK internals or sensitive identity-provider diagnostics.
-pub async fn authenticate(
-    State(state): State<AuthLayerState>,
+pub async fn authenticate<P>(
+    State(state): State<AuthLayerState<P>>,
     mut request: Request,
     next: Next,
-) -> Response {
+) -> Response
+where
+    P: StaticAuthVerifier + 'static,
+{
     let metadata = request_metadata(&request);
-    match state.verifier.verify(&metadata).await {
+    match state.verifier.verify_owned(metadata.clone()).await {
         Ok(decision) => {
             request.extensions_mut().insert(decision);
             next.run(request).await
@@ -160,8 +169,9 @@ mod tests {
             })
         });
 
+        let state = AuthLayerState::from_provider(provider);
         let app = Router::new().route("/me", get(identity)).layer(
-            middleware::from_fn_with_state(AuthLayerState::from_provider(provider), authenticate),
+            middleware::from_fn_with_state(state, authenticate),
         );
 
         let response = app
@@ -191,8 +201,9 @@ mod tests {
             })
         });
 
+        let state = AuthLayerState::from_provider(provider);
         let app = Router::new().route("/me", get(|| async { "unreachable" })).layer(
-            middleware::from_fn_with_state(AuthLayerState::from_provider(provider), authenticate),
+            middleware::from_fn_with_state(state, authenticate),
         );
 
         let response = app
