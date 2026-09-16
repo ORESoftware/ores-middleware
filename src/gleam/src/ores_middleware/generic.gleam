@@ -1,5 +1,3 @@
-import gleam/list
-
 /// A generic consumer-owned provider port.
 ///
 /// `input`, `output`, and `error` stay application-defined, so an auth SDK,
@@ -22,6 +20,18 @@ pub fn verify(
 ) -> Result(output, error) {
   let Provider(verify:) = provider
   verify(input)
+}
+
+/// Carries independently typed request and consumer context values without
+/// coupling the generic provider to HTTP, OTP, an auth SDK, or ORES context.
+pub type ContextualInput(request, context) {
+  ContextualInput(request: request, context: context)
+}
+
+pub fn contextual_provider(
+  verify: fn(request, context) -> Result(output, error),
+) -> Provider(ContextualInput(request, context), output, error) {
+  provider(fn(input) { verify(input.request, input.context) })
 }
 
 /// Generic request/response handler. The response type can itself represent an
@@ -59,6 +69,12 @@ pub fn wrap(
   wrap(next)
 }
 
+/// Consumer-owned metadata for middleware stages. ORES preserves the name but
+/// assigns it no semantics and never uses it to reorder the stack.
+pub type NamedMiddleware(request, response) {
+  NamedMiddleware(name: String, middleware: Middleware(request, response))
+}
+
 /// Compose middleware in consumer declaration order. The first middleware is
 /// outermost, so it runs first on the request path and last on the response
 /// path. ores_middleware deliberately does not decide which stages exist.
@@ -66,7 +82,19 @@ pub fn compose(
   handler: Handler(request, response),
   middleware: List(Middleware(request, response)),
 ) -> Handler(request, response) {
-  list.fold_right(middleware, handler, fn(next, stage) {
-    wrap(stage, next)
-  })
+  case middleware {
+    [] -> handler
+    [stage, ..rest] -> wrap(stage, compose(handler, rest))
+  }
+}
+
+pub fn compose_named(
+  handler: Handler(request, response),
+  stages: List(NamedMiddleware(request, response)),
+) -> Handler(request, response) {
+  case stages {
+    [] -> handler
+    [NamedMiddleware(middleware: stage, ..), ..rest] ->
+      wrap(stage, compose_named(handler, rest))
+  }
 }
