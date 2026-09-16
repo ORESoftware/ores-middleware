@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   composeContextualMiddleware,
   composeMiddleware,
+  composeNamedContextualMiddleware,
+  composeNamedMiddleware,
   contextualFallibleProviderFrom,
   contextualProviderFrom,
   fallibleProviderFrom,
@@ -116,4 +118,50 @@ test("contextual middleware preserves consumer-owned context shape and order", a
     "tenant:customer:after",
     "auth:customer:after"
   ]);
+});
+
+test("named middleware metadata is preserved but never interpreted or reordered", async () => {
+  const events = [];
+  const stage = (name) => ({
+    name,
+    middleware: (next) => async (request) => {
+      events.push(name);
+      return next(request);
+    }
+  });
+  const composed = composeNamedMiddleware(
+    async (request) => request,
+    [stage("custom-z"), stage("auth-provider-v42"), stage("custom-a")]
+  );
+
+  assert.equal(await composed("request"), "request");
+  assert.deepEqual(events, ["custom-z", "auth-provider-v42", "custom-a"]);
+});
+
+test("named contextual middleware preserves arbitrary consumer context and names", async () => {
+  const events = [];
+  const stage = (name) => ({
+    name,
+    middleware: (next) => async (request, context) => {
+      events.push(`${name}:${context.tenant}`);
+      return next(request, context);
+    }
+  });
+  const composed = composeNamedContextualMiddleware(
+    async (request, context) => `${context.tenant}:${request}`,
+    [stage("tenant-first"), stage("consumer-auth-v13")]
+  );
+
+  assert.equal(await composed("request", { tenant: "t-99" }), "t-99:request");
+  assert.deepEqual(events, ["tenant-first:t-99", "consumer-auth-v13:t-99"]);
+});
+
+test("empty generic middleware chains are identity transforms", async () => {
+  const handler = async (request) => ({ request, marker: "unchanged" });
+  const contextualHandler = async (request, context) => ({ request, context });
+
+  assert.strictEqual(composeMiddleware(handler), handler);
+  assert.strictEqual(composeNamedMiddleware(handler, []), handler);
+  assert.strictEqual(composeContextualMiddleware(contextualHandler), contextualHandler);
+  assert.strictEqual(composeNamedContextualMiddleware(contextualHandler, []), contextualHandler);
 });
