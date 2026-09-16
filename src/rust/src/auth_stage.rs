@@ -88,6 +88,21 @@ where
         }
     }
 
+    /// Evaluate this stage without crossing the object-safe `StagePipeline`
+    /// boundary.
+    ///
+    /// This async method retains the concrete provider and compiler-generated
+    /// future type. Direct consumers can use it when they want static dispatch;
+    /// the `MiddlewareStageHandler` implementation below boxes only when the
+    /// stage is actually registered in the heterogeneous runtime pipeline.
+    pub async fn evaluate(&self, input: StageInput) -> StageDecision {
+        let future = self.verifier.verify_owned(input.request.clone());
+        match future.await {
+            Ok(decision) => StageDecision::Continue(Box::new(self.apply_decision(input, &decision))),
+            Err(error) => reject_auth(self.name, error),
+        }
+    }
+
     fn apply_decision(&self, mut input: StageInput, decision: &AuthDecision) -> StageInput {
         input.context.user_id = decision.user_id.clone();
         input.context.tenant_id = decision.tenant_id.clone();
@@ -115,15 +130,7 @@ where
         &'a self,
         input: StageInput,
     ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
-        let future = self.verifier.verify_owned(input.request.clone());
-        Box::pin(async move {
-            match future.await {
-                Ok(decision) => {
-                    StageDecision::Continue(Box::new(self.apply_decision(input, &decision)))
-                }
-                Err(error) => reject_auth(self.name, error),
-            }
-        })
+        Box::pin(self.evaluate(input))
     }
 }
 
@@ -173,6 +180,26 @@ mod tests {
                 baggage: BTreeMap::new(),
             },
         )
+    }
+
+    #[tokio::test]
+    async fn direct_evaluate_keeps_stage_on_static_path() {
+        let provider = auth_provider_fn(|_request: RequestMetadata| async {
+            Ok(AuthDecision {
+                user_id: Some("static-user".into()),
+                tenant_id: Some("static-tenant".into()),
+                claims: BTreeMap::new(),
+            })
+        });
+        let auth = AuthStage::from_provider("static-auth", provider);
+
+        match auth.evaluate(input("token")).await {
+            StageDecision::Continue(input) => {
+                assert_eq!(input.context.user_id.as_deref(), Some("static-user"));
+                assert_eq!(input.context.tenant_id.as_deref(), Some("static-tenant"));
+            }
+            StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
+        }
     }
 
     #[tokio::test]
