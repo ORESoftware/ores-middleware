@@ -1,0 +1,220 @@
+name: release-zed
+
+on:
+  pull_request:
+    paths:
+      - '.zpkg.toml'
+      - '.zpkg.lock'
+      - '.github/workflows/release-zed.yml'
+      - 'scripts/run-zed-release-acceptance.sh'
+      - 'scripts/installed_package_smoke.py'
+      - 'scripts/build_targets.py'
+      - 'src/**'
+      - 'contracts/**'
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-zed-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify exact Zed release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Install checksum-verified Zed 0.3.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.3.0/zed-x86_64-unknown-linux-gnu.tar.gz'
+          readonly expected='f87576bc289e43ed647902527e7be70566445d2f1fd11249f067ab35547d4b8a'
+          mkdir -p "$RUNNER_TEMP/zed-dist"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/zed.tar.gz" "$url"
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/zed.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/zed.tar.gz" -C "$RUNNER_TEMP/zed-dist"
+          zed_bin="$(find "$RUNNER_TEMP/zed-dist" -type f -name zed -perm -u+x -print -quit)"
+          test -n "$zed_bin"
+          printf 'ZED_BIN=%s\n' "$zed_bin" >> "$GITHUB_ENV"
+          "$zed_bin" --version
+
+      - name: Verify manifest, lock, and tag identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          package = tomllib.loads(Path('.zpkg.toml').read_text())['package']
+          version = package['version']
+          assert package['org'] == 'oresoftware'
+          assert package['name'] == 'ores-middleware'
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
+          if os.environ.get('GITHUB_REF_TYPE') == 'tag':
+              expected = f'v{version}'
+              actual = os.environ.get('GITHUB_REF_NAME', '')
+              if actual != expected:
+                  raise SystemExit(f'tag/package mismatch: expected {expected!r}, got {actual!r}')
+          PY
+          test -s .zpkg.lock
+          "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
+            > "$RUNNER_TEMP/zed-release-validate.json"
+
+      - name: Verify locked direct dependency provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+          manifest = tomllib.loads(Path('.zpkg.toml').read_text())
+          lock = tomllib.loads(Path('.zpkg.lock').read_text())
+          packages = {f"{p.get('org')}/{p.get('name')}": p for p in lock.get('package', [])}
+          for name in sorted(manifest.get('dependencies', {})):
+              if name not in packages:
+                  raise SystemExit(f'missing locked direct dependency: {name}')
+              item = packages[name]
+              assert re.fullmatch(r'[0-9a-f]{64}', item.get('sha256', '')), name
+              assert re.fullmatch(r'[0-9a-f]{40}', item.get('vcs_commit', '')), name
+              assert item.get('vcs_tag'), name
+              assert item.get('source'), name
+          PY
+
+      - name: Plan and preflight release without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ZED_BIN" release plan --json > "$RUNNER_TEMP/zed-release-plan.json"
+          "$ZED_BIN" release preflight
+          test -s "$RUNNER_TEMP/zed-release-plan.json"
+
+      - name: Pack twice and verify deterministic release artifacts
+        shell: bash
+        env:
+          ZED_ACCEPTANCE_RECEIPT_DIR: ${{ runner.temp }}/zed-acceptance
+          ZED_ACCEPTANCE_SOURCE_COMMIT: ${{ github.sha }}
+        run: bash scripts/run-zed-release-acceptance.sh
+
+      - name: Upload verification receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: zed-release-verify-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/zed-release-validate.json
+            ${{ runner.temp }}/zed-release-plan.json
+            ${{ runner.temp }}/zed-acceptance/receipt.json
+            ${{ runner.temp }}/zed-acceptance/acceptance-scope.json
+            ${{ runner.temp }}/zed-acceptance/package-first-digests.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Publish and consume exact Zed release
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: zed-pkg
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install checksum-verified Zed 0.3.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.3.0/zed-x86_64-unknown-linux-gnu.tar.gz'
+          readonly expected='f87576bc289e43ed647902527e7be70566445d2f1fd11249f067ab35547d4b8a'
+          mkdir -p "$RUNNER_TEMP/zed-dist"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/zed.tar.gz" "$url"
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/zed.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/zed.tar.gz" -C "$RUNNER_TEMP/zed-dist"
+          zed_bin="$(find "$RUNNER_TEMP/zed-dist" -type f -name zed -perm -u+x -print -quit)"
+          test -n "$zed_bin"
+          printf 'ZED_BIN=%s\n' "$zed_bin" >> "$GITHUB_ENV"
+
+      - name: Publish reviewed tagged package
+        env:
+          ZED_PKG_TOKEN: ${{ secrets.ZED_PKG_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ZED_PKG_TOKEN"
+          version="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path('.zpkg.toml').read_text())['package']['version'])
+          PY
+          )"
+          test "$GITHUB_REF_NAME" = "v$version"
+          "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
+            > "$RUNNER_TEMP/zed-publish-validate.json"
+          "$ZED_BIN" release plan
+          "$ZED_BIN" release preflight
+          "$ZED_BIN" pack --out "$RUNNER_TEMP/zed-publish-pack"
+          "$ZED_BIN" publish
+
+      - name: Verify registry dependency closure from a clean consumer
+        env:
+          ZED_PKG_TOKEN: ${{ secrets.ZED_PKG_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ZED_PKG_TOKEN"
+          version="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path('.zpkg.toml').read_text())['package']['version'])
+          PY
+          )"
+          consumer="$RUNNER_TEMP/zed-clean-consumer"
+          rm -rf "$consumer"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          "$ZED_BIN" install "oresoftware/ores-middleware@$version" --install-mode copy
+          installed="$consumer/.vendor/.zed/oresoftware/ores-middleware"
+          test -f "$installed/.zpkg.toml"
+          test -f "$installed/target/package/scripts/installed_package_smoke.py"
+          python3 "$installed/target/package/scripts/installed_package_smoke.py" --root "$installed"
+          "$ZED_BIN" install --frozen --install-mode copy
+
+      - name: Upload publication evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: zed-release-publish-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/zed-publish-validate.json
+            ${{ runner.temp }}/zed-publish-pack/*.tar.gz
+            ${{ runner.temp }}/zed-clean-consumer/.zpkg.lock
+          if-no-files-found: warn
+          retention-days: 90
