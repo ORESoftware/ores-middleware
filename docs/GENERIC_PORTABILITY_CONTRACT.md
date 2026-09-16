@@ -14,20 +14,36 @@ Rust, TypeScript, Go, and Gleam may use different language mechanisms, but the s
 8. **Identity chains are valid.** Empty middleware lists preserve the handler unchanged/semantically unchanged.
 9. **Duplicate stages are valid unless the consumer rejects them.** Generic composition does not silently deduplicate repeated middleware names or implementations.
 10. **Adapters remain optional.** HTTP/framework adapters may translate into the generic contract, but the contract itself must remain usable for HTTP, TCP, RPC, queues, tests, or application-specific request types.
+11. **JavaScript runtime neutrality.** The TypeScript generic core must not import Node-only modules or branch on Node, Bun, or Deno globals. Runtime-specific adaptation belongs outside `generic.ts`.
+12. **Ambient context parity is executable.** The TypeScript request-context carrier must preserve nested restoration, captured-context re-entry, async continuation, and concurrent-request isolation on every declared JavaScript runtime.
 
 ## Language mapping
 
 | Semantic concept | Rust | TypeScript | Go | Gleam |
 | --- | --- | --- | --- | --- |
-| Consumer provider | `AuthProvider` / closure adapter / typed verifier | `Provider<Input, Output>` | `Provider[Input, Output]` | `Provider(input, output, error)` |
+| Consumer provider | `StaticAuthVerifier` / closure adapter / explicit `dyn` bridge | `Provider<Input, Output>` | `Provider[Input, Output]` | `Provider(input, output, error)` |
 | Contextual provider | typed request/provider state | `ContextualInput<Request, Context>` | `ContextualInput[Request, Metadata]` | `ContextualInput(request, context)` |
-| Generic handler | stage/handler traits and typed closures | `Handler<Request, Response>` | `GenericHandler[Request, Response]` | `Handler(request, response)` |
+| Generic handler | typed stage/handler closures | `Handler<Request, Response>` | `GenericHandler[Request, Response]` | `Handler(request, response)` |
 | Generic middleware | stage/layer abstractions | `Middleware<Request, Response>` | `GenericMiddleware[Request, Response]` | `Middleware(request, response)` |
-| Named middleware | consumer order policy / stage metadata | `NamedMiddleware<Request, Response>` | `NamedGenericMiddleware[Request, Response]` | `NamedMiddleware(request, response)` |
+| Named middleware | `MiddlewareCompositionPlan` / consumer policy | `NamedMiddleware<Request, Response>` | `NamedGenericMiddleware[Request, Response]` | `NamedMiddleware(request, response)` |
 | Composition | insertion/declaration order | `composeMiddleware` | `ComposeGeneric` | `compose` |
-| Named composition | consumer-authored rules | `composeNamedMiddleware` | `ComposeNamedGeneric` | `compose_named` |
+| Named composition | `validate_consumer_middleware_order` | `composeNamedMiddleware` | `ComposeNamedGeneric` | `compose_named` |
 
 The names above are intentionally idiomatic rather than mechanically identical. Semantic parity is required; syntax parity is not.
+
+## JavaScript runtime matrix
+
+The TypeScript implementation is one language surface executed on three independently tested runtimes:
+
+| Runtime | Minimum tested version | Required evidence |
+| --- | --- | --- |
+| Node.js | 22.23.1 | package build/tests, generic/provider semantics, `AsyncLocalStorage` context semantics, Fetch adapter smoke |
+| Bun | 1.4.2 | generic/provider semantics, `AsyncLocalStorage` context semantics, native `Bun.serve` loopback Fetch admission |
+| Deno | 2.9.6 | generic/provider semantics, Node-compat `AsyncLocalStorage` context semantics, native `Deno.serve` loopback Fetch admission |
+
+`package.json` and `src/ts/package.json` carry identical `oresRuntimeSupport` metadata. That metadata is descriptive; CI execution is the evidence. A runtime is not considered supported merely because it can parse the package or because another JavaScript runtime passed.
+
+The root package export map and the publishable `src/ts` export map must also remain semantically identical. `scripts/check-ts-package-exports.mjs` enforces the mapping so a subpath such as `./generic`, `./context`, or `./adapters` cannot silently exist in only one package boundary.
 
 ## Provider version injection
 
@@ -47,6 +63,12 @@ They must not reorder the consumer's middleware chain or force unrelated provide
 
 ## CI enforcement
 
-`scripts/check-generic-portability.mjs` statically checks the TypeScript, Go, and Gleam generic modules for the required concepts and rejects common concrete provider SDK names in those modules. Runtime language tests separately verify order, context, failure propagation, empty chains, and duplicate-name behavior.
+`scripts/check-generic-portability.mjs` checks Rust, TypeScript, Go, and Gleam for the required generic concepts and rejects common concrete provider SDK names from those cores. It additionally rejects Node/Bun/Deno-specific bindings from the TypeScript generic core.
+
+`.github/workflows/generic-portability.yml` executes focused native conformance in all four generic-core languages rather than treating source-shape checks as sufficient evidence. The broader reproducibility workflows continue to run their full language suites on their supported operating-system matrices.
+
+`.github/workflows/js-runtime-portability.yml` installs exact Node, Bun, and Deno versions, builds the exact TypeScript package, executes the same generic/provider/context smoke suite under all three runtimes, compares normalized witnesses to the Node baseline, and emits a source-bound receipt. The separate native Fetch adapter matrix exercises actual Bun and Deno loopback servers, request-contract rejection paths, context isolation, and concurrent requests.
+
+The repository-wide `contract-conformance` and generated-runtime gates continue to cover Rust, TypeScript, Go, Gleam, Elixir, and Erlang descriptors/data contracts. Generic provider injection is currently a four-language contract; Elixir and Erlang remain part of the wider middleware conformance surface without pretending they expose this exact generic API.
 
 Independent `*-test` consumer repositories pin immutable `ores-middleware` commits and consume the public language/package boundary so packaging/module regressions are caught outside this repository.
