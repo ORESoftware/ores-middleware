@@ -199,6 +199,9 @@ mod tests {
                 assert_eq!(input.context.tenant_id.as_deref(), Some("static-tenant"));
             }
             StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
+            StageDecision::Respond(response) => {
+                panic!("unexpected direct response: {}", response.status)
+            }
         }
     }
 
