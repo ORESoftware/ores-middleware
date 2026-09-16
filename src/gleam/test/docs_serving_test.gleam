@@ -12,7 +12,7 @@ pub fn main() {
 
 pub fn shared_conformance_fixture_test() {
   let rows = fixture_rows()
-  assert list.length(rows) > 0
+  assert rows != []
 
   list.each(rows, fn(row) {
     let #(
