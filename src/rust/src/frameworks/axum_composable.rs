@@ -9,13 +9,14 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::{RequestMetadata, StaticAuthVerifier, TransportSecurity};
+use crate::{AuthVerifier, RequestMetadata, TransportSecurity};
 
 /// State for the standalone Axum authentication primitive.
 ///
-/// The concrete provider type is retained inside `Arc<P>` rather than erased to
-/// `Arc<dyn AuthVerifier>`. `Arc` is used for cheap state cloning; dispatch is
-/// still static and the provider future remains compiler-generated/concrete.
+/// `P` is a concrete implementation of the same object-safe [`AuthVerifier`]
+/// contract used by the bundled middleware stack. The `Arc` exists for cheap
+/// state cloning; consumers can still choose an `Arc<dyn AuthVerifier>` as `P`
+/// when runtime provider selection is useful.
 pub struct AuthLayerState<P> {
     verifier: Arc<P>,
 }
@@ -30,7 +31,7 @@ impl<P> Clone for AuthLayerState<P> {
 
 impl<P> AuthLayerState<P>
 where
-    P: StaticAuthVerifier,
+    P: AuthVerifier,
 {
     #[must_use]
     pub fn from_provider(provider: P) -> Self {
@@ -50,27 +51,23 @@ where
     }
 }
 
-/// Standalone Axum authentication middleware with static provider dispatch.
+/// Standalone Axum authentication middleware.
 ///
 /// Compose this directly with `middleware::from_fn_with_state` at the exact
 /// route/router boundary and ordering selected by the consuming service. Keeping
 /// Axum's concrete `FromFnLayer` in the consumer expression preserves all of its
-/// `Service<Request>` bounds; wrapping it behind an opaque `impl Layer` would
-/// erase associated-service information that `Router::layer` needs for type
-/// checking.
-///
-/// The layer can also be placed inside a consumer-owned `tower::ServiceBuilder`.
-/// No boxed service or ORES-owned `dyn Service` boundary is required.
+/// `Service<Request>` bounds; there is no need for an additional boxed Tower
+/// service solely to package this middleware.
 pub async fn authenticate<P>(
     State(state): State<AuthLayerState<P>>,
     mut request: Request,
     next: Next,
 ) -> Response
 where
-    P: StaticAuthVerifier + 'static,
+    P: AuthVerifier + 'static,
 {
     let metadata = request_metadata(&request);
-    match state.verifier.verify_owned(metadata.clone()).await {
+    match state.verifier.verify(&metadata).await {
         Ok(decision) => {
             request.extensions_mut().insert(decision);
             next.run(request).await
