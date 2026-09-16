@@ -24,9 +24,7 @@ pub struct MiddlewareOrderingRule {
     pub message: String,
     #[serde(default)]
     pub severity: OrderIssueSeverity,
-    /// When false, the rule is evaluated only when both named stages are present.
-    /// This lets one policy describe optional middleware without implicitly
-    /// requiring it. Presence is controlled independently by `required`.
+    /// When false, evaluate this rule only when both named stages are present.
     #[serde(default)]
     pub require_both: bool,
 }
@@ -64,9 +62,8 @@ impl MiddlewareOrderingRule {
 
 /// Consumer-owned middleware composition policy.
 ///
-/// Empty/default policy accepts every selection and order. Nothing in this type
-/// imports the repository's reviewed reference profile: a service opts into only
-/// the rules that are meaningful for that service/route.
+/// Empty/default policy accepts every selection and order. A service opts into
+/// only the rules meaningful for that service or route.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MiddlewareOrderPolicy {
@@ -75,8 +72,7 @@ pub struct MiddlewareOrderPolicy {
     #[serde(default)]
     pub forbidden: Vec<String>,
     /// Only stages named here are required to be unique. Other stage names may
-    /// intentionally occur multiple times (for example two independent auth
-    /// providers or two observation layers).
+    /// intentionally occur multiple times.
     #[serde(default)]
     pub unique: Vec<String>,
     #[serde(default)]
@@ -124,11 +120,6 @@ impl MiddlewareOrderPolicy {
 
 /// Serializable declaration of the exact middleware sequence selected by a
 /// consumer plus the consumer's own validation policy.
-///
-/// This value is intentionally independent of `MiddlewareConfig`: end projects
-/// or ORES CLIs can embed it under a `.ores-mw.toml` composition/profile section
-/// without forcing every cross-language runtime to adopt a new root config field
-/// before the contract authorities and adapters are ready together.
 #[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MiddlewareCompositionPlan {
@@ -168,15 +159,13 @@ pub struct MiddlewareOrderIssue {
     pub stage: Option<String>,
 }
 
-/// Validate a concrete middleware plan against policy supplied by the consuming
-/// service. Stage names are intentionally open strings so custom/org-specific
-/// middleware can participate without changes to `ores-middleware`.
+/// Validate a concrete middleware sequence against policy supplied by the
+/// consuming service.
 ///
 /// The default policy imposes no selection, order, uniqueness, or first-stage
 /// requirement. When duplicate stage names are allowed, a `before -> after`
-/// rule requires the *last* `before` occurrence to precede the *first* `after`
-/// occurrence, preventing an interleaved duplicate from silently satisfying the
-/// relationship.
+/// rule requires the last `before` occurrence to precede the first `after`
+/// occurrence so interleaving cannot silently satisfy the rule.
 pub fn validate_consumer_middleware_order<S>(
     stages: &[S],
     policy: &MiddlewareOrderPolicy,
@@ -189,13 +178,13 @@ where
         .map(|stage| stage.as_ref().to_owned())
         .collect::<Vec<_>>();
     let present = names.iter().cloned().collect::<HashSet<_>>();
-    let positions = names
-        .iter()
-        .enumerate()
-        .fold(HashMap::<String, Vec<usize>>::new(), |mut map, (index, name)| {
+    let positions = names.iter().enumerate().fold(
+        HashMap::<String, Vec<usize>>::new(),
+        |mut map, (index, name)| {
             map.entry(name.clone()).or_default().push(index);
             map
-        });
+        },
+    );
 
     let required = policy.required.iter().filter_map(|stage| {
         (!present.contains(stage)).then_some(MiddlewareOrderIssue {
@@ -271,14 +260,9 @@ where
         .collect()
 }
 
-/// Validate the declaration itself before a runtime pipeline is built.
-///
-/// Blank stage/rule identifiers are always malformed declaration data. All
-/// semantic ordering/presence constraints otherwise come from the consumer's
-/// policy.
-pub fn validate_declared_middleware_plan(
-    plan: &MiddlewareCompositionPlan,
-) -> Vec<MiddlewareOrderIssue> {
+/// Validate only the shape of a declaration, independently of the stage order
+/// against which its consumer-authored policy is evaluated.
+fn validate_plan_shape(plan: &MiddlewareCompositionPlan) -> Vec<MiddlewareOrderIssue> {
     let blank_stages = plan.stages.iter().filter_map(|stage| {
         stage.trim().is_empty().then_some(MiddlewareOrderIssue {
             code: "blank-stage-name".into(),
@@ -302,8 +286,15 @@ pub fn validate_declared_middleware_plan(
         })
     });
 
-    blank_stages
-        .chain(malformed_rules)
+    blank_stages.chain(malformed_rules).collect()
+}
+
+/// Validate the declaration itself before a runtime pipeline is built.
+pub fn validate_declared_middleware_plan(
+    plan: &MiddlewareCompositionPlan,
+) -> Vec<MiddlewareOrderIssue> {
+    validate_plan_shape(plan)
+        .into_iter()
         .chain(validate_consumer_middleware_order(
             &plan.stages,
             &plan.policy,
@@ -312,11 +303,11 @@ pub fn validate_declared_middleware_plan(
 }
 
 /// Verify that the stages actually installed by a runtime match the consumer's
-/// declared plan exactly, then apply the consumer-authored policy.
+/// declared plan exactly, and apply the policy to the *live* runtime sequence.
 ///
-/// This is useful for `.ores-mw.toml`/CLI admission: configuration can be
-/// reviewed independently, while startup or tests prove the live composition did
-/// not drift from it. No legacy/default stage sequence is consulted.
+/// It is important that policy evaluation uses `actual_stages`, not the declared
+/// sequence: a drifted runtime must report both the exact-plan mismatch and any
+/// security/semantic ordering constraint it violates.
 pub fn validate_runtime_middleware_plan<S>(
     actual_stages: &[S],
     plan: &MiddlewareCompositionPlan,
@@ -339,8 +330,12 @@ where
         stage: None,
     });
 
-    validate_declared_middleware_plan(plan)
+    validate_plan_shape(plan)
         .into_iter()
+        .chain(validate_consumer_middleware_order(
+            actual_stages,
+            &plan.policy,
+        ))
         .chain(drift)
         .collect()
 }
@@ -453,7 +448,7 @@ mod tests {
         assert!(
             validate_runtime_middleware_plan(
                 &["custom-auth", "custom-limit", "handler"],
-                &plan
+                &plan,
             )
             .is_empty()
         );
@@ -465,10 +460,34 @@ mod tests {
                 .iter()
                 .any(|issue| issue.code == "runtime-stage-plan-mismatch")
         );
-        assert!(
+        assert!(issues.iter().any(|issue| issue.code == "auth-before-limit"));
+    }
+
+    #[test]
+    fn runtime_plan_applies_presence_rules_to_live_stages() {
+        let plan = MiddlewareCompositionPlan::new()
+            .stage("auth")
+            .stage("handler")
+            .with_policy(MiddlewareOrderPolicy::new().require("auth"));
+
+        let issues = validate_runtime_middleware_plan(&["handler"], &plan);
+        assert!(issues.iter().any(|issue| issue.code == "runtime-stage-plan-mismatch"));
+        assert!(issues.iter().any(|issue| issue.code == "required-stage-missing"));
+    }
+
+    #[test]
+    fn runtime_validation_does_not_duplicate_declared_policy_issues() {
+        let plan = MiddlewareCompositionPlan::new()
+            .stage("handler")
+            .with_policy(MiddlewareOrderPolicy::new().require("auth"));
+
+        let issues = validate_runtime_middleware_plan(&["handler"], &plan);
+        assert_eq!(
             issues
                 .iter()
-                .any(|issue| issue.code == "auth-before-limit")
+                .filter(|issue| issue.code == "required-stage-missing")
+                .count(),
+            1
         );
     }
 
