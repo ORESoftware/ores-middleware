@@ -8,7 +8,7 @@ repository = "https://github.com/ORESoftware/ores-middleware"
 
 [features]
 default = ["axum", "compression"]
-axum = ["dep:axum", "dep:tower"]
+axum = ["dep:axum"]
 compression = ["axum", "dep:tower-http"]
 mash = ["axum"]
 leptos = ["axum"]
@@ -27,7 +27,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-tower = { version = "0.5", optional = true }
 tower-http = { version = "0.6", features = ["compression-full"], optional = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["serde", "v4"] }
