@@ -35,8 +35,11 @@ def main() -> int:
             )
 
     source_tag = (ROOT / ".github" / "workflows" / "zed-source-tag.yml").read_text()
-    if re.search(r"^\s+contents:\s+write\s*$", source_tag, flags=re.MULTILINE):
-        raise SystemExit("zed-source-tag policy must not own content/tag mutation")
+    for forbidden in ("git/ref/tags", "refs/tags/", "Create or verify immutable source tag"):
+        if forbidden in source_tag:
+            raise SystemExit(
+                "zed-source-tag policy may resolve lock metadata but must never create or rewrite release tags"
+            )
 
     release = (ROOT / ".github" / "workflows" / "release-zed.yml").read_text()
     for required in ("Create immutable package tag", "Publish and consume exact Zed release"):
