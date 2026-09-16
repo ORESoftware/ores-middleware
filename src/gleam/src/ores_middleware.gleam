@@ -93,6 +93,8 @@ pub type AuthDecision {
 pub type Hooks {
   Hooks(
     authenticate: fn(Request, RequestContext) -> Result(AuthDecision, String),
+    auth_baggage_enricher: fn(Request, RequestContext, AuthDecision) ->
+      Dict(String, String),
     resolve_test_identity: fn(Request, RequestContext) ->
       Result(AuthDecision, String),
     authorize_ip: fn(Request, RequestContext) -> Bool,
@@ -188,6 +190,7 @@ pub fn default_config(service_name: String) -> Config {
 pub fn default_hooks() -> Hooks {
   Hooks(
     authenticate: fn(_, _) { Ok(AuthDecision("", "", dict.new())) },
+    auth_baggage_enricher: fn(_, _, _) { dict.new() },
     resolve_test_identity: fn(_, _) {
       Error("test identity resolver is not configured")
     },
@@ -419,12 +422,13 @@ fn authenticate(
   case decision {
     Error(_) -> problem(401, "authentication_failed", "authentication failed")
     Ok(auth) -> {
+      let baggage = hooks.auth_baggage_enricher(request, context, auth)
       let context =
         RequestContext(
           ..context,
           user_id: auth.user_id,
           tenant_id: auth.tenant_id,
-          baggage: context.baggage,
+          baggage: baggage,
         )
       case config.shared_auth_mode != Disabled && context.user_id == "" {
         True ->
