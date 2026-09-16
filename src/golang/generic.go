@@ -1,13 +1,11 @@
 package oresmiddleware
 
-import (
-	"context"
-	"net/http"
-)
+import "context"
 
-// Provider is the implementation-agnostic verification port used by consumers.
-// Input and output are deliberately generic so applications can keep concrete
-// SDK request/response types and versions outside ores-middleware.
+// Provider is the implementation-, transport-, framework-, and SDK-agnostic
+// verification port used by Go consumers. Input and output are deliberately
+// generic so applications can keep concrete SDK request/response types and
+// versions outside ores-middleware.
 type Provider[Input any, Output any] interface {
 	Verify(context.Context, Input) (Output, error)
 }
@@ -20,12 +18,63 @@ func (fn ProviderFunc[Input, Output]) Verify(ctx context.Context, input Input) (
 	return fn(ctx, input)
 }
 
-// GenericHandler is a framework-neutral request/response handler.
+// ProviderFrom makes the consumer-owned provider boundary explicit while
+// preserving concrete input/output types.
+func ProviderFrom[Input any, Output any](
+	verify func(context.Context, Input) (Output, error),
+) Provider[Input, Output] {
+	if verify == nil {
+		panic("oresmiddleware.ProviderFrom: verify must not be nil")
+	}
+	return ProviderFunc[Input, Output](verify)
+}
+
+// ContextualInput carries a request and independently typed consumer metadata.
+// It intentionally knows nothing about net/http, Gin, Echo, Fiber, TCP, NATS,
+// auth SDKs, or ORES RequestContext.
+type ContextualInput[Request any, Metadata any] struct {
+	Request  Request
+	Metadata Metadata
+}
+
+// ContextualProviderFunc adapts a request+metadata function to the generic
+// Provider port without erasing either concrete type.
+type ContextualProviderFunc[Request any, Metadata any, Output any] func(
+	context.Context,
+	Request,
+	Metadata,
+) (Output, error)
+
+func (fn ContextualProviderFunc[Request, Metadata, Output]) Verify(
+	ctx context.Context,
+	input ContextualInput[Request, Metadata],
+) (Output, error) {
+	return fn(ctx, input.Request, input.Metadata)
+}
+
+func ContextualProviderFrom[Request any, Metadata any, Output any](
+	verify func(context.Context, Request, Metadata) (Output, error),
+) Provider[ContextualInput[Request, Metadata], Output] {
+	if verify == nil {
+		panic("oresmiddleware.ContextualProviderFrom: verify must not be nil")
+	}
+	return ContextualProviderFunc[Request, Metadata, Output](verify)
+}
+
+// GenericHandler is a framework-neutral request/response handler. Error policy
+// remains consumer-owned and uses ordinary Go errors.
 type GenericHandler[Request any, Response any] func(context.Context, Request) (Response, error)
 
 // GenericMiddleware transforms a generic handler. Consumers choose every stage
 // and the exact declaration order; no ORES-specific ordering is imposed here.
 type GenericMiddleware[Request any, Response any] func(GenericHandler[Request, Response]) GenericHandler[Request, Response]
+
+// NamedGenericMiddleware carries consumer-owned metadata without assigning any
+// semantics to names or reordering stages.
+type NamedGenericMiddleware[Request any, Response any] struct {
+	Name       string
+	Middleware GenericMiddleware[Request, Response]
+}
 
 // ComposeGeneric preserves declaration order: the first middleware is outermost
 // and therefore runs first on the request path and last on the response path.
@@ -36,48 +85,27 @@ func ComposeGeneric[Request any, Response any](
 	if handler == nil {
 		panic("oresmiddleware.ComposeGeneric: handler must not be nil")
 	}
-	return composeGeneric(handler, middleware)
+	for i := len(middleware) - 1; i >= 0; i-- {
+		if middleware[i] == nil {
+			panic("oresmiddleware.ComposeGeneric: middleware must not be nil")
+		}
+		handler = middleware[i](handler)
+		if handler == nil {
+			panic("oresmiddleware.ComposeGeneric: middleware returned nil handler")
+		}
+	}
+	return handler
 }
 
-func composeGeneric[Request any, Response any](
+// ComposeNamedGeneric preserves the consumer-declared order and metadata but
+// deliberately does not interpret stage names.
+func ComposeNamedGeneric[Request any, Response any](
 	handler GenericHandler[Request, Response],
-	middleware []GenericMiddleware[Request, Response],
+	stages ...NamedGenericMiddleware[Request, Response],
 ) GenericHandler[Request, Response] {
-	if len(middleware) == 0 {
-		return handler
+	middleware := make([]GenericMiddleware[Request, Response], 0, len(stages))
+	for _, stage := range stages {
+		middleware = append(middleware, stage.Middleware)
 	}
-	stage := middleware[0]
-	if stage == nil {
-		panic("oresmiddleware.ComposeGeneric: middleware must not be nil")
-	}
-	return stage(composeGeneric(handler, middleware[1:]))
-}
-
-// AuthProviderInput is the narrow bridge from the existing net/http auth port
-// to the generic provider contract. Provider implementations remain entirely
-// consumer-owned.
-type AuthProviderInput struct {
-	Request *http.Request
-	Context RequestContext
-}
-
-type authProviderAdapter[P Provider[AuthProviderInput, AuthDecision]] struct {
-	provider P
-}
-
-func (adapter authProviderAdapter[P]) Verify(
-	ctx context.Context,
-	request *http.Request,
-	requestContext RequestContext,
-) (AuthDecision, error) {
-	return adapter.provider.Verify(ctx, AuthProviderInput{
-		Request: request,
-		Context: requestContext,
-	})
-}
-
-// AuthVerifierFromProvider adapts any generic provider to the legacy/convenience
-// AuthVerifier surface without type-erasing or importing its concrete SDK.
-func AuthVerifierFromProvider[P Provider[AuthProviderInput, AuthDecision]](provider P) AuthVerifier {
-	return authProviderAdapter[P]{provider: provider}
+	return ComposeGeneric(handler, middleware...)
 }
