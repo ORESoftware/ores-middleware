@@ -135,8 +135,15 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 			return
 		}
 		value.UserID, value.TenantID = decision.UserID, decision.TenantID
-		for key, item := range decision.Claims {
-			if strings.HasPrefix(key, "otel.") {
+		// Provider claims remain provider data. Ambient baggage is enriched only
+		// through the explicit consumer-owned boundary below.
+		if s.deps.AuthBaggageEnricher != nil {
+			enriched, err := s.deps.AuthBaggageEnricher.Enrich(ctx, request, value, decision)
+			if err != nil {
+				writeProblem(writer, 500, "authentication_context_failed", "authentication context enrichment failed")
+				return
+			}
+			for key, item := range enriched {
 				value.Baggage[key] = item
 			}
 		}
