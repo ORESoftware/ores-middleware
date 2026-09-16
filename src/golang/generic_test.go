@@ -12,7 +12,7 @@ func TestGenericProviderKeepsConcreteSDKConsumerOwned(t *testing.T) {
 		version string
 		prefix  string
 	}
-	
+
 	sdk := consumerSDK{version: "v7", prefix: "sdk-v7:"}
 	provider := ProviderFunc[AuthProviderInput, AuthDecision](func(_ context.Context, input AuthProviderInput) (AuthDecision, error) {
 		if sdk.version != "v7" {
@@ -24,7 +24,7 @@ func TestGenericProviderKeepsConcreteSDKConsumerOwned(t *testing.T) {
 		}
 		return AuthDecision{UserID: token[len(sdk.prefix):]}, nil
 	})
-	
+
 	verifier := AuthVerifierFromProvider(provider)
 	request := httptest.NewRequest("GET", "https://example.test/me", nil)
 	request.Header.Set("authorization", "sdk-v7:alice")
@@ -34,6 +34,34 @@ func TestGenericProviderKeepsConcreteSDKConsumerOwned(t *testing.T) {
 	}
 	if decision.UserID != "alice" {
 		t.Fatalf("expected alice, got %q", decision.UserID)
+	}
+}
+
+func TestContextualProviderIsTransportAndSDKAgnostic(t *testing.T) {
+	type request struct{ Token string }
+	type metadata struct{ Tenant string }
+	type decision struct {
+		Subject string
+		Tenant  string
+	}
+
+	provider := ContextualProviderFrom(func(
+		_ context.Context,
+		req request,
+		meta metadata,
+	) (decision, error) {
+		return decision{Subject: req.Token, Tenant: meta.Tenant}, nil
+	})
+
+	got, err := provider.Verify(context.Background(), ContextualInput[request, metadata]{
+		Request:  request{Token: "alice"},
+		Metadata: metadata{Tenant: "t-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Subject != "alice" || got.Tenant != "t-1" {
+		t.Fatalf("unexpected decision: %#v", got)
 	}
 }
 
@@ -53,7 +81,7 @@ func TestComposeGenericPreservesConsumerOwnedOrdering(t *testing.T) {
 		events = append(events, "handler")
 		return request + ":ok", nil
 	})
-	
+
 	composed := ComposeGeneric(
 		handler,
 		stage("request-id"),
@@ -79,4 +107,63 @@ func TestComposeGenericPreservesConsumerOwnedOrdering(t *testing.T) {
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("order mismatch\n got: %#v\nwant: %#v", events, want)
 	}
+}
+
+func TestComposeNamedGenericDoesNotInterpretConsumerStageNames(t *testing.T) {
+	events := []string{}
+	stage := func(name string) NamedGenericMiddleware[string, string] {
+		return NamedGenericMiddleware[string, string]{
+			Name: name,
+			Middleware: func(next GenericHandler[string, string]) GenericHandler[string, string] {
+				return func(ctx context.Context, request string) (string, error) {
+					events = append(events, name)
+					return next(ctx, request)
+				}
+			},
+		}
+	}
+	handler := GenericHandler[string, string](func(_ context.Context, request string) (string, error) {
+		return request, nil
+	})
+
+	composed := ComposeNamedGeneric(
+		handler,
+		stage("custom-z"),
+		stage("auth-provider-v42"),
+		stage("custom-a"),
+	)
+	if _, err := composed(context.Background(), "request"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"custom-z", "auth-provider-v42", "custom-a"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("stage names/order were interpreted: got %#v want %#v", events, want)
+	}
+}
+
+func TestComposeGenericRejectsNilMiddlewareAndNilResults(t *testing.T) {
+	handler := GenericHandler[string, string](func(_ context.Context, request string) (string, error) {
+		return request, nil
+	})
+
+	assertPanics := func(name string, fn func()) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			fn()
+		})
+	}
+
+	assertPanics("nil middleware", func() {
+		ComposeGeneric(handler, nil)
+	})
+	assertPanics("nil returned handler", func() {
+		ComposeGeneric(handler, func(GenericHandler[string, string]) GenericHandler[string, string] {
+			return nil
+		})
+	})
 }
