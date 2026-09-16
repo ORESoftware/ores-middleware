@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 /// Severity for a consumer-authored middleware composition rule.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OrderIssueSeverity {
+    #[default]
     Error,
     Advisory,
 }
@@ -21,10 +22,12 @@ pub struct MiddlewareOrderingRule {
     pub after: String,
     pub code: String,
     pub message: String,
+    #[serde(default)]
     pub severity: OrderIssueSeverity,
     /// When false, the rule is evaluated only when both named stages are present.
     /// This lets one policy describe optional middleware without implicitly
     /// requiring it. Presence is controlled independently by `required`.
+    #[serde(default)]
     pub require_both: bool,
 }
 
@@ -133,7 +136,10 @@ pub struct MiddlewareOrderIssue {
 /// middleware can participate without changes to `ores-middleware`.
 ///
 /// The default policy imposes no selection, order, uniqueness, or first-stage
-/// requirement.
+/// requirement. When duplicate stage names are allowed, a `before -> after`
+/// rule requires the *last* `before` occurrence to precede the *first* `after`
+/// occurrence, preventing an interleaved duplicate from silently satisfying the
+/// relationship.
 pub fn validate_consumer_middleware_order<S>(
     stages: &[S],
     policy: &MiddlewareOrderPolicy,
@@ -194,8 +200,14 @@ where
     });
 
     let order = policy.rules.iter().filter_map(|rule| {
-        let before = positions.get(&rule.before).and_then(|value| value.first()).copied();
-        let after = positions.get(&rule.after).and_then(|value| value.first()).copied();
+        let before = positions
+            .get(&rule.before)
+            .and_then(|value| value.last())
+            .copied();
+        let after = positions
+            .get(&rule.after)
+            .and_then(|value| value.first())
+            .copied();
         match (before, after) {
             (Some(left), Some(right)) if left < right => None,
             (Some(_), Some(_)) => Some(MiddlewareOrderIssue {
@@ -258,6 +270,26 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_stage_cannot_interleave_across_an_ordering_boundary() {
+        let policy = MiddlewareOrderPolicy::new().rule(MiddlewareOrderingRule::before(
+            "auth",
+            "rate-limit",
+            "auth-before-limit",
+            "every auth layer must execute before the limiting boundary",
+        ));
+
+        let valid = ["auth", "auth", "rate-limit", "handler"];
+        assert!(validate_consumer_middleware_order(&valid, &policy).is_empty());
+
+        let interleaved = ["auth", "rate-limit", "auth", "handler"];
+        assert!(
+            validate_consumer_middleware_order(&interleaved, &policy)
+                .iter()
+                .any(|issue| issue.code == "auth-before-limit")
+        );
+    }
+
+    #[test]
     fn optional_order_rule_does_not_require_optional_stage() {
         let policy = MiddlewareOrderPolicy::new().rule(MiddlewareOrderingRule::before(
             "request-id",
@@ -280,5 +312,15 @@ mod tests {
         assert!(issues.iter().any(|issue| issue.code == "required-stage-missing"));
         assert!(issues.iter().any(|issue| issue.code == "forbidden-stage-present"));
         assert!(issues.iter().any(|issue| issue.code == "consumer-first-stage-mismatch"));
+    }
+
+    #[test]
+    fn serialized_rules_default_to_error_and_optional_presence() {
+        let rule: MiddlewareOrderingRule = serde_json::from_str(
+            r#"{"before":"auth","after":"handler","code":"auth-first","message":"auth before handler"}"#,
+        )
+        .expect("rule without optional fields");
+        assert_eq!(rule.severity, OrderIssueSeverity::Error);
+        assert!(!rule.require_both);
     }
 }
