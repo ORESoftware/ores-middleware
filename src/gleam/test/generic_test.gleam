@@ -71,7 +71,9 @@ pub fn named_middleware_names_are_not_interpreted_test() {
     generic.NamedMiddleware(
       name: name,
       middleware: generic.middleware(fn(next) {
-        generic.handler(fn(request) { name <> ">" <> generic.run(next, request) })
+        generic.handler(fn(request) {
+          name <> ">" <> generic.run(next, request)
+        })
       }),
     )
   }
@@ -116,13 +118,19 @@ pub fn duplicate_named_stages_are_preserved_without_deduplication_test() {
     generic.NamedMiddleware(
       name: name,
       middleware: generic.middleware(fn(next) {
-        generic.handler(fn(request) { name <> ">" <> generic.run(next, request) })
+        generic.handler(fn(request) {
+          name <> ">" <> generic.run(next, request)
+        })
       }),
     )
   }
   let base = generic.handler(fn(request) { request })
   let composed =
-    generic.compose_named(base, [stage("auth"), stage("auth"), stage("audit")])
+    generic.compose_named(base, [
+      stage("auth"),
+      stage("auth"),
+      stage("audit"),
+    ])
 
   assert generic.run(composed, "request") == "auth>auth>audit>request"
 }
