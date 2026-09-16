@@ -10,9 +10,13 @@
 
 `ores-middleware` owns the narrow provider ports, closure adapters, framework adapters, validation helpers, and middleware primitives.
 
-## Why this boundary exists
+## Static dispatch is the primary path
 
-If `ores-middleware` directly depended on one auth SDK/version, every consumer would inherit that version choice and upgrades would become coupled to the middleware crate. Instead, consumers inject a concrete client through a stable adapter.
+New Rust composition is deliberately static-first. `auth_provider_fn(...)` returns a concrete `FnAuthProvider<F>` implementing `StaticAuthVerifier`; its future type is an associated type rather than a boxed trait-object future. `AuthStage<P, E>` retains concrete provider and decision-enricher types, and `AuthLayerState<P>` retains the concrete provider behind `Arc<P>` only for cheap cloning.
+
+`dyn_auth_provider(...)` exists solely as an explicit compatibility bridge for older APIs that already require `Arc<dyn AuthVerifier>`. Do not type-erase a provider before that boundary.
+
+The framework-neutral `StagePipeline` is different: it is intentionally a heterogeneous runtime registry, so the registry stores different stage types behind one object-safe stage interface. Consumers that want an entirely statically typed Tower chain can compose the standalone Axum primitive directly instead of registering it in `StagePipeline`.
 
 ```text
 consumer Cargo.toml
@@ -22,24 +26,25 @@ consumer Cargo.toml
     +-- auth-sdk v2.x -----+  |
                            |  |
                            v  v
-                    consumer closures
+                    concrete closures
                            |
                            v
-               ores_middleware::AuthVerifier
-                           |
-                 +---------+----------+
-                 |                    |
-                 v                    v
-             AuthStage       standalone Axum layer
-                 |
-                 +-- compatibility: MiddlewareStack
+               StaticAuthVerifier
+                    /            \
+                   v              v
+          AuthStage<P, E>    AuthLayerState<P>
+                   |
+                   +-- optional heterogeneous StagePipeline boundary
+
+legacy only:
+concrete provider -> dyn_auth_provider -> Arc<dyn AuthVerifier> -> MiddlewareStack
 ```
 
-The concrete SDK types never become part of the `ores-middleware` public API.
+The concrete SDK types never become dependencies of `ores-middleware` itself.
 
 ## Generic auth provider adapter
 
-`auth_provider_fn(...)` converts an async closure into an `AuthVerifier`. The closure receives owned `RequestMetadata`, which lets it capture and use any auth client without borrowing from the middleware stack.
+`auth_provider_fn(...)` converts an async closure into a concrete provider implementing `StaticAuthVerifier`. The closure receives owned `RequestMetadata`, so its returned future does not borrow the middleware stack and can remain its concrete type.
 
 ```rust
 use std::collections::BTreeMap;
@@ -79,15 +84,37 @@ let auth = auth_provider_fn(move |request: RequestMetadata| {
     }
 });
 
-// The consuming service chooses this stage's exact position.
+// P remains the concrete closure-adapter type here.
 let auth_stage = AuthStage::from_provider("company-auth", auth);
 ```
 
 `AuthStage` sanitizes public failures itself and establishes stable user/tenant context. Provider-specific error messages are not copied to the public response.
 
+## Standalone Axum composition without an ORES `dyn Service`
+
+Keep Axum's concrete `FromFnLayer` in the consumer expression. This gives `Router::layer(...)` the associated `Service<Request>` information it needs and avoids an ORES-owned boxed or dynamic Tower service.
+
+```rust
+use axum::{middleware, Router};
+use ores_middleware::frameworks::axum_composable::{
+    AuthLayerState, authenticate,
+};
+
+let auth_state = AuthLayerState::from_provider(auth);
+
+let protected = Router::new()
+    .route("/account", account_route)
+    .layer(middleware::from_fn_with_state(
+        auth_state,
+        authenticate,
+    ));
+```
+
+The same concrete layer may be placed inside a consumer-owned `tower::ServiceBuilder`; the consumer still determines ordering.
+
 ## Compatibility with `MiddlewareStack`
 
-`dyn_auth_provider(...)` is the recommended compatibility boundary when a caller needs an `Arc<dyn AuthVerifier>` for the older bundled `MiddlewareStack` API:
+`dyn_auth_provider(...)` is an explicit compatibility boundary when a caller needs an `Arc<dyn AuthVerifier>` for the older bundled `MiddlewareStack` API:
 
 ```rust
 use ores_middleware::{
@@ -97,8 +124,7 @@ use ores_middleware::{
 let provider = dyn_auth_provider(auth_provider_fn(move |request| {
     let client = client.clone();
     async move {
-        // Map this concrete SDK/version into AuthDecision / IntegrationError.
-        authenticate(client, request).await
+        authenticate_provider(client, request).await
     }
 }));
 
@@ -142,7 +168,7 @@ auth_v1 = { package = "my-auth-sdk", version = "=1.9.4" }
 auth_v2 = { package = "my-auth-sdk", version = "=2.3.1" }
 ```
 
-Each version gets its own adapter:
+Each version gets its own concrete adapter:
 
 ```rust
 let legacy_client = auth_v1::Client::new(legacy_config);
@@ -163,7 +189,7 @@ Those providers can be attached to different routers/routes or used during a sta
 
 ## Shared Auth dual-provider adapter
 
-The stricter Shared Auth path has the same dependency-injection model. `shared_auth_provider_fn(...)` adapts a closure to `SharedAuthProviderVerifier`.
+The stricter Shared Auth path follows the same static-first dependency-injection model. `shared_auth_provider_fn(...)` returns a concrete adapter implementing `StaticSharedAuthProviderVerifier` while retaining the older object-safe provider trait for compatibility.
 
 ```rust
 use ores_middleware::{
@@ -201,11 +227,11 @@ let supabase = shared_auth_provider_fn(
 );
 ```
 
-The same pattern applies independently to the Neon verifier. `SharedAuthReadyStack::new(...)` accepts the resulting concrete adapters; it never needs to know the underlying provider crate version.
+The same pattern applies independently to the Neon verifier. Keep each adapter concrete for as long as the consuming surface permits it.
 
 ## Middleware order remains consumer-owned
 
-Provider injection does not imply a canonical middleware order. A consuming Axum service chooses both middleware types and ordering. Prefer explicit route/router composition or the framework-neutral `StagePipeline`.
+Provider injection does not imply a canonical middleware order. A consuming Axum service chooses both middleware types and ordering. Prefer explicit route/router composition or the framework-neutral `StagePipeline` when runtime heterogeneous registration is useful.
 
 ```rust
 use std::sync::Arc;
@@ -223,16 +249,19 @@ Another service may intentionally choose a different chain. `ores-middleware` ex
 
 ## Route-specific providers
 
-Different routers can use different providers or provider versions:
+Different routers can use different concrete providers or provider versions:
 
 ```rust
+let legacy_state = AuthLayerState::from_provider(legacy_auth);
+let modern_state = AuthLayerState::from_provider(modern_auth);
+
 let legacy = Router::new()
     .route("/legacy", legacy_route)
-    .layer(legacy_auth_layer);
+    .layer(middleware::from_fn_with_state(legacy_state, authenticate));
 
 let modern = Router::new()
     .route("/account", account_route)
-    .layer(modern_auth_layer);
+    .layer(middleware::from_fn_with_state(modern_state, authenticate));
 
 let app = Router::new()
     .merge(legacy)
@@ -244,10 +273,12 @@ This is useful for migrations, admin/customer separation, tenant-specific identi
 ## Design rules
 
 1. Concrete provider SDKs are dependencies of the consumer, not `ores-middleware` core.
-2. Pin exact versions or immutable Git revisions when determinism is required.
-3. Map provider-specific success values into stable ORES types at the adapter boundary.
-4. Keep raw provider failure diagnostics inside the adapter boundary; public middleware failures are sanitized.
-5. Do not leak provider SDK types into route/business interfaces.
-6. Keep credentials and secrets outside provider descriptors and logs.
-7. Consumers own middleware selection/order; provider adapters are composable primitives.
-8. Prefer a small adapter closure first; use a named newtype/struct when the mapping becomes substantial or needs dedicated tests.
+2. Prefer `StaticAuthVerifier` / `StaticSharedAuthProviderVerifier`; type-erase only at a boundary that actually requires runtime heterogeneity.
+3. Pin exact versions or immutable Git revisions when determinism is required.
+4. Map provider-specific success values into stable ORES types at the adapter boundary.
+5. Keep raw provider failure diagnostics inside the adapter boundary; public middleware failures are sanitized.
+6. Do not leak provider SDK types into route/business interfaces.
+7. Keep credentials and secrets outside provider descriptors and logs.
+8. Consumers own middleware selection/order; provider adapters are composable primitives.
+9. Prefer a small adapter closure first; use a named newtype/struct when the mapping becomes substantial or needs dedicated tests.
+10. Treat `StagePipeline` and legacy `MiddlewareStack` as intentional dynamic boundaries, not as reasons to erase provider types earlier.
