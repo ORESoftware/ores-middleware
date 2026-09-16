@@ -6,12 +6,10 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::Route,
 };
 use serde_json::json;
-use tower::Layer;
 
-use crate::{AuthDecision, RequestMetadata, StaticAuthVerifier, TransportSecurity};
+use crate::{RequestMetadata, StaticAuthVerifier, TransportSecurity};
 
 /// State for the standalone Axum authentication primitive.
 ///
@@ -52,25 +50,17 @@ where
     }
 }
 
-/// Return an Axum layer that keeps the injected provider concrete.
-///
-/// The consumer remains responsible for ordering. The returned layer can be
-/// passed directly to `Router::layer(...)` or placed inside a `ServiceBuilder`
-/// alongside consumer-owned middleware.
-#[must_use]
-pub fn auth_layer<P>(provider: P) -> impl Clone + Layer<Route>
-where
-    P: StaticAuthVerifier + 'static,
-{
-    middleware::from_fn_with_state(AuthLayerState::from_provider(provider), authenticate::<P>)
-}
-
 /// Standalone Axum authentication middleware with static provider dispatch.
 ///
-/// Compose this with `middleware::from_fn_with_state` at the exact route/router
-/// boundary and ordering selected by the consuming service. On success the
-/// stable [`AuthDecision`] is inserted into request extensions for downstream
-/// middleware and handlers.
+/// Compose this directly with `middleware::from_fn_with_state` at the exact
+/// route/router boundary and ordering selected by the consuming service. Keeping
+/// Axum's concrete `FromFnLayer` in the consumer expression preserves all of its
+/// `Service<Request>` bounds; wrapping it behind an opaque `impl Layer` would
+/// erase associated-service information that `Router::layer` needs for type
+/// checking.
+///
+/// The layer can also be placed inside a consumer-owned `tower::ServiceBuilder`.
+/// No boxed service or ORES-owned `dyn Service` boundary is required.
 pub async fn authenticate<P>(
     State(state): State<AuthLayerState<P>>,
     mut request: Request,
@@ -158,7 +148,7 @@ mod tests {
     use tower::{ServiceBuilder, ServiceExt};
 
     use super::*;
-    use crate::{IntegrationError, auth_provider_fn};
+    use crate::{AuthDecision, IntegrationError, auth_provider_fn};
 
     async fn identity(Extension(identity): Extension<AuthDecision>) -> String {
         format!(
@@ -242,7 +232,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn auth_layer_composes_inside_consumer_owned_service_builder() {
+    async fn concrete_axum_layer_composes_inside_consumer_owned_service_builder() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async move {
             Ok(AuthDecision {
                 user_id: Some("ordered-user".into()),
@@ -251,7 +241,10 @@ mod tests {
             })
         });
 
-        let consumer_owned_stack = ServiceBuilder::new().layer(auth_layer(provider));
+        let state = AuthLayerState::from_provider(provider);
+        let consumer_owned_stack = ServiceBuilder::new().layer(
+            middleware::from_fn_with_state(state, authenticate),
+        );
         let app = Router::new()
             .route("/me", get(identity))
             .layer(consumer_owned_stack);
