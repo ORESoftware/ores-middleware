@@ -77,6 +77,15 @@ export interface StoredResponse { status: number; headers: Array<[string, string
 export interface MiddlewareDependencies {
   authVerifier?: (request: Request, context: RequestContext) => Promise<AuthDecision>;
   resolveTestIdentity?: (request: Request, context: RequestContext) => Promise<AuthDecision>;
+  /**
+   * Explicit consumer-owned mapping from provider decision data into ambient
+   * baggage. No AuthDecision claim is promoted automatically by the core.
+   */
+  authBaggageEnricher?: (
+    request: Request,
+    context: Readonly<RequestContext>,
+    auth: Readonly<AuthDecision>
+  ) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>;
   rateLimiter?: { allow(key: string, capacity: number, refillPerSecond: number): Promise<boolean> };
   idempotencyStore?: { get(key: string): Promise<StoredResponse | undefined>; set(key: string, response: StoredResponse): Promise<void> };
   isTrustedProxy?: (request: Request) => boolean;
@@ -193,16 +202,17 @@ class MemoryIdempotencyStore {
   async set(key: string, value: StoredResponse): Promise<void> { this.#entries.set(key, value); }
 }
 
-/** The post-authentication request context, built as a new value from the pre-auth one. */
+/**
+ * Establish stable identity without interpreting provider-specific claims.
+ * Ambient baggage is consumer-owned and is enriched only through the explicit
+ * authBaggageEnricher hook below.
+ */
 function withAuth(context: RequestContext, auth: AuthDecision): RequestContext {
   return {
     ...context,
     userId: auth.userId,
     tenantId: auth.tenantId,
-    baggage: {
-      ...context.baggage,
-      ...Object.fromEntries(Object.entries(auth.claims ?? {}).filter(([key]) => key.startsWith("otel.")))
-    }
+    baggage: { ...context.baggage }
   };
 }
 
@@ -279,8 +289,16 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
       : dependencies.authVerifier
         ? await dependencies.authVerifier(request, initialContext)
         : {};
-    // The authenticated context is a new object; the pre-auth context is never edited.
-    const context: RequestContext = withAuth(initialContext, auth);
+    // Identity is established first. Provider claims remain isolated unless the
+    // consumer explicitly maps selected values into baggage.
+    const identityContext = withAuth(initialContext, auth);
+    const enrichedBaggage = dependencies.authBaggageEnricher
+      ? await dependencies.authBaggageEnricher(request, identityContext, auth)
+      : {};
+    const context: RequestContext = {
+      ...identityContext,
+      baggage: { ...identityContext.baggage, ...enrichedBaggage }
+    };
 
     const authenticatedOutcome = await runOperationBoundary(
       { transport: "http", scope: "request", name: "middleware.request", signal: request.signal },
