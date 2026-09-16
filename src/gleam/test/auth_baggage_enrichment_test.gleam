@@ -42,16 +42,19 @@ pub fn auth_baggage_is_not_propagated_by_default_test() {
   let logger = logger()
   let hooks0 = ores_middleware.default_hooks()
   let hooks =
-    ores_middleware.Hooks(..hooks0, authenticate: fn(_, _) {
-      Ok(ores_middleware.AuthDecision(
-        user_id: "user-default",
-        tenant_id: "tenant-default",
-        baggage: dict.from_list([
-          #("otel.marker", "must-not-propagate"),
-          #("authorization", "Bearer secret"),
-        ]),
-      ))
-    })
+    ores_middleware.Hooks(
+      ..hooks0,
+      authenticate: fn(_, _) {
+        Ok(ores_middleware.AuthDecision(
+          user_id: "user-default",
+          tenant_id: "tenant-default",
+          baggage: dict.from_list([
+            #("otel.marker", "must-not-propagate"),
+            #("authorization", "Bearer secret"),
+          ]),
+        ))
+      },
+    )
   let assert Ok(middleware) =
     otel.create_middleware(config(False), hooks, logger)
 
