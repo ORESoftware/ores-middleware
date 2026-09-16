@@ -1,16 +1,17 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::{AuthDecision, AuthVerifier, IntegrationError, RequestMetadata};
 use crate::shared_auth::{
     SharedAuthProviderContext, SharedAuthProviderFailure, SharedAuthProviderVerifier,
     SharedAuthVerifiedPrincipal,
 };
+use crate::{AuthDecision, AuthVerifier, IntegrationError, RequestMetadata};
 
 /// Static-dispatch authentication provider boundary.
 ///
 /// Consumers keep their concrete auth SDK and future types all the way through
-/// normal middleware composition. Runtime type erasure is only needed at older
-/// compatibility boundaries that explicitly require `dyn AuthVerifier`.
+/// normal middleware composition. Runtime type erasure is only needed when the
+/// consumer explicitly chooses a trait object or reaches a legacy compatibility
+/// boundary that requires `dyn AuthVerifier`.
 pub trait StaticAuthVerifier: Send + Sync {
     type Future: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static;
 
@@ -28,6 +29,18 @@ where
     }
 }
 
+/// Allow an explicitly type-erased verifier to use every consumer-owned generic
+/// composition surface. The allocation/dispatch cost remains explicit in the
+/// provider type instead of forcing a separate middleware API.
+impl StaticAuthVerifier for Arc<dyn AuthVerifier> {
+    type Future = Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send>>;
+
+    fn verify_owned(&self, request: RequestMetadata) -> Self::Future {
+        let provider = Arc::clone(self);
+        Box::pin(async move { provider.verify(&request).await })
+    }
+}
+
 /// Static-dispatch Shared Auth provider boundary.
 pub trait StaticSharedAuthProviderVerifier: Send + Sync {
     type Future: Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
@@ -39,6 +52,41 @@ pub trait StaticSharedAuthProviderVerifier: Send + Sync {
         request: RequestMetadata,
         context: SharedAuthProviderContext,
     ) -> Self::Future;
+}
+
+impl<P> StaticSharedAuthProviderVerifier for Arc<P>
+where
+    P: StaticSharedAuthProviderVerifier + ?Sized,
+{
+    type Future = P::Future;
+
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+        context: SharedAuthProviderContext,
+    ) -> Self::Future {
+        self.as_ref().verify_owned(request, context)
+    }
+}
+
+/// Dynamic Shared Auth providers can opt into the same generic composition
+/// surface when runtime provider selection is useful to the application.
+impl StaticSharedAuthProviderVerifier for Arc<dyn SharedAuthProviderVerifier> {
+    type Future = Pin<
+        Box<
+            dyn Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+                + Send,
+        >,
+    >;
+
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+        context: SharedAuthProviderContext,
+    ) -> Self::Future {
+        let provider = Arc::clone(self);
+        Box::pin(async move { provider.verify(&request, &context).await })
+    }
 }
 
 /// Closure-backed authentication provider adapter.
@@ -127,8 +175,12 @@ where
     }
 }
 
-/// Explicit compatibility escape hatch for APIs that require
-/// `Arc<dyn AuthVerifier>`. Normal composition should keep the provider concrete.
+/// Explicit type-erasure helper for consumers that want runtime heterogeneity or
+/// compatibility with APIs that require `Arc<dyn AuthVerifier>`.
+///
+/// The returned provider sanitizes provider diagnostics and also implements
+/// `StaticAuthVerifier`, so it can be passed to `AuthStage` and the standalone
+/// Axum authentication layer without switching composition APIs.
 #[must_use]
 pub fn dyn_auth_provider<P>(provider: P) -> Arc<dyn AuthVerifier>
 where
@@ -239,7 +291,11 @@ mod tests {
             |request: RequestMetadata, context: SharedAuthProviderContext| async move {
                 Ok(SharedAuthVerifiedPrincipal::new(
                     context.provider,
-                    request.headers.get("authorization").cloned().unwrap_or_default(),
+                    request
+                        .headers
+                        .get("authorization")
+                        .cloned()
+                        .unwrap_or_default(),
                     "tenant-1",
                     "session-1",
                     context.issuer,
@@ -256,7 +312,10 @@ mod tests {
             audience: "example-api".into(),
             data_plane: SharedAuthDataPlane::CustomerAuth,
         };
-        let principal = provider.verify_owned(request("subject-1"), context).await.unwrap();
+        let principal = provider
+            .verify_owned(request("subject-1"), context)
+            .await
+            .unwrap();
         assert_eq!(principal.subject, "subject-1");
     }
 
@@ -269,8 +328,61 @@ mod tests {
             })
         });
         let provider = dyn_auth_provider(provider);
-        let error = provider.verify(&request("bad")).await.unwrap_err();
+        let error = provider.verify_owned(request("bad")).await.unwrap_err();
         assert_eq!(error.code, "authentication_failed");
         assert_eq!(error.message, "authentication failed");
+    }
+
+    #[tokio::test]
+    async fn explicit_dyn_provider_uses_the_static_composition_trait() {
+        let provider = auth_provider_fn(|request: RequestMetadata| async move {
+            Ok(AuthDecision {
+                user_id: request.headers.get("authorization").cloned(),
+                tenant_id: Some("runtime-selected".into()),
+                claims: BTreeMap::new(),
+            })
+        });
+        let provider = dyn_auth_provider(provider);
+        let decision = StaticAuthVerifier::verify_owned(&provider, request("bob"))
+            .await
+            .unwrap();
+        assert_eq!(decision.user_id.as_deref(), Some("bob"));
+        assert_eq!(decision.tenant_id.as_deref(), Some("runtime-selected"));
+    }
+
+    #[tokio::test]
+    async fn dyn_shared_auth_provider_uses_the_static_composition_trait() {
+        let provider = shared_auth_provider_fn(
+            |request: RequestMetadata, context: SharedAuthProviderContext| async move {
+                Ok(SharedAuthVerifiedPrincipal::new(
+                    context.provider,
+                    request
+                        .headers
+                        .get("authorization")
+                        .cloned()
+                        .unwrap_or_default(),
+                    "tenant-dyn",
+                    "session-dyn",
+                    context.issuer,
+                    context.audience,
+                    context.organization,
+                    context.data_plane,
+                ))
+            },
+        );
+        let provider: Arc<dyn SharedAuthProviderVerifier> = Arc::new(provider);
+        let context = SharedAuthProviderContext {
+            provider: SharedAuthProvider::Neon,
+            organization: "example-org".into(),
+            issuer: "https://issuer.example".into(),
+            audience: "example-api".into(),
+            data_plane: SharedAuthDataPlane::CustomerAuth,
+        };
+        let principal =
+            StaticSharedAuthProviderVerifier::verify_owned(&provider, request("subject-dyn"), context)
+                .await
+                .unwrap();
+        assert_eq!(principal.subject, "subject-dyn");
+        assert_eq!(principal.tenant_id, "tenant-dyn");
     }
 }
