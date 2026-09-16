@@ -53,22 +53,23 @@ jobs:
       ERROR_MODE: ${{ inputs.error_mode }}
     steps:
       - name: Check out target branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
           components: rustfmt
 
       - name: Check out immutable middleware helper
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ORESoftware/ores-middleware
           ref: ${{ inputs.middleware_revision }}
           path: .ores-middleware-tool
+          persist-credentials: false
 
       - name: Resolve source, manifest, and Axum generation
         id: resolve
