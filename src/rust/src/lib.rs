@@ -43,8 +43,7 @@ impl std::fmt::Debug for hardening::HardenedStagePipeline {
 }
 
 pub use auth_provider::{
-    FnAuthProvider, FnSharedAuthProvider, StaticAuthVerifier,
-    StaticSharedAuthProviderVerifier, auth_provider_fn, dyn_auth_provider,
+    FnAuthProvider, FnSharedAuthProvider, auth_provider_fn, dyn_auth_provider,
     shared_auth_provider_fn,
 };
 pub use auth_stage::{AuthDecisionEnricher, AuthStage, NoopAuthDecisionEnricher};
