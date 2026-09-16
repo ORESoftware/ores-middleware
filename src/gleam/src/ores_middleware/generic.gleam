@@ -31,7 +31,9 @@ pub type ContextualInput(request, context) {
 pub fn contextual_provider(
   verify: fn(request, context) -> Result(output, error),
 ) -> Provider(ContextualInput(request, context), output, error) {
-  provider(fn(input) { verify(input.request, input.context) })
+  provider(fn(input: ContextualInput(request, context)) {
+    verify(input.request, input.context)
+  })
 }
 
 /// Generic request/response handler. The response type can itself represent an
