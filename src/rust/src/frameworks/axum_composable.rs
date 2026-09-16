@@ -9,12 +9,13 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::{AuthDecision, RequestMetadata, StaticAuthVerifier, TransportSecurity};
+use crate::{RequestMetadata, StaticAuthVerifier, TransportSecurity};
 
 /// State for the standalone Axum authentication primitive.
 ///
 /// The concrete provider type is retained inside `Arc<P>` rather than erased to
-/// `Arc<dyn AuthVerifier>`. `Arc` is only for cheap state cloning.
+/// `Arc<dyn AuthVerifier>`. `Arc` is only for cheap state cloning. Consumers may
+/// still choose a trait object as `P` when runtime heterogeneity is useful.
 pub struct AuthLayerState<P> {
     verifier: Arc<P>,
 }
@@ -49,8 +50,10 @@ where
     }
 }
 
-/// Standalone Axum authentication middleware with static provider dispatch.
+/// Standalone Axum authentication middleware.
 /// Consumers choose where this layer appears in their own Tower/Axum chain.
+/// Dispatch is static when `P` is concrete and dynamic when the consumer passes
+/// a trait-object adapter such as `Arc<dyn AuthVerifier>`.
 pub async fn authenticate<P>(
     State(state): State<AuthLayerState<P>>,
     mut request: Request,
@@ -134,7 +137,7 @@ mod tests {
     use tower::{ServiceBuilder, ServiceExt};
 
     use super::*;
-    use crate::{IntegrationError, auth_provider_fn};
+    use crate::{AuthDecision, IntegrationError, auth_provider_fn, dyn_auth_provider};
 
     async fn identity(Extension(identity): Extension<AuthDecision>) -> String {
         format!(
@@ -158,9 +161,15 @@ mod tests {
         let app = Router::new().route("/me", get(identity)).layer(
             middleware::from_fn_with_state(state, authenticate),
         );
-        let response = app.oneshot(
-            Request::builder().uri("/me").body(axum::body::Body::empty()).unwrap()
-        ).await.unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/me")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
 
@@ -173,14 +182,22 @@ mod tests {
             })
         });
         let state = AuthLayerState::from_provider(provider);
-        let app = Router::new().route("/me", get(|| async { "unreachable" })).layer(
-            middleware::from_fn_with_state(state, authenticate),
-        );
-        let response = app.oneshot(
-            Request::builder().uri("/me").body(axum::body::Body::empty()).unwrap()
-        ).await.unwrap();
+        let app = Router::new()
+            .route("/me", get(|| async { "unreachable" }))
+            .layer(middleware::from_fn_with_state(state, authenticate));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/me")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(body.contains("authentication_failed"));
         assert!(!body.contains("sdk_token_rejected"));
@@ -197,13 +214,46 @@ mod tests {
             })
         });
         let state = AuthLayerState::from_provider(provider);
-        let consumer_owned_stack = ServiceBuilder::new().layer(
+        let consumer_owned_stack =
+            ServiceBuilder::new().layer(middleware::from_fn_with_state(state, authenticate));
+        let app = Router::new()
+            .route("/me", get(identity))
+            .layer(consumer_owned_stack);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/me")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dyn_provider_uses_the_same_axum_composition_surface() {
+        let provider = auth_provider_fn(|_request: RequestMetadata| async move {
+            Ok(AuthDecision {
+                user_id: Some("dyn-user".into()),
+                tenant_id: Some("dyn-tenant".into()),
+                claims: BTreeMap::new(),
+            })
+        });
+        let provider = dyn_auth_provider(provider);
+        let state = AuthLayerState::from_provider(provider);
+        let app = Router::new().route("/me", get(identity)).layer(
             middleware::from_fn_with_state(state, authenticate),
         );
-        let app = Router::new().route("/me", get(identity)).layer(consumer_owned_stack);
-        let response = app.oneshot(
-            Request::builder().uri("/me").body(axum::body::Body::empty()).unwrap()
-        ).await.unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/me")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
 }
