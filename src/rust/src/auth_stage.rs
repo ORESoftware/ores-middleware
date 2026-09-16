@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// Consumer hook for copying a reviewed subset of auth decision data into
-/// generic stage attributes.
+/// generic stage attributes or other explicitly selected request context.
 pub trait AuthDecisionEnricher: Send + Sync {
     fn enrich(&self, input: StageInput, decision: &AuthDecision) -> StageInput;
 }
@@ -90,13 +90,6 @@ where
     fn apply_decision(&self, mut input: StageInput, decision: &AuthDecision) -> StageInput {
         input.context.user_id = decision.user_id.clone();
         input.context.tenant_id = decision.tenant_id.clone();
-        input.context.baggage.extend(
-            decision
-                .claims
-                .iter()
-                .filter(|(key, _)| key.starts_with("otel."))
-                .map(|(key, value)| (key.clone(), value.clone())),
-        );
         self.decision_enricher.enrich(input, decision)
     }
 }
@@ -180,6 +173,31 @@ mod tests {
             StageDecision::Continue(input) => {
                 assert_eq!(input.context.user_id.as_deref(), Some("direct-user"));
                 assert_eq!(input.context.tenant_id.as_deref(), Some("direct-tenant"));
+            }
+            _ => panic!("auth should continue"),
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_claims_require_explicit_consumer_enrichment() {
+        let provider = auth_provider_fn(|_request: RequestMetadata| async {
+            Ok(AuthDecision {
+                user_id: Some("alice".into()),
+                tenant_id: Some("tenant-a".into()),
+                claims: BTreeMap::from([
+                    ("role".into(), "admin".into()),
+                    ("otel.secret".into(), "must-not-propagate".into()),
+                ]),
+            })
+        });
+        let auth = AuthStage::from_provider("auth", provider);
+
+        match auth.evaluate(input("token")).await {
+            StageDecision::Continue(input) => {
+                assert_eq!(input.context.user_id.as_deref(), Some("alice"));
+                assert_eq!(input.context.tenant_id.as_deref(), Some("tenant-a"));
+                assert!(input.context.baggage.is_empty());
+                assert!(input.attributes.is_empty());
             }
             _ => panic!("auth should continue"),
         }
