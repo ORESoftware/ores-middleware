@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use ores_middleware::{
-    AuthDecision, AuthVerifier, IntegrationError, RequestMetadata, SharedAuthDataPlane,
-    SharedAuthProvider, SharedAuthProviderContext, SharedAuthProviderFailure,
-    SharedAuthProviderFailureKind, SharedAuthProviderVerifier, SharedAuthVerifiedPrincipal,
-    auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn,
+    AuthDecision, IntegrationError, RequestMetadata, SharedAuthDataPlane, SharedAuthProvider,
+    SharedAuthProviderContext, SharedAuthProviderFailure, SharedAuthProviderFailureKind,
+    SharedAuthProviderVerifier, SharedAuthVerifiedPrincipal, auth_provider_fn, dyn_auth_provider,
+    shared_auth_provider_fn,
 };
 
 fn request(token: &str) -> RequestMetadata {
