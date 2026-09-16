@@ -4,7 +4,7 @@ use axum::{
     Json,
     extract::{ConnectInfo, Request, State},
     http::StatusCode,
-    middleware::{self, Next},
+    middleware::Next,
     response::{IntoResponse, Response},
 };
 use serde_json::json;
@@ -15,7 +15,7 @@ use crate::{RequestMetadata, StaticAuthVerifier, TransportSecurity};
 ///
 /// The concrete provider type is retained inside `Arc<P>` rather than erased to
 /// `Arc<dyn AuthVerifier>`. `Arc` is used for cheap state cloning; dispatch is
-/// still static and the provider future remains its concrete associated type.
+/// still static and the provider future remains compiler-generated/concrete.
 pub struct AuthLayerState<P> {
     verifier: Arc<P>,
 }
