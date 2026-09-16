@@ -540,7 +540,6 @@ name = "oresoftware-next-loggers"
 version = "0.1.0"
 source = "git+https://github.com/ores-otel/ores.otel.log?rev=080cc8cd09ef6493aa2a2790bcd06793012d8766#080cc8cd09ef6493aa2a2790bcd06793012d8766"
 dependencies = [
- "libc",
  "serde",
  "serde_json",
  "time",
