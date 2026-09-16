@@ -4,6 +4,7 @@
     reason = "SharedAuthVerifiedPrincipal keeps all provider, identity, tenant, session, issuer, audience, organization, and realm evidence explicit at construction"
 )]
 
+pub mod auth_provider;
 mod bootstrap;
 mod compat;
 mod config;
@@ -39,6 +40,10 @@ impl std::fmt::Debug for hardening::HardenedStagePipeline {
     }
 }
 
+pub use auth_provider::{
+    FnAuthProvider, FnSharedAuthProvider, auth_provider_fn, dyn_auth_provider,
+    shared_auth_provider_fn,
+};
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
 pub use config::{
     MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
