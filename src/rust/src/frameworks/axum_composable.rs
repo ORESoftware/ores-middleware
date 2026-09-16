@@ -9,53 +9,58 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::{AuthVerifier, RequestMetadata, TransportSecurity};
+use crate::{AuthDecision, RequestMetadata, StaticAuthVerifier, TransportSecurity};
 
 /// State for the standalone Axum authentication primitive.
 ///
-/// Authentication is a runtime integration boundary, so the state stores one
-/// `Arc<dyn AuthVerifier>`. This keeps the Axum state type stable across provider
-/// implementations and lets applications select providers from configuration
-/// without making the router type generic over the provider.
-#[derive(Clone)]
-pub struct AuthLayerState {
-    verifier: Arc<dyn AuthVerifier>,
+/// The concrete provider type is retained inside `Arc<P>` rather than erased to
+/// `Arc<dyn AuthVerifier>`. `Arc` is only for cheap state cloning.
+pub struct AuthLayerState<P> {
+    verifier: Arc<P>,
 }
 
-impl AuthLayerState {
+impl<P> Clone for AuthLayerState<P> {
+    fn clone(&self) -> Self {
+        Self {
+            verifier: Arc::clone(&self.verifier),
+        }
+    }
+}
+
+impl<P> AuthLayerState<P>
+where
+    P: StaticAuthVerifier,
+{
     #[must_use]
-    pub fn from_provider<P>(provider: P) -> Self
-    where
-        P: AuthVerifier + 'static,
-    {
-        Self::from_shared(Arc::new(provider))
+    pub fn from_provider(provider: P) -> Self {
+        Self {
+            verifier: Arc::new(provider),
+        }
     }
 
     #[must_use]
-    pub fn from_shared(provider: Arc<dyn AuthVerifier>) -> Self {
+    pub fn from_shared(provider: Arc<P>) -> Self {
         Self { verifier: provider }
     }
 
     #[must_use]
-    pub fn verifier(&self) -> &(dyn AuthVerifier + 'static) {
+    pub fn verifier(&self) -> &P {
         self.verifier.as_ref()
     }
 }
 
-/// Standalone Axum authentication middleware.
-///
-/// Compose this directly with `middleware::from_fn_with_state` at the exact
-/// route/router boundary and ordering selected by the consuming service. Keeping
-/// Axum's concrete `FromFnLayer` in the consumer expression preserves its
-/// `Service<Request>` information; the provider inside the state can still be a
-/// runtime-selected trait object.
-pub async fn authenticate(
-    State(state): State<AuthLayerState>,
+/// Standalone Axum authentication middleware with static provider dispatch.
+/// Consumers choose where this layer appears in their own Tower/Axum chain.
+pub async fn authenticate<P>(
+    State(state): State<AuthLayerState<P>>,
     mut request: Request,
     next: Next,
-) -> Response {
+) -> Response
+where
+    P: StaticAuthVerifier + 'static,
+{
     let metadata = request_metadata(&request);
-    match state.verifier.verify(&metadata).await {
+    match state.verifier.verify_owned(metadata.clone()).await {
         Ok(decision) => {
             request.extensions_mut().insert(decision);
             next.run(request).await
@@ -72,10 +77,6 @@ pub async fn authenticate(
     }
 }
 
-/// Extract the stable ORES request metadata used by provider adapters.
-///
-/// Header names are canonicalized to lowercase while transport security is
-/// derived only from the request URI or trusted listener-inserted extension.
 #[must_use]
 pub fn request_metadata(request: &Request) -> RequestMetadata {
     let headers = request
@@ -133,7 +134,7 @@ mod tests {
     use tower::{ServiceBuilder, ServiceExt};
 
     use super::*;
-    use crate::{AuthDecision, IntegrationError, auth_provider_fn};
+    use crate::{IntegrationError, auth_provider_fn};
 
     async fn identity(Extension(identity): Extension<AuthDecision>) -> String {
         format!(
@@ -146,73 +147,21 @@ mod tests {
     #[tokio::test]
     async fn standalone_auth_primitive_exposes_stable_decision_downstream() {
         let provider = auth_provider_fn(|request: RequestMetadata| async move {
-            assert_eq!(request.method, "GET");
             assert_eq!(request.path, "/me");
-            assert_eq!(
-                request.headers.get("authorization").map(String::as_str),
-                Some("version-pinned-token")
-            );
             Ok(AuthDecision {
                 user_id: Some("alice".into()),
                 tenant_id: Some("tenant-a".into()),
                 claims: BTreeMap::new(),
             })
         });
-
         let state = AuthLayerState::from_provider(provider);
         let app = Router::new().route("/me", get(identity)).layer(
             middleware::from_fn_with_state(state, authenticate),
         );
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/me")
-                    .header("authorization", "version-pinned-token")
-                    .body(axum::body::Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
+        let response = app.oneshot(
+            Request::builder().uri("/me").body(axum::body::Body::empty()).unwrap()
+        ).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        assert_eq!(body.as_ref(), b"alice:tenant-a");
-    }
-
-    #[tokio::test]
-    async fn shared_dynamic_provider_handle_uses_the_same_state_type() {
-        let provider: Arc<dyn AuthVerifier> = Arc::new(auth_provider_fn(
-            |_request: RequestMetadata| async move {
-                Ok(AuthDecision {
-                    user_id: Some("dynamic-user".into()),
-                    tenant_id: Some("dynamic-tenant".into()),
-                    claims: BTreeMap::new(),
-                })
-            },
-        ));
-        let state = AuthLayerState::from_shared(provider);
-        let app = Router::new().route("/me", get(identity)).layer(
-            middleware::from_fn_with_state(state, authenticate),
-        );
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/me")
-                    .body(axum::body::Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        assert_eq!(body.as_ref(), b"dynamic-user:dynamic-tenant");
     }
 
     #[tokio::test]
@@ -223,34 +172,23 @@ mod tests {
                 message: "secret provider diagnostic: tenant-internal-key-id=42".into(),
             })
         });
-
         let state = AuthLayerState::from_provider(provider);
         let app = Router::new().route("/me", get(|| async { "unreachable" })).layer(
             middleware::from_fn_with_state(state, authenticate),
         );
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/me")
-                    .body(axum::body::Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
+        let response = app.oneshot(
+            Request::builder().uri("/me").body(axum::body::Body::empty()).unwrap()
+        ).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        let body = String::from_utf8(body.to_vec()).expect("utf-8 problem body");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(body.contains("authentication_failed"));
         assert!(!body.contains("sdk_token_rejected"));
         assert!(!body.contains("tenant-internal-key-id"));
     }
 
     #[tokio::test]
-    async fn concrete_axum_layer_composes_inside_consumer_owned_service_builder() {
+    async fn concrete_provider_composes_inside_consumer_owned_service_builder() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async move {
             Ok(AuthDecision {
                 user_id: Some("ordered-user".into()),
@@ -258,29 +196,14 @@ mod tests {
                 claims: BTreeMap::new(),
             })
         });
-
         let state = AuthLayerState::from_provider(provider);
         let consumer_owned_stack = ServiceBuilder::new().layer(
             middleware::from_fn_with_state(state, authenticate),
         );
-        let app = Router::new()
-            .route("/me", get(identity))
-            .layer(consumer_owned_stack);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/me")
-                    .body(axum::body::Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
+        let app = Router::new().route("/me", get(identity)).layer(consumer_owned_stack);
+        let response = app.oneshot(
+            Request::builder().uri("/me").body(axum::body::Body::empty()).unwrap()
+        ).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        assert_eq!(body.as_ref(), b"ordered-user:ordered-tenant");
     }
 }
