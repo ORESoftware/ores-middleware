@@ -8,6 +8,11 @@ use crate::stage::{
     MiddlewareStageHandler, StageDecision, StageInput, StageRejection, StageResponse,
 };
 
+const MAX_CSRF_COOKIE_PAIRS: usize = 64;
+const MAX_CSRF_COOKIE_HEADER_BYTES: usize = 16 * 1024;
+const MAX_CSRF_COOKIE_NAME_BYTES: usize = 128;
+const MAX_CSRF_COOKIE_VALUE_BYTES: usize = 4 * 1024;
+
 #[derive(Debug, Clone, Default)]
 pub struct CorsPolicy {
     pub allowed_origins: BTreeSet<String>,
@@ -212,9 +217,19 @@ impl MiddlewareStageHandler for CsrfStage {
                 return StageDecision::Continue(Box::new(input));
             }
 
-            let cookies = header(&input.request.headers, "cookie")
-                .map(parse_cookie_header)
-                .unwrap_or_default();
+            let cookies = match header(&input.request.headers, "cookie") {
+                None => BTreeMap::new(),
+                Some(raw) => match parse_cookie_header(raw) {
+                    Ok(cookies) => cookies,
+                    Err(code) => {
+                        return StageDecision::Reject(StageRejection::new(
+                            400,
+                            code,
+                            "cookie header is invalid or ambiguous",
+                        ));
+                    }
+                },
+            };
             if !uses_protected_cookie(&self.policy, &cookies) {
                 return StageDecision::Continue(Box::new(input));
             }
@@ -282,15 +297,70 @@ fn parse_comma_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn parse_cookie_header(value: &str) -> BTreeMap<String, String> {
-    value
-        .split(';')
-        .filter_map(|part| {
-            let (name, value) = part.trim().split_once('=')?;
-            let name = name.trim();
-            (!name.is_empty()).then(|| (name.to_owned(), value.trim().to_owned()))
-        })
-        .collect()
+fn parse_cookie_header(value: &str) -> Result<BTreeMap<String, String>, &'static str> {
+    if value.len() > MAX_CSRF_COOKIE_HEADER_BYTES {
+        return Err("csrf_cookie_header_too_large");
+    }
+
+    let mut cookies = BTreeMap::new();
+    let mut count = 0usize;
+    for part in value.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        count = count.saturating_add(1);
+        if count > MAX_CSRF_COOKIE_PAIRS {
+            return Err("csrf_cookie_count_exceeded");
+        }
+
+        let Some((name, raw_value)) = part.split_once('=') else {
+            return Err("csrf_cookie_invalid");
+        };
+        let name = name.trim();
+        let raw_value = raw_value.trim();
+        if name.is_empty()
+            || name.len() > MAX_CSRF_COOKIE_NAME_BYTES
+            || !name.bytes().all(is_cookie_name_byte)
+            || raw_value.len() > MAX_CSRF_COOKIE_VALUE_BYTES
+            || raw_value.bytes().any(is_forbidden_cookie_value_byte)
+        {
+            return Err("csrf_cookie_invalid");
+        }
+        if cookies
+            .insert(name.to_owned(), raw_value.to_owned())
+            .is_some()
+        {
+            return Err("csrf_cookie_ambiguous");
+        }
+    }
+
+    Ok(cookies)
+}
+
+const fn is_cookie_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+const fn is_forbidden_cookie_value_byte(byte: u8) -> bool {
+    byte == 0 || byte == b'\r' || byte == b'\n' || byte < 0x20 || byte == 0x7f
 }
 
 fn apply_cors_headers(
@@ -503,5 +573,60 @@ mod tests {
             )
             .await;
         assert_eq!(response.status, 204);
+    }
+
+    #[tokio::test]
+    async fn csrf_rejects_duplicate_cookie_names_as_ambiguous() {
+        let pipeline = StagePipeline::new().with_stage(Arc::new(CsrfStage::new(csrf_policy())));
+        let response = pipeline
+            .execute(
+                request(
+                    "POST",
+                    &[
+                        (
+                            "cookie",
+                            "session=s1; ores_csrf=attacker; ores_csrf=t1",
+                        ),
+                        ("origin", "https://app.example.test"),
+                        ("x-ores-csrf-token", "t1"),
+                    ],
+                ),
+                |_| async { panic!("ambiguous cookies must not reach application handler") },
+            )
+            .await;
+        let body = String::from_utf8(response.body).expect("problem body must be utf-8");
+        assert_eq!(response.status, 400);
+        assert!(body.contains("csrf_cookie_ambiguous"));
+    }
+
+    #[tokio::test]
+    async fn csrf_rejects_oversized_cookie_headers_before_parsing() {
+        let pipeline = StagePipeline::new().with_stage(Arc::new(CsrfStage::new(csrf_policy())));
+        let oversized = format!("session={}", "x".repeat(MAX_CSRF_COOKIE_HEADER_BYTES));
+        let response = pipeline
+            .execute(
+                request(
+                    "POST",
+                    &[
+                        ("cookie", &oversized),
+                        ("origin", "https://app.example.test"),
+                        ("x-ores-csrf-token", "t1"),
+                    ],
+                ),
+                |_| async { panic!("oversized cookies must not reach application handler") },
+            )
+            .await;
+        let body = String::from_utf8(response.body).expect("problem body must be utf-8");
+        assert_eq!(response.status, 400);
+        assert!(body.contains("csrf_cookie_header_too_large"));
+    }
+
+    #[test]
+    fn cookie_parser_rejects_malformed_and_duplicate_pairs() {
+        assert_eq!(parse_cookie_header("session").unwrap_err(), "csrf_cookie_invalid");
+        assert_eq!(
+            parse_cookie_header("session=a; session=b").unwrap_err(),
+            "csrf_cookie_ambiguous"
+        );
     }
 }
