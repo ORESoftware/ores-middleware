@@ -122,6 +122,43 @@ impl MiddlewareOrderPolicy {
     }
 }
 
+/// Serializable declaration of the exact middleware sequence selected by a
+/// consumer plus the consumer's own validation policy.
+///
+/// This value is intentionally independent of `MiddlewareConfig`: end projects
+/// or ORES CLIs can embed it under a `.ores-mw.toml` composition/profile section
+/// without forcing every cross-language runtime to adopt a new root config field
+/// before the contract authorities and adapters are ready together.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiddlewareCompositionPlan {
+    /// Exact request-stage sequence expected at runtime. Names are open strings.
+    #[serde(default)]
+    pub stages: Vec<String>,
+    /// Constraints authored by the consumer. Empty means unconstrained.
+    #[serde(default)]
+    pub policy: MiddlewareOrderPolicy,
+}
+
+impl MiddlewareCompositionPlan {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn stage(mut self, stage: impl Into<String>) -> Self {
+        self.stages.push(stage.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_policy(mut self, policy: MiddlewareOrderPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MiddlewareOrderIssue {
@@ -234,6 +271,80 @@ where
         .collect()
 }
 
+/// Validate the declaration itself before a runtime pipeline is built.
+///
+/// Blank stage/rule identifiers are always malformed declaration data. All
+/// semantic ordering/presence constraints otherwise come from the consumer's
+/// policy.
+pub fn validate_declared_middleware_plan(
+    plan: &MiddlewareCompositionPlan,
+) -> Vec<MiddlewareOrderIssue> {
+    let blank_stages = plan.stages.iter().filter_map(|stage| {
+        stage.trim().is_empty().then_some(MiddlewareOrderIssue {
+            code: "blank-stage-name".into(),
+            message: "middleware stage names must not be blank".into(),
+            severity: OrderIssueSeverity::Error,
+            stage: Some(stage.clone()),
+        })
+    });
+
+    let malformed_rules = plan.policy.rules.iter().filter_map(|rule| {
+        let malformed = rule.before.trim().is_empty()
+            || rule.after.trim().is_empty()
+            || rule.code.trim().is_empty()
+            || rule.before == rule.after;
+        malformed.then_some(MiddlewareOrderIssue {
+            code: "invalid-order-rule".into(),
+            message: "order rules require non-empty, distinct before/after names and a non-empty code"
+                .into(),
+            severity: OrderIssueSeverity::Error,
+            stage: None,
+        })
+    });
+
+    blank_stages
+        .chain(malformed_rules)
+        .chain(validate_consumer_middleware_order(
+            &plan.stages,
+            &plan.policy,
+        ))
+        .collect()
+}
+
+/// Verify that the stages actually installed by a runtime match the consumer's
+/// declared plan exactly, then apply the consumer-authored policy.
+///
+/// This is useful for `.ores-mw.toml`/CLI admission: configuration can be
+/// reviewed independently, while startup or tests prove the live composition did
+/// not drift from it. No legacy/default stage sequence is consulted.
+pub fn validate_runtime_middleware_plan<S>(
+    actual_stages: &[S],
+    plan: &MiddlewareCompositionPlan,
+) -> Vec<MiddlewareOrderIssue>
+where
+    S: AsRef<str>,
+{
+    let actual = actual_stages
+        .iter()
+        .map(|stage| stage.as_ref())
+        .collect::<Vec<_>>();
+    let declared = plan.stages.iter().map(String::as_str).collect::<Vec<_>>();
+
+    let drift = (actual != declared).then_some(MiddlewareOrderIssue {
+        code: "runtime-stage-plan-mismatch".into(),
+        message: format!(
+            "runtime middleware stages {actual:?} do not match declared stages {declared:?}"
+        ),
+        severity: OrderIssueSeverity::Error,
+        stage: None,
+    });
+
+    validate_declared_middleware_plan(plan)
+        .into_iter()
+        .chain(drift)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,5 +433,58 @@ mod tests {
         .expect("rule without optional fields");
         assert_eq!(rule.severity, OrderIssueSeverity::Error);
         assert!(!rule.require_both);
+    }
+
+    #[test]
+    fn runtime_plan_detects_exact_order_drift_without_legacy_defaults() {
+        let plan = MiddlewareCompositionPlan::new()
+            .stage("custom-auth")
+            .stage("custom-limit")
+            .stage("handler")
+            .with_policy(MiddlewareOrderPolicy::new().rule(
+                MiddlewareOrderingRule::before(
+                    "custom-auth",
+                    "custom-limit",
+                    "auth-before-limit",
+                    "consumer-selected identity dependency",
+                ),
+            ));
+
+        assert!(
+            validate_runtime_middleware_plan(
+                &["custom-auth", "custom-limit", "handler"],
+                &plan
+            )
+            .is_empty()
+        );
+
+        let issues =
+            validate_runtime_middleware_plan(&["custom-limit", "custom-auth", "handler"], &plan);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "runtime-stage-plan-mismatch")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "auth-before-limit")
+        );
+    }
+
+    #[test]
+    fn declared_plan_rejects_blank_names_and_self_rules() {
+        let plan = MiddlewareCompositionPlan {
+            stages: vec!["request-id".into(), " ".into()],
+            policy: MiddlewareOrderPolicy::new().rule(MiddlewareOrderingRule::before(
+                "auth",
+                "auth",
+                "self-rule",
+                "invalid",
+            )),
+        };
+        let issues = validate_declared_middleware_plan(&plan);
+        assert!(issues.iter().any(|issue| issue.code == "blank-stage-name"));
+        assert!(issues.iter().any(|issue| issue.code == "invalid-order-rule"));
     }
 }

@@ -146,9 +146,63 @@ An ordering rule is conditional by default: if one of its two stages is absent, 
 
 Duplicate middleware is also allowed by default. A consumer opts into uniqueness only for stage names where duplication is semantically invalid. If duplicates are allowed, a `before -> after` rule requires the last `before` occurrence to precede the first `after` occurrence, so an interleaved duplicate cannot accidentally satisfy the policy.
 
+## Serializable composition plans and `.ores-mw.toml`
+
+`MiddlewareCompositionPlan` is a serializable declaration containing the exact consumer-selected `stages` sequence plus its `policy`. It is intentionally independent of the cross-language root `MiddlewareConfig` for now: a project/CLI can embed it in `.ores-mw.toml` without silently changing every language's root config contract before TypeSpec, JSON Schema, and all runtime adapters are updated together.
+
+A TOML projection can look like this:
+
+```toml
+[composition]
+stages = [
+  "request-id",
+  "company-auth-v2",
+  "tenant-rate-limit",
+  "authorization",
+  "handler",
+  "telemetry",
+]
+
+[composition.policy]
+required = ["company-auth-v2", "authorization"]
+forbidden = ["test-auth-bypass"]
+unique = ["tenant-rate-limit", "authorization"]
+first = "request-id"
+
+[[composition.policy.rules]]
+before = "company-auth-v2"
+after = "tenant-rate-limit"
+code = "auth-before-tenant-limit"
+message = "this service derives its limiter principal from authenticated identity"
+severity = "error"
+requireBoth = true
+```
+
+The crate exposes two admission layers:
+
+```rust
+use ores_middleware::{
+    MiddlewareCompositionPlan,
+    validate_declared_middleware_plan,
+    validate_runtime_middleware_plan,
+};
+
+let declared: MiddlewareCompositionPlan = load_from_ores_mw_toml()?;
+
+// Config/CI validation before the server is built.
+let declaration_issues = validate_declared_middleware_plan(&declared);
+
+// Startup/test validation proves live registration did not drift from config.
+let runtime_issues = validate_runtime_middleware_plan(&pipeline.stage_names(), &declared);
+```
+
+`validate_runtime_middleware_plan(...)` compares the runtime stage sequence to the declared sequence exactly and then applies only the consumer-authored policy. It never consults the legacy default order.
+
+This two-step design keeps provider/stage construction in application code—where concrete Rust types and pinned SDK versions belong—while allowing config/CLI tooling to review the intended sequence independently.
+
 ## Route-specific policies
 
-A large service does not need one policy for every route. Keep policies at the same ownership boundary as the composition they validate:
+A large service does not need one policy for every route. Keep policies/plans at the same ownership boundary as the composition they validate:
 
 ```rust
 let public_policy = MiddlewareOrderPolicy::new()
@@ -166,13 +220,13 @@ let mutation_policy = MiddlewareOrderPolicy::new()
     ));
 ```
 
-This keeps policy explicit and reviewable in the consumer instead of hiding it inside the shared library.
+A consumer may store multiple named composition plans in its own `.ores-mw.toml` projection—for example `public`, `mutation`, and `admin`—and validate each corresponding runtime router independently. The shared crate does not impose the naming or routing topology.
 
 ## The reviewed legacy profile
 
 `DEFAULT_MIDDLEWARE_ORDER` and `validate_middleware_order(...)` predate the consumer-owned policy API. They remain available for compatibility and as an opt-in reviewed reference profile. They intentionally validate that complete legacy 16-stage profile and therefore should **not** be used when a service wants a different selection or order.
 
-New consumers that need order validation should prefer `MiddlewareOrderPolicy` plus `validate_consumer_middleware_order(...)` and declare only their own invariants.
+New consumers that need order validation should prefer `MiddlewareOrderPolicy` / `MiddlewareCompositionPlan` and declare only their own invariants.
 
 Likewise, the existing bundled `frameworks::axum::install(...)` + `MiddlewareStack` path remains useful for services that intentionally want that bundled lifecycle. It is not a requirement for consuming the standalone framework primitives or `StagePipeline`.
 
@@ -184,4 +238,5 @@ Likewise, the existing bundled `frameworks::axum::install(...)` + `MiddlewareSta
 4. Public middleware responses must not expose raw provider diagnostics.
 5. Consumers choose middleware selection, ordering, and scope.
 6. Validation checks consumer-authored policy; it must not silently add library policy.
-7. Legacy bundled stacks and reviewed default order helpers are opt-in compatibility surfaces, not universal architecture.
+7. Runtime admission can prove live stage registration matches the consumer's serialized plan exactly.
+8. Legacy bundled stacks and reviewed default order helpers are opt-in compatibility surfaces, not universal architecture.

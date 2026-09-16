@@ -49,8 +49,9 @@ pub use auth_provider::{
 pub use auth_stage::AuthStage;
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
 pub use composition::{
-    MiddlewareOrderIssue, MiddlewareOrderPolicy, MiddlewareOrderingRule, OrderIssueSeverity,
-    validate_consumer_middleware_order,
+    MiddlewareCompositionPlan, MiddlewareOrderIssue, MiddlewareOrderPolicy,
+    MiddlewareOrderingRule, OrderIssueSeverity, validate_consumer_middleware_order,
+    validate_declared_middleware_plan, validate_runtime_middleware_plan,
 };
 pub use config::{
     MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
