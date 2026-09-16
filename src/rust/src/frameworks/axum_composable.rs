@@ -4,10 +4,12 @@ use axum::{
     Json,
     extract::{ConnectInfo, Request, State},
     http::StatusCode,
-    middleware::Next,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
+    routing::Route,
 };
 use serde_json::json;
+use tower::Layer;
 
 use crate::{AuthDecision, RequestMetadata, StaticAuthVerifier, TransportSecurity};
 
@@ -48,6 +50,19 @@ where
     pub fn verifier(&self) -> &P {
         self.verifier.as_ref()
     }
+}
+
+/// Return an Axum layer that keeps the injected provider concrete.
+///
+/// The consumer remains responsible for ordering. The returned layer can be
+/// passed directly to `Router::layer(...)` or placed inside a `ServiceBuilder`
+/// alongside consumer-owned middleware.
+#[must_use]
+pub fn auth_layer<P>(provider: P) -> impl Clone + Layer<Route>
+where
+    P: StaticAuthVerifier + 'static,
+{
+    middleware::from_fn_with_state(AuthLayerState::from_provider(provider), authenticate::<P>)
 }
 
 /// Standalone Axum authentication middleware with static provider dispatch.
@@ -140,7 +155,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use axum::{Router, extract::Extension, middleware, routing::get};
-    use tower::ServiceExt;
+    use tower::{ServiceBuilder, ServiceExt};
 
     use super::*;
     use crate::{IntegrationError, auth_provider_fn};
@@ -224,5 +239,37 @@ mod tests {
         assert!(body.contains("authentication_failed"));
         assert!(!body.contains("sdk_token_rejected"));
         assert!(!body.contains("tenant-internal-key-id"));
+    }
+
+    #[tokio::test]
+    async fn auth_layer_composes_inside_consumer_owned_service_builder() {
+        let provider = auth_provider_fn(|_request: RequestMetadata| async move {
+            Ok(AuthDecision {
+                user_id: Some("ordered-user".into()),
+                tenant_id: Some("ordered-tenant".into()),
+                claims: BTreeMap::new(),
+            })
+        });
+
+        let consumer_owned_stack = ServiceBuilder::new().layer(auth_layer(provider));
+        let app = Router::new()
+            .route("/me", get(identity))
+            .layer(consumer_owned_stack);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/me")
+                    .body(axum::body::Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(body.as_ref(), b"ordered-user:ordered-tenant");
     }
 }
