@@ -52,7 +52,8 @@ pub fn auth_baggage_is_not_propagated_by_default_test() {
         ]),
       ))
     })
-  let assert Ok(middleware) = otel.create_middleware(config(False), hooks, logger)
+  let assert Ok(middleware) =
+    otel.create_middleware(config(False), hooks, logger)
 
   let response =
     middleware(request(dict.new()), fn(_, request_logger) {
@@ -95,8 +96,12 @@ pub fn test_auth_bypass_uses_same_explicit_enrichment_boundary_test() {
       },
     )
   let headers =
-    dict.from_list([#("x-test-auth-bypass", "true"), #("x-request-id", "bypass")])
-  let assert Ok(middleware) = otel.create_middleware(config(True), hooks, logger)
+    dict.from_list([
+      #("x-test-auth-bypass", "true"),
+      #("x-request-id", "bypass"),
+    ])
+  let assert Ok(middleware) =
+    otel.create_middleware(config(True), hooks, logger)
 
   let response =
     middleware(request(headers), fn(_, request_logger) {
