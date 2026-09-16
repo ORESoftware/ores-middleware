@@ -15,7 +15,7 @@ pub fn generic_provider_keeps_sdk_consumer_owned_test() {
       }
     })
 
-  assert Ok("alice") = generic.verify(provider, "v7:alice")
+  assert generic.verify(provider, "v7:alice") == Ok("alice")
 }
 
 pub fn generic_middleware_order_is_consumer_owned_test() {
