@@ -3,15 +3,25 @@ name: generic portability
 on:
   pull_request:
     paths:
+      - "src/rust/src/auth_provider.rs"
+      - "src/rust/src/auth_stage.rs"
+      - "src/rust/src/composition.rs"
+      - "src/rust/tests/provider_injection.rs"
       - "src/ts/src/generic.ts"
+      - "src/ts/src/context.ts"
       - "src/ts/test/generic.test.mjs"
+      - "src/ts/package.json"
       - "src/golang/generic.go"
       - "src/golang/generic_test.go"
       - "src/gleam/src/ores_middleware/generic.gleam"
       - "src/gleam/test/generic_test.gleam"
+      - "tests/runtime-portability/generic-context-smoke.mjs"
       - "scripts/check-generic-portability.mjs"
+      - "scripts/check-ts-package-exports.mjs"
       - "docs/GENERIC_PORTABILITY_CONTRACT.md"
+      - "package.json"
       - ".github/workflows/generic-portability.yml"
+      - ".github/workflows/js-runtime-portability.yml"
   workflow_dispatch:
 
 permissions:
@@ -35,9 +45,91 @@ jobs:
           package-manager-cache: false
       - name: Check cross-language generic portability contract
         run: node scripts/check-generic-portability.mjs
-      - name: Ensure guard and docs are tracked without generated drift
+      - name: Check TypeScript package export and runtime metadata parity
+        run: node scripts/check-ts-package-exports.mjs
+      - name: Ensure guards and docs are tracked without generated drift
         run: |
           set -euo pipefail
           git diff --check
           test -f docs/GENERIC_PORTABILITY_CONTRACT.md
           test -f scripts/check-generic-portability.mjs
+          test -f scripts/check-ts-package-exports.mjs
+          test -f tests/runtime-portability/generic-context-smoke.mjs
+
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+      - name: Execute Rust provider and composition conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src/rust/Cargo.toml --test provider_injection
+          cargo test --locked --manifest-path src/rust/Cargo.toml auth_provider::tests
+
+  typescript:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+      - name: Build exact TypeScript package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --no-audit --no-fund
+          npm --prefix src/ts run build
+      - name: Execute generic TypeScript conformance
+        run: node --test src/ts/test/generic.test.mjs
+
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.25.0"
+          cache: false
+      - name: Execute generic Go conformance
+        working-directory: src/golang
+        run: go test -count=1 ./...
+
+  gleam:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          elixir-version: "1.18.4"
+          gleam-version: "1.18.1"
+          rebar3-version: "3.24.0"
+      - name: Build and format-check Gleam package
+        working-directory: src/gleam
+        shell: bash
+        run: |
+          set -euo pipefail
+          gleam build
+          gleam format --check src test
+      - name: Execute generic Gleam conformance
+        working-directory: src/gleam
+        run: gleam test
