@@ -38,20 +38,35 @@ jobs:
           python3 scripts/check_zpkg.py
           python3 -m unittest scripts/test_build_targets.py -v
           python3 - <<'PY'
+          import re
           import tomllib
           from pathlib import Path
 
           package = tomllib.loads(Path('.zpkg.toml').read_text())['package']
           assert package['org'] == 'oresoftware'
           assert package['name'] == 'ores-middleware'
-          assert package['version'] == '0.1.0'
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', package['version'])
           assert package['repository']['url'] == 'https://github.com/ORESoftware/ores-middleware'
           PY
+      - name: Resolve immutable source tag from package manifest
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path('.zpkg.toml').read_text())['package']['version'])
+          PY
+          )"
+          test -n "$version"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'tag=v%s\n' "$version" >> "$GITHUB_OUTPUT"
       - name: Create or verify immutable source tag
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EXPECTED_VERSION: 0.1.0
+          EXPECTED_VERSION: ${{ steps.package.outputs.version }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
