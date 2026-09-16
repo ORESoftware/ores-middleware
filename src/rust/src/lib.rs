@@ -5,6 +5,7 @@
 )]
 
 pub mod auth_provider;
+pub mod auth_stage;
 mod bootstrap;
 mod compat;
 pub mod composition;
@@ -45,6 +46,7 @@ pub use auth_provider::{
     FnAuthProvider, FnSharedAuthProvider, auth_provider_fn, dyn_auth_provider,
     shared_auth_provider_fn,
 };
+pub use auth_stage::AuthStage;
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
 pub use composition::{
     MiddlewareOrderIssue, MiddlewareOrderPolicy, MiddlewareOrderingRule, OrderIssueSeverity,

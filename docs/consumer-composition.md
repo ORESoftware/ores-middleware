@@ -12,9 +12,52 @@ The application or organization consuming the crate owns:
 
 This is important because two services can use the same ORES primitives with different semantics. An authenticated mutation API may need authentication before a principal-aware rate limiter, while a public endpoint may use only an anonymous flood guard. The library should not manufacture one global answer for both.
 
+## Framework-neutral stage composition
+
+`StagePipeline` is the framework-neutral composition root. Stages execute in exactly the order the consumer adds them; response hooks unwind in reverse order.
+
+`AuthStage` adapts any injected `AuthVerifier` into that pipeline without selecting a position for it:
+
+```rust
+use std::sync::Arc;
+use ores_middleware::{
+    AuthDecision, AuthStage, IntegrationError, RequestMetadata,
+    StagePipeline, auth_provider_fn,
+};
+
+let sdk = selected_auth_sdk::Client::new(auth_config);
+let provider = auth_provider_fn(move |request: RequestMetadata| {
+    let sdk = sdk.clone();
+    async move {
+        let verified = sdk
+            .verify(request.headers.get("authorization"))
+            .await
+            .map_err(|error| IntegrationError {
+                code: "auth_rejected",
+                message: error.to_string(),
+            })?;
+        Ok(AuthDecision {
+            user_id: Some(verified.user_id),
+            tenant_id: verified.tenant_id,
+            claims: verified.stable_claims,
+        })
+    }
+});
+
+let pipeline = StagePipeline::new()
+    .with_stage(Arc::new(request_id_stage))
+    .with_stage(Arc::new(AuthStage::from_provider("company-auth-v2", provider)))
+    .with_stage(Arc::new(tenant_rate_limit_stage))
+    .with_stage(Arc::new(authorization_stage));
+```
+
+`AuthStage` establishes the stable user/tenant request context and copies only `otel.*` claims into request baggage. It does **not** automatically copy arbitrary provider claims into generic attributes. If a later consumer-owned authorization stage needs a reviewed subset, use `with_decision_enricher(...)` to explicitly allow-list those values.
+
+The pipeline itself does not consult `DEFAULT_MIDDLEWARE_ORDER`.
+
 ## Standalone Axum authentication primitive
 
-The consuming crate pins and constructs its chosen auth SDK, adapts it through `auth_provider_fn(...)`, and places the ORES Axum middleware exactly where it wants:
+The consuming crate can also place an auth adapter directly at an Axum router boundary:
 
 ```rust
 use axum::{Router, middleware, routing::get};
@@ -55,7 +98,7 @@ let app = Router::new()
     .merge(protected);
 ```
 
-`authenticate` inserts the stable `AuthDecision` into request extensions. Provider-specific error text is logged only as permitted by the adapter and is not copied into the public `401` response.
+`authenticate` inserts the stable `AuthDecision` into request extensions. Provider-specific error text is not copied into the public `401` response.
 
 The same provider can be placed on an entire router, one route group, or multiple independently composed routers. Different provider versions can coexist because the concrete SDK types remain in the consumer.
 
@@ -92,9 +135,16 @@ let issues = validate_consumer_middleware_order(&actual, &policy);
 assert!(issues.is_empty());
 ```
 
+For a `StagePipeline`, the actual plan is available directly:
+
+```rust
+let actual = pipeline.stage_names();
+let issues = validate_consumer_middleware_order(&actual, &policy);
+```
+
 An ordering rule is conditional by default: if one of its two stages is absent, the rule does not make that stage mandatory. Use `.require(...)` for presence or `.require_both()` on a particular relationship when absence itself is a violation.
 
-Duplicate middleware is also allowed by default. A consumer opts into uniqueness only for stage names where duplication is semantically invalid.
+Duplicate middleware is also allowed by default. A consumer opts into uniqueness only for stage names where duplication is semantically invalid. If duplicates are allowed, a `before -> after` rule requires the last `before` occurrence to precede the first `after` occurrence, so an interleaved duplicate cannot accidentally satisfy the policy.
 
 ## Route-specific policies
 
@@ -124,7 +174,7 @@ This keeps policy explicit and reviewable in the consumer instead of hiding it i
 
 New consumers that need order validation should prefer `MiddlewareOrderPolicy` plus `validate_consumer_middleware_order(...)` and declare only their own invariants.
 
-Likewise, the existing bundled `frameworks::axum::install(...)` + `MiddlewareStack` path remains useful for services that intentionally want that bundled lifecycle. It is not a requirement for consuming the standalone framework primitives.
+Likewise, the existing bundled `frameworks::axum::install(...)` + `MiddlewareStack` path remains useful for services that intentionally want that bundled lifecycle. It is not a requirement for consuming the standalone framework primitives or `StagePipeline`.
 
 ## Rules for provider/version injection
 
