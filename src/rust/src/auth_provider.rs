@@ -8,38 +8,41 @@ use crate::shared_auth::{
 
 /// Static-dispatch authentication provider boundary.
 ///
-/// New consumer-owned middleware paths should prefer this trait. It keeps the
-/// concrete provider type and concrete future type through monomorphization and
-/// only crosses into `dyn AuthVerifier` when an older compatibility API requires
-/// runtime type erasure.
+/// New consumer-owned middleware paths should prefer this trait. The returned
+/// `impl Future` remains a concrete compiler-generated type after monomorphization;
+/// only the older compatibility API crosses into `dyn AuthVerifier`.
 pub trait StaticAuthVerifier: Send + Sync {
-    type Future: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static;
-
-    fn verify_owned(&self, request: RequestMetadata) -> Self::Future;
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+    ) -> impl Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static;
 }
 
 impl<P> StaticAuthVerifier for Arc<P>
 where
     P: StaticAuthVerifier + ?Sized,
 {
-    type Future = P::Future;
-
-    fn verify_owned(&self, request: RequestMetadata) -> Self::Future {
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+    ) -> impl Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static {
         self.as_ref().verify_owned(request)
     }
 }
 
 /// Static-dispatch Shared Auth provider boundary.
+///
+/// This trait is intentionally not object-safe. Provider-specific callers keep
+/// the provider and returned future concrete; the separate
+/// [`SharedAuthProviderVerifier`] trait remains for legacy dynamic consumers.
 pub trait StaticSharedAuthProviderVerifier: Send + Sync {
-    type Future: Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
-        + Send
-        + 'static;
-
     fn verify_owned(
         &self,
         request: RequestMetadata,
         context: SharedAuthProviderContext,
-    ) -> Self::Future;
+    ) -> impl Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+    + Send
+    + 'static;
 }
 
 /// Closure-backed authentication provider adapter.
@@ -78,9 +81,10 @@ where
     F: Fn(RequestMetadata) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static,
 {
-    type Future = Fut;
-
-    fn verify_owned(&self, request: RequestMetadata) -> Self::Future {
+    fn verify_owned(
+        &self,
+        request: RequestMetadata,
+    ) -> impl Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static {
         (self.f)(request)
     }
 }
@@ -182,13 +186,13 @@ where
         + Send
         + 'static,
 {
-    type Future = Fut;
-
     fn verify_owned(
         &self,
         request: RequestMetadata,
         context: SharedAuthProviderContext,
-    ) -> Self::Future {
+    ) -> impl Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
+    + Send
+    + 'static {
         (self.f)(request, context)
     }
 }
