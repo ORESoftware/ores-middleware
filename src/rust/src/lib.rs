@@ -7,6 +7,7 @@
 pub mod auth_provider;
 mod bootstrap;
 mod compat;
+pub mod composition;
 mod config;
 mod context;
 pub mod docs_serving;
@@ -45,6 +46,10 @@ pub use auth_provider::{
     shared_auth_provider_fn,
 };
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
+pub use composition::{
+    MiddlewareOrderIssue, MiddlewareOrderPolicy, MiddlewareOrderingRule, OrderIssueSeverity,
+    validate_consumer_middleware_order,
+};
 pub use config::{
     MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
     validate_config,

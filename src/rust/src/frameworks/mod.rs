@@ -2,6 +2,8 @@
 pub mod axum;
 #[cfg(feature = "axum")]
 pub mod axum_audit;
+#[cfg(feature = "axum")]
+pub mod axum_composable;
 #[cfg(feature = "dioxus")]
 pub mod dioxus;
 #[cfg(feature = "leptos")]
