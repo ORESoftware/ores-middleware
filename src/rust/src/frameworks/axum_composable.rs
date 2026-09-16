@@ -13,40 +13,31 @@ use crate::{AuthVerifier, RequestMetadata, TransportSecurity};
 
 /// State for the standalone Axum authentication primitive.
 ///
-/// `P` is a concrete implementation of the same object-safe [`AuthVerifier`]
-/// contract used by the bundled middleware stack. The `Arc` exists for cheap
-/// state cloning; consumers can still choose an `Arc<dyn AuthVerifier>` as `P`
-/// when runtime provider selection is useful.
-pub struct AuthLayerState<P> {
-    verifier: Arc<P>,
+/// Authentication is a runtime integration boundary, so the state stores one
+/// `Arc<dyn AuthVerifier>`. This keeps the Axum state type stable across provider
+/// implementations and lets applications select providers from configuration
+/// without making the router type generic over the provider.
+#[derive(Clone)]
+pub struct AuthLayerState {
+    verifier: Arc<dyn AuthVerifier>,
 }
 
-impl<P> Clone for AuthLayerState<P> {
-    fn clone(&self) -> Self {
-        Self {
-            verifier: Arc::clone(&self.verifier),
-        }
-    }
-}
-
-impl<P> AuthLayerState<P>
-where
-    P: AuthVerifier,
-{
+impl AuthLayerState {
     #[must_use]
-    pub fn from_provider(provider: P) -> Self {
-        Self {
-            verifier: Arc::new(provider),
-        }
+    pub fn from_provider<P>(provider: P) -> Self
+    where
+        P: AuthVerifier + 'static,
+    {
+        Self::from_shared(Arc::new(provider))
     }
 
     #[must_use]
-    pub fn from_shared(provider: Arc<P>) -> Self {
+    pub fn from_shared(provider: Arc<dyn AuthVerifier>) -> Self {
         Self { verifier: provider }
     }
 
     #[must_use]
-    pub fn verifier(&self) -> &P {
+    pub fn verifier(&self) -> &(dyn AuthVerifier + 'static) {
         self.verifier.as_ref()
     }
 }
@@ -55,17 +46,14 @@ where
 ///
 /// Compose this directly with `middleware::from_fn_with_state` at the exact
 /// route/router boundary and ordering selected by the consuming service. Keeping
-/// Axum's concrete `FromFnLayer` in the consumer expression preserves all of its
-/// `Service<Request>` bounds; there is no need for an additional boxed Tower
-/// service solely to package this middleware.
-pub async fn authenticate<P>(
-    State(state): State<AuthLayerState<P>>,
+/// Axum's concrete `FromFnLayer` in the consumer expression preserves its
+/// `Service<Request>` information; the provider inside the state can still be a
+/// runtime-selected trait object.
+pub async fn authenticate(
+    State(state): State<AuthLayerState>,
     mut request: Request,
     next: Next,
-) -> Response
-where
-    P: AuthVerifier + 'static,
-{
+) -> Response {
     let metadata = request_metadata(&request);
     match state.verifier.verify(&metadata).await {
         Ok(decision) => {
@@ -192,6 +180,39 @@ mod tests {
             .await
             .expect("body");
         assert_eq!(body.as_ref(), b"alice:tenant-a");
+    }
+
+    #[tokio::test]
+    async fn shared_dynamic_provider_handle_uses_the_same_state_type() {
+        let provider: Arc<dyn AuthVerifier> = Arc::new(auth_provider_fn(
+            |_request: RequestMetadata| async move {
+                Ok(AuthDecision {
+                    user_id: Some("dynamic-user".into()),
+                    tenant_id: Some("dynamic-tenant".into()),
+                    claims: BTreeMap::new(),
+                })
+            },
+        ));
+        let state = AuthLayerState::from_shared(provider);
+        let app = Router::new().route("/me", get(identity)).layer(
+            middleware::from_fn_with_state(state, authenticate),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/me")
+                    .body(axum::body::Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(body.as_ref(), b"dynamic-user:dynamic-tenant");
     }
 
     #[tokio::test]
