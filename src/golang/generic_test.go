@@ -2,6 +2,7 @@ package oresmiddleware
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"reflect"
 	"testing"
@@ -34,6 +35,18 @@ func TestGenericProviderKeepsConcreteSDKConsumerOwned(t *testing.T) {
 	}
 	if decision.UserID != "alice" {
 		t.Fatalf("expected alice, got %q", decision.UserID)
+	}
+}
+
+func TestGenericProviderPreservesConsumerErrorIdentity(t *testing.T) {
+	sentinel := errors.New("consumer-provider-failure")
+	provider := ProviderFrom(func(context.Context, string) (string, error) {
+		return "", sentinel
+	})
+
+	_, err := provider.Verify(context.Background(), "request")
+	if !errors.Is(err, sentinel) || err != sentinel {
+		t.Fatalf("provider error identity changed: got %v", err)
 	}
 }
 
@@ -138,6 +151,33 @@ func TestComposeNamedGenericDoesNotInterpretConsumerStageNames(t *testing.T) {
 	want := []string{"custom-z", "auth-provider-v42", "custom-a"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("stage names/order were interpreted: got %#v want %#v", events, want)
+	}
+}
+
+func TestComposeNamedGenericPreservesDuplicateStages(t *testing.T) {
+	events := []string{}
+	stage := func(name string) NamedGenericMiddleware[string, string] {
+		return NamedGenericMiddleware[string, string]{
+			Name: name,
+			Middleware: func(next GenericHandler[string, string]) GenericHandler[string, string] {
+				return func(ctx context.Context, request string) (string, error) {
+					events = append(events, name)
+					return next(ctx, request)
+				}
+			},
+		}
+	}
+	handler := GenericHandler[string, string](func(_ context.Context, request string) (string, error) {
+		return request, nil
+	})
+
+	composed := ComposeNamedGeneric(handler, stage("auth"), stage("auth"), stage("audit"))
+	if _, err := composed(context.Background(), "request"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"auth", "auth", "audit"}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("duplicate stages changed: got %#v want %#v", events, want)
 	}
 }
 
