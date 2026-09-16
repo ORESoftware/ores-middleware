@@ -4,17 +4,23 @@ on:
   pull_request:
     paths:
       - '.github/workflows/zed-source-tag.yml'
+      - '.github/workflows/release-zed.yml'
       - '.zpkg.toml'
       - '.zpkg.lock'
       - 'scripts/check_zpkg.py'
+      - 'scripts/check_zed_release_policy.py'
+      - 'scripts/run-zed-release-acceptance.sh'
       - 'scripts/test_build_targets.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/zed-source-tag.yml'
+      - '.github/workflows/release-zed.yml'
       - '.zpkg.toml'
       - '.zpkg.lock'
       - 'scripts/check_zpkg.py'
+      - 'scripts/check_zed_release_policy.py'
+      - 'scripts/run-zed-release-acceptance.sh'
       - 'scripts/test_build_targets.py'
   workflow_dispatch:
 
@@ -34,36 +40,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Validate package identity and immutable tag policy
+      - name: Validate package identity and release ownership
         run: |
           set -euo pipefail
           python3 scripts/check_zpkg.py
+          python3 scripts/check_zed_release_policy.py
           python3 -m unittest scripts/test_build_targets.py -v
-          python3 - <<'PY'
-          import re
-          import tomllib
-          from pathlib import Path
-
-          manifest = tomllib.loads(Path('.zpkg.toml').read_text())
-          package = manifest['package']
-          assert package['org'] == 'oresoftware'
-          assert package['name'] == 'ores-middleware'
-          version = package['version']
-          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
-          assert package['repository']['vcs'] == 'git'
-          assert package['repository']['url'] == 'https://github.com/ORESoftware/ores-middleware'
-          assert manifest['publish']['tag_format'] == 'v{version}'
-          print(f'expected immutable release tag: v{version}')
-          PY
-      - name: Assert release workflow owns tag mutation
+      - name: Syntax-check release shell entrypoints
         shell: bash
         run: |
           set -euo pipefail
-          test -f .github/workflows/release-zed.yml
-          if grep -Eq '^[[:space:]]+contents:[[:space:]]+write[[:space:]]*$' .github/workflows/zed-source-tag.yml; then
-            echo 'source-tag policy workflow must remain read-only; release-zed owns tag creation' >&2
-            exit 1
-          fi
+          bash -n scripts/run-zed-release-acceptance.sh
 
   resolve-public-release-lock:
     if: >-
