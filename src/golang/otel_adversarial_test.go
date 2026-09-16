@@ -50,6 +50,17 @@ func (transport *failingLogTransport) WriteCount() int {
 	return transport.writes
 }
 
+type authBaggageEnricherFunc func(context.Context, *http.Request, RequestContext, AuthDecision) (map[string]string, error)
+
+func (fn authBaggageEnricherFunc) Enrich(
+	ctx context.Context,
+	request *http.Request,
+	requestContext RequestContext,
+	decision AuthDecision,
+) (map[string]string, error) {
+	return fn(ctx, request, requestContext, decision)
+}
+
 func newTestOresLogger(name string, transport nextloggers.Transport) *nextloggers.Logger {
 	return NewOresLogger(OresLoggerOptions{
 		AppName:    "middleware-adversarial-test",
@@ -89,6 +100,18 @@ func TestOresLoggerParallelRequestsRemainIsolated(t *testing.T) {
 					"authorization": "must-not-propagate",
 				},
 			}, nil
+		}),
+		AuthBaggageEnricher: authBaggageEnricherFunc(func(
+			_ context.Context,
+			_ *http.Request,
+			_ RequestContext,
+			decision AuthDecision,
+		) (map[string]string, error) {
+			slot, ok := decision.Claims["otel.slot"]
+			if !ok {
+				return nil, errors.New("missing allow-listed otel.slot claim")
+			}
+			return map[string]string{"otel.slot": slot}, nil
 		}),
 	})
 	if err != nil {
