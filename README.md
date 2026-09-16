@@ -61,29 +61,34 @@ A request context contains the request ID, trace ID, optional span, tenant, user
 
 A bounded, TTL-limited request-ID registry may be used for diagnostics or controlled cross-boundary lookup. It is not the primary propagation mechanism and must not become an unbounded global map.
 
-## Canonical lifecycle order
+## Consumer-owned middleware composition
 
-Framework adapters preserve this order unless a framework requires an equivalent split-phase implementation:
+`ores-middleware` provides middleware primitives, adapters, validation helpers, provider ports, and reviewed ordering guidance. The consuming service owns **which middleware is enabled, its exact order, and its route/server scope**.
 
-1. Reject malformed transport metadata, unsupported media negotiation, and bodies over the configured limit before parsing.
-2. Determine whether the immediate peer is a trusted proxy; ignore or reject forwarded transport/IP headers from every other peer.
-3. Enforce HTTPS/TLS policy and establish request/trace IDs.
-4. Establish language-native request context and OpenTelemetry propagation.
-5. Apply IP/network policy, then authenticate through `shared-auth` or an embedded verifier.
-6. Apply tenant/user/IP/route rate limiting.
-7. Apply test-only bypass or fault injection only after runtime-environment validation.
-8. Resolve idempotency before state-changing business logic.
-9. Execute the handler under crash recovery and a cancellable deadline.
-10. Apply ETag/cache control, security headers, compression, metrics, tracing, schema capture, and `opto-sync` observation.
-11. Store successful idempotent responses and clear diagnostic context.
+`DEFAULT_MIDDLEWARE_ORDER` and `validate_middleware_order(...)` are reviewed guidance/helpers; they are not an instruction that every consumer must install the same chain. A service may intentionally choose a different order or omit middleware that is not applicable. Framework-specific composition should remain explicit at the application boundary so the service can reason about request and response ordering.
 
-Authentication is fail-closed. `opto-sync` observation may be configured fail-open for non-critical audit delivery, but its failure is always recorded. Test auth bypass and fault injection are configuration errors in production.
+A commonly reviewed profile is:
+
+1. panic/recovery boundary;
+2. deadline and request/trace context;
+3. trusted-proxy / transport-security checks;
+4. payload/flood controls;
+5. authentication and authorization;
+6. principal-aware rate limiting;
+7. idempotency;
+8. handler execution;
+9. response compression/security headers;
+10. telemetry finalization.
+
+This profile is guidance, not a universal hard-coded stack. Consumers may use a different composition when semantics require it. Ordering validators should distinguish technical incompatibilities from optional/recommended policy.
+
+Authentication is fail-closed when enabled. `opto-sync` observation may be configured fail-open for non-critical audit delivery, but its failure is always recorded. Test auth bypass and fault injection are configuration errors in production.
 
 ## Integration ports
 
 The core packages depend on narrow ports rather than hard-coding provider SDKs:
 
-- **shared-auth:** token/JWT verification or a configured HTTP introspection hook. A configured auth integration must establish a user or return `401`.
+- **shared-auth / auth providers:** token/JWT verification or a configured HTTP introspection hook. The consuming service pins the concrete auth SDK/version and injects it through the stable ORES provider interface. See [`docs/provider-injection.md`](docs/provider-injection.md).
 - **opto-sync:** request-completion observer/outbox hook. Payloads contain correlation and operational metadata, not credentials or unrestricted bodies.
 - **ores-otel:** trace propagation and telemetry sink. The W3C `traceparent` and `baggage` propagators are the baseline.
 - **rate and idempotency stores:** in-memory implementations support local development and tests; distributed services should inject Redis or another durable/consistent implementation appropriate to the endpoint semantics.
@@ -108,6 +113,8 @@ config.settings.tls.mode = "disabled".into();
 let stack = Arc::new(MiddlewareStack::new(config)?);
 let app = ores_middleware::frameworks::axum::install(app, stack);
 ```
+
+Concrete auth libraries are injected by the consuming crate rather than linked into `ores-middleware` core. For closure adapters, dual-version migrations, and Shared Auth examples, see [`docs/provider-injection.md`](docs/provider-injection.md).
 
 ### TypeScript / JavaScript
 
@@ -179,6 +186,7 @@ A downstream server PR is complete only when it:
 2. installs the framework adapter at the actual router/server boundary;
 3. supplies a service name and explicit TLS/trusted-proxy policy;
 4. wires shared-auth, opto-sync, and ores-otel ports as applicable;
-5. adds tests for correlation headers, context propagation, payload limits, auth failure, deadlines, and production safety;
-6. documents any temporarily disabled capability and links a tracked follow-up;
-7. keeps the PR draft until its own build and tests pass.
+5. chooses and documents the middleware selection/order appropriate to that service;
+6. adds tests for correlation headers, context propagation, payload limits, auth failure, deadlines, and production safety;
+7. documents any temporarily disabled capability and links a tracked follow-up;
+8. keeps the PR draft until its own build and tests pass.
