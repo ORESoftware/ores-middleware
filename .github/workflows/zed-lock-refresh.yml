@@ -70,7 +70,7 @@ jobs:
           lock = tomllib.loads(Path('.zpkg.lock').read_text())
           locked = {
               f"{item.get('org')}/{item.get('name')}": item
-              for item in lock.get('package', [])
+              for item in lock.get('packages', [])
           }
           missing = sorted(set(manifest.get('dependencies', {})) - set(locked))
           if missing:
