@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use ores_middleware::{
-    AuthDecision, AuthVerifier, IntegrationError, RequestMetadata, SharedAuthDataPlane,
+    AuthDecision, AuthStage, AuthVerifier, IntegrationError, RequestMetadata, SharedAuthDataPlane,
     SharedAuthProvider, SharedAuthProviderContext, SharedAuthProviderFailure,
-    SharedAuthProviderFailureKind, SharedAuthVerifiedPrincipal, StaticAuthVerifier,
-    StaticSharedAuthProviderVerifier, auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn,
+    SharedAuthProviderFailureKind, SharedAuthProviderVerifier, SharedAuthVerifiedPrincipal,
+    auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn,
 };
 
 fn request(token: &str) -> RequestMetadata {
@@ -19,7 +19,7 @@ fn request(token: &str) -> RequestMetadata {
 }
 
 #[tokio::test]
-async fn public_auth_provider_adapter_is_sdk_agnostic_without_dyn() {
+async fn public_auth_provider_adapter_is_sdk_agnostic() {
     #[derive(Clone)]
     struct ConsumerPinnedSdk {
         accepted_prefix: &'static str,
@@ -56,15 +56,12 @@ async fn public_auth_provider_adapter_is_sdk_agnostic_without_dyn() {
         }
     });
 
-    let decision = provider
-        .verify_owned(request("sdk-v7:alice"))
-        .await
-        .unwrap();
+    let decision = provider.verify(&request("sdk-v7:alice")).await.unwrap();
     assert_eq!(decision.user_id.as_deref(), Some("alice"));
 }
 
 #[tokio::test]
-async fn public_shared_auth_adapter_has_static_dispatch_path() {
+async fn public_shared_auth_adapter_uses_existing_provider_port() {
     let provider = shared_auth_provider_fn(
         |request: RequestMetadata, context: SharedAuthProviderContext| async move {
             let subject = request
@@ -99,7 +96,7 @@ async fn public_shared_auth_adapter_has_static_dispatch_path() {
     };
 
     let principal = provider
-        .verify_owned(request("bob"), context)
+        .verify(&request("bob"), &context)
         .await
         .unwrap();
 
@@ -108,18 +105,25 @@ async fn public_shared_auth_adapter_has_static_dispatch_path() {
 }
 
 #[tokio::test]
-async fn dynamic_auth_is_an_explicit_legacy_compatibility_boundary() {
-    let provider = auth_provider_fn(|_request: RequestMetadata| async {
+async fn same_provider_can_feed_auth_stage_or_dynamic_stack_boundary() {
+    let stage_provider = auth_provider_fn(|_request: RequestMetadata| async {
+        Ok(AuthDecision {
+            user_id: Some("stage-user".into()),
+            tenant_id: None,
+            claims: BTreeMap::new(),
+        })
+    });
+    let stage = AuthStage::from_provider("auth", stage_provider);
+    assert_eq!(stage.name(), "auth");
+
+    let stack_provider = auth_provider_fn(|_request: RequestMetadata| async {
         Ok(AuthDecision {
             user_id: Some("legacy-user".into()),
             tenant_id: None,
             claims: BTreeMap::new(),
         })
     });
-
-    let provider = dyn_auth_provider(provider);
-    let decision = AuthVerifier::verify(provider.as_ref(), &request("legacy"))
-        .await
-        .unwrap();
+    let provider = dyn_auth_provider(stack_provider);
+    let decision = provider.verify(&request("legacy")).await.unwrap();
     assert_eq!(decision.user_id.as_deref(), Some("legacy-user"));
 }
