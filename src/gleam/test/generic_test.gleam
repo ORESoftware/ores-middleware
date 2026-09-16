@@ -87,3 +87,42 @@ pub fn named_middleware_names_are_not_interpreted_test() {
 
   assert result == expected
 }
+
+pub fn empty_middleware_lists_are_identity_transforms_test() {
+  let base = generic.handler(fn(request) { request <> ":unchanged" })
+  let unnamed = generic.compose(base, [])
+  let named = generic.compose_named(base, [])
+
+  assert generic.run(unnamed, "request") == "request:unchanged"
+  assert generic.run(named, "request") == "request:unchanged"
+}
+
+pub fn response_type_can_hold_effectful_or_transport_neutral_results_test() {
+  let base =
+    generic.handler(fn(request) {
+      case request {
+        "ok" -> Ok(200)
+        _ -> Error("consumer-defined-failure")
+      }
+    })
+  let composed = generic.compose(base, [])
+
+  assert generic.run(composed, "ok") == Ok(200)
+  assert generic.run(composed, "bad") == Error("consumer-defined-failure")
+}
+
+pub fn duplicate_named_stages_are_preserved_without_deduplication_test() {
+  let stage = fn(name) {
+    generic.NamedMiddleware(
+      name: name,
+      middleware: generic.middleware(fn(next) {
+        generic.handler(fn(request) { name <> ">" <> generic.run(next, request) })
+      }),
+    )
+  }
+  let base = generic.handler(fn(request) { request })
+  let composed =
+    generic.compose_named(base, [stage("auth"), stage("auth"), stage("audit")])
+
+  assert generic.run(composed, "request") == "auth>auth>audit>request"
+}
