@@ -43,10 +43,11 @@ impl std::fmt::Debug for hardening::HardenedStagePipeline {
 }
 
 pub use auth_provider::{
-    FnAuthProvider, FnSharedAuthProvider, auth_provider_fn, dyn_auth_provider,
+    FnAuthProvider, FnSharedAuthProvider, StaticAuthVerifier,
+    StaticSharedAuthProviderVerifier, auth_provider_fn, dyn_auth_provider,
     shared_auth_provider_fn,
 };
-pub use auth_stage::AuthStage;
+pub use auth_stage::{AuthDecisionEnricher, AuthStage, NoopAuthDecisionEnricher};
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
 pub use composition::{
     MiddlewareCompositionPlan, MiddlewareOrderIssue, MiddlewareOrderPolicy,
