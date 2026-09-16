@@ -182,11 +182,7 @@ pub fn middleware_callback_receives_authenticated_pinned_logger_test() {
           ]),
         ))
       },
-      auth_baggage_enricher: fn(
-        _,
-        _,
-        auth: ores_middleware.AuthDecision,
-      ) {
+      auth_baggage_enricher: fn(_, _, auth: ores_middleware.AuthDecision) {
         case dict.get(auth.baggage, "otel.allowed") {
           Ok(value) -> dict.from_list([#("otel.allowed", value)])
           Error(_) -> dict.new()
