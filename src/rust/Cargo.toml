@@ -19,9 +19,10 @@ axum = { version = "0.8", optional = true }
 futures-util = "0.3"
 hmac = "0.12"
 http = "1"
-# Match ores-otel-web's source identity: one logger/context carrier and one
-# compatible serde_json graph, rather than a second SDK at an older revision.
-next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log", rev = "74bc1c421f5a56be28cade1a47f5d45de51f3b4b" }
+# Keep the logger/context/config loader and ores-otel-web on one reviewed source
+# identity. 080cc8cd includes the canonical strict Rust `.ores-otel.toml`
+# loader plus the shared lookup/parity fixes used by TypeScript and Dart.
+next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log", rev = "080cc8cd09ef6493aa2a2790bcd06793012d8766" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -37,13 +38,18 @@ serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "74bc1c421f5a56be28cade1a47f5d45de51f3b4b", default-features = false, features = ["axum"] }
+ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "080cc8cd09ef6493aa2a2790bcd06793012d8766", default-features = false, features = ["axum"] }
 
-# This suite imports the optional HTTP adapter; it still runs in the default
+# These suites import the optional HTTP adapter; they still run in the default
 # and all-feature gates. Portable core tests also run with no default features.
 [[test]]
 name = "otel_adversarial"
 path = "tests/otel_adversarial.rs"
+required-features = ["axum"]
+
+[[test]]
+name = "otel_runtime_config"
+path = "tests/otel_runtime_config.rs"
 required-features = ["axum"]
 
 [[bin]]

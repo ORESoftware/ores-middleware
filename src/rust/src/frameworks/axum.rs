@@ -26,7 +26,7 @@ use crate::{
         OperationDescriptor, OperationFailureKind, OperationOutcome, OperationScope,
         OperationTransport, run_operation_boundary_with_timeout,
     },
-    otel::RequestLogger,
+    otel::{RequestLogger, ServerOtelRuntime},
     stack_from_env,
 };
 
@@ -34,6 +34,8 @@ use crate::{
 struct DispatchState {
     stack: Arc<MiddlewareStack>,
     logger: Option<Logger>,
+    otel_tracing_enabled: bool,
+    otel_sample_ratio: f64,
 }
 
 pub fn install_from_env(
@@ -83,13 +85,15 @@ pub fn install(router: Router, stack: Arc<MiddlewareStack>) -> Router {
         DispatchState {
             stack,
             logger: None,
+            otel_tracing_enabled: false,
+            otel_sample_ratio: 0.0,
         },
     )
 }
 
-/// Installs the portable stack plus an ores-otel request logger. Handlers may
-/// extract [`RequestLogger`] from request extensions, while any file/module
-/// logger can call `info_context` or `warn_context` inside the same task.
+/// Installs the portable stack plus an ores-otel request logger using legacy
+/// full-sampling semantics. New applications that author `.ores-otel.toml`
+/// should prefer [`install_with_ores_runtime`].
 pub fn install_with_ores_logger(
     router: Router,
     stack: Arc<MiddlewareStack>,
@@ -100,6 +104,27 @@ pub fn install_with_ores_logger(
         DispatchState {
             stack,
             logger: Some(logger),
+            otel_tracing_enabled: true,
+            otel_sample_ratio: 1.0,
+        },
+    )
+}
+
+/// Installs the portable stack with the already-resolved canonical server OTel
+/// runtime. The application retains ownership of `runtime` so it can close the
+/// root logger/transport during graceful shutdown.
+pub fn install_with_ores_runtime(
+    router: Router,
+    stack: Arc<MiddlewareStack>,
+    runtime: &ServerOtelRuntime,
+) -> Router {
+    install_with_state(
+        router,
+        DispatchState {
+            stack,
+            logger: runtime.logger.clone(),
+            otel_tracing_enabled: runtime.config.enabled && runtime.config.tracing.enabled,
+            otel_sample_ratio: runtime.config.tracing.sample_ratio,
         },
     )
 }
@@ -133,10 +158,14 @@ async fn dispatch(
     };
     request.extensions_mut().insert(active.context.clone());
 
-    let request_logger = state
-        .logger
-        .as_ref()
-        .map(|logger| RequestLogger::new(logger.clone(), &active.context));
+    let request_logger = state.logger.as_ref().map(|logger| {
+        RequestLogger::new_with_sampling(
+            logger.clone(),
+            &active.context,
+            state.otel_tracing_enabled,
+            state.otel_sample_ratio,
+        )
+    });
     if let Some(logger) = &request_logger {
         request.extensions_mut().insert(logger.clone());
         emit_request_log(

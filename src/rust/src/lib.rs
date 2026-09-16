@@ -61,7 +61,11 @@ pub use operation::{
     OperationTransport, run_operation_boundary, run_operation_boundary_with_cancellation,
     run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
 };
-pub use otel::{RequestLogger, run_with_ores_log_context, to_ores_log_context};
+pub use otel::{
+    RequestLogger, ServerOtelRuntime, ServerOtelRuntimeError, load_server_otel_runtime,
+    load_server_otel_runtime_from_process_env, run_with_ores_log_context,
+    server_otel_runtime_from_resolved, should_sample_trace, to_ores_log_context,
+};
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use rate_limit::{
     DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm, RateLimitDecision,
