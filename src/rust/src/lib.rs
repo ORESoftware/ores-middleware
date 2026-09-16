@@ -27,6 +27,7 @@ pub mod resilience;
 pub mod runtime_manifest;
 pub mod security;
 pub mod shared_auth;
+pub mod shared_auth_static;
 pub mod stage;
 pub mod validation;
 
@@ -105,6 +106,7 @@ pub use shared_auth::{
     SharedAuthProviderVerifier, SharedAuthReadyStack, SharedAuthRuntimeTopology,
     SharedAuthServerRole, SharedAuthVerifiedPrincipal,
 };
+pub use shared_auth_static::PairedSharedAuthVerifier;
 pub use stage::{
     MiddlewareStageHandler, StageDecision, StageInput, StagePipeline, StageRejection, StageResponse,
 };
