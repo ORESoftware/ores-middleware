@@ -15,7 +15,8 @@ pub fn generic_provider_keeps_sdk_consumer_owned_test() {
       }
     })
 
-  assert generic.verify(provider, "v7:alice") == Ok("alice")
+  let result = generic.verify(provider, "v7:alice")
+  assert result == Ok("alice")
 }
 
 pub fn contextual_provider_keeps_request_context_and_failure_generic_test() {
@@ -27,14 +28,19 @@ pub fn contextual_provider_keeps_request_context_and_failure_generic_test() {
       }
     })
 
-  assert generic.verify(
-    provider,
-    generic.ContextualInput(request: "ok", context: "tenant-a"),
-  ) == Ok("tenant-a:accepted")
-  assert generic.verify(
-    provider,
-    generic.ContextualInput(request: "bad", context: "tenant-a"),
-  ) == Error(42)
+  let accepted =
+    generic.verify(
+      provider,
+      generic.ContextualInput(request: "ok", context: "tenant-a"),
+    )
+  let rejected =
+    generic.verify(
+      provider,
+      generic.ContextualInput(request: "bad", context: "tenant-a"),
+    )
+
+  assert accepted == Ok("tenant-a:accepted")
+  assert rejected == Error(42)
 }
 
 pub fn generic_middleware_order_is_consumer_owned_test() {
@@ -53,9 +59,11 @@ pub fn generic_middleware_order_is_consumer_owned_test() {
       stage("consumer-auth-v7"),
       stage("tenant-rate-limit"),
     ])
+  let result = generic.run(composed, "request")
+  let expected =
+    "request-id>consumer-auth-v7>tenant-rate-limit>request:handler<tenant-rate-limit<consumer-auth-v7<request-id"
 
-  assert generic.run(composed, "request")
-    == "request-id>consumer-auth-v7>tenant-rate-limit>request:handler<tenant-rate-limit<consumer-auth-v7<request-id"
+  assert result == expected
 }
 
 pub fn named_middleware_names_are_not_interpreted_test() {
@@ -74,7 +82,8 @@ pub fn named_middleware_names_are_not_interpreted_test() {
       stage("auth-provider-v42"),
       stage("custom-a"),
     ])
+  let result = generic.run(composed, "request")
+  let expected = "custom-z>auth-provider-v42>custom-a>request"
 
-  assert generic.run(composed, "request")
-    == "custom-z>auth-provider-v42>custom-a>request"
+  assert result == expected
 }
