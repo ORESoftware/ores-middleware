@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -159,6 +159,158 @@ pub struct MiddlewareOrderIssue {
     pub stage: Option<String>,
 }
 
+fn valid_order_rule(rule: &MiddlewareOrderingRule) -> bool {
+    !rule.before.trim().is_empty()
+        && !rule.after.trim().is_empty()
+        && !rule.code.trim().is_empty()
+        && !rule.message.trim().is_empty()
+        && rule.before != rule.after
+}
+
+fn validate_policy_shape(policy: &MiddlewareOrderPolicy) -> Vec<MiddlewareOrderIssue> {
+    let blank_selectors = policy
+        .required
+        .iter()
+        .chain(&policy.forbidden)
+        .chain(&policy.unique)
+        .filter_map(|stage| {
+            stage.trim().is_empty().then_some(MiddlewareOrderIssue {
+                code: "blank-policy-stage-name".into(),
+                message: "consumer middleware policy stage names must not be blank".into(),
+                severity: OrderIssueSeverity::Error,
+                stage: Some(stage.clone()),
+            })
+        });
+
+    let blank_first = policy.first.as_ref().and_then(|stage| {
+        stage.trim().is_empty().then_some(MiddlewareOrderIssue {
+            code: "blank-policy-stage-name".into(),
+            message: "consumer middleware policy first-stage name must not be blank".into(),
+            severity: OrderIssueSeverity::Error,
+            stage: Some(stage.clone()),
+        })
+    });
+
+    let malformed_rules = policy.rules.iter().filter_map(|rule| {
+        (!valid_order_rule(rule)).then_some(MiddlewareOrderIssue {
+            code: "invalid-order-rule".into(),
+            message: "order rules require non-empty, distinct before/after names, a non-empty code, and a non-empty message"
+                .into(),
+            severity: OrderIssueSeverity::Error,
+            stage: None,
+        })
+    });
+
+    let required = policy
+        .required
+        .iter()
+        .filter(|stage| !stage.trim().is_empty())
+        .cloned()
+        .collect::<HashSet<_>>();
+    let forbidden = policy
+        .forbidden
+        .iter()
+        .filter(|stage| !stage.trim().is_empty())
+        .cloned()
+        .collect::<HashSet<_>>();
+    let mut contradictory = required
+        .intersection(&forbidden)
+        .cloned()
+        .collect::<HashSet<_>>();
+    if let Some(first) = policy
+        .first
+        .as_ref()
+        .filter(|stage| !stage.trim().is_empty())
+    {
+        if forbidden.contains(first) {
+            contradictory.insert(first.clone());
+        }
+    }
+    let mut contradictory = contradictory.into_iter().collect::<Vec<_>>();
+    contradictory.sort();
+    let contradictions = contradictory.into_iter().map(|stage| MiddlewareOrderIssue {
+        code: "contradictory-stage-policy".into(),
+        message: format!(
+            "consumer middleware policy both requires/places and forbids stage {stage:?}"
+        ),
+        severity: OrderIssueSeverity::Error,
+        stage: Some(stage),
+    });
+
+    blank_selectors
+        .chain(blank_first)
+        .chain(malformed_rules)
+        .chain(contradictions)
+        .collect()
+}
+
+fn active_order_cycle_issue(
+    names: &[String],
+    policy: &MiddlewareOrderPolicy,
+) -> Option<MiddlewareOrderIssue> {
+    let present = names.iter().cloned().collect::<HashSet<_>>();
+    let active_edges = policy
+        .rules
+        .iter()
+        .filter(|rule| {
+            valid_order_rule(rule)
+                && present.contains(&rule.before)
+                && present.contains(&rule.after)
+        })
+        .map(|rule| (rule.before.clone(), rule.after.clone()))
+        .collect::<HashSet<_>>();
+
+    if active_edges.is_empty() {
+        return None;
+    }
+
+    let mut adjacency = HashMap::<String, Vec<String>>::new();
+    let mut indegree = HashMap::<String, usize>::new();
+    for (before, after) in active_edges {
+        indegree.entry(before.clone()).or_insert(0);
+        *indegree.entry(after.clone()).or_insert(0) += 1;
+        adjacency.entry(before).or_default().push(after);
+    }
+
+    let mut queue = indegree
+        .iter()
+        .filter_map(|(stage, degree)| (*degree == 0).then_some(stage.clone()))
+        .collect::<VecDeque<_>>();
+    let mut visited = 0usize;
+    while let Some(stage) = queue.pop_front() {
+        visited += 1;
+        if let Some(next) = adjacency.get(&stage) {
+            for after in next {
+                let degree = indegree
+                    .get_mut(after)
+                    .expect("active ordering graph contains every target node");
+                *degree -= 1;
+                if *degree == 0 {
+                    queue.push_back(after.clone());
+                }
+            }
+        }
+    }
+
+    if visited == indegree.len() {
+        return None;
+    }
+
+    let mut cycle_candidates = indegree
+        .into_iter()
+        .filter_map(|(stage, degree)| (degree > 0).then_some(stage))
+        .collect::<Vec<_>>();
+    cycle_candidates.sort();
+    Some(MiddlewareOrderIssue {
+        code: "consumer-order-cycle".into(),
+        message: format!(
+            "active consumer middleware ordering rules contain a cycle involving {cycle_candidates:?}"
+        ),
+        severity: OrderIssueSeverity::Error,
+        stage: None,
+    })
+}
+
 /// Validate a concrete middleware sequence against policy supplied by the
 /// consuming service.
 ///
@@ -166,6 +318,11 @@ pub struct MiddlewareOrderIssue {
 /// requirement. When duplicate stage names are allowed, a `before -> after`
 /// rule requires the last `before` occurrence to precede the first `after`
 /// occurrence so interleaving cannot silently satisfy the rule.
+///
+/// Policy declarations are validated at the same boundary: blank selectors,
+/// contradictory required/forbidden declarations, malformed rules, and active
+/// ordering cycles are returned as explicit issues instead of being left to
+/// incidental runtime ordering failures.
 pub fn validate_consumer_middleware_order<S>(
     stages: &[S],
     policy: &MiddlewareOrderPolicy,
@@ -186,107 +343,120 @@ where
         },
     );
 
-    let required = policy.required.iter().filter_map(|stage| {
-        (!present.contains(stage)).then_some(MiddlewareOrderIssue {
-            code: "required-stage-missing".into(),
-            message: format!("consumer policy requires middleware stage {stage:?}"),
-            severity: OrderIssueSeverity::Error,
-            stage: Some(stage.clone()),
-        })
-    });
-
-    let forbidden = policy.forbidden.iter().filter_map(|stage| {
-        present.contains(stage).then_some(MiddlewareOrderIssue {
-            code: "forbidden-stage-present".into(),
-            message: format!("consumer policy forbids middleware stage {stage:?}"),
-            severity: OrderIssueSeverity::Error,
-            stage: Some(stage.clone()),
-        })
-    });
-
-    let unique = policy.unique.iter().filter_map(|stage| {
-        positions
-            .get(stage)
-            .is_some_and(|indexes| indexes.len() > 1)
-            .then_some(MiddlewareOrderIssue {
-                code: "consumer-unique-stage-duplicated".into(),
-                message: format!("consumer policy requires stage {stage:?} to occur at most once"),
+    let required = policy
+        .required
+        .iter()
+        .filter(|stage| !stage.trim().is_empty())
+        .filter_map(|stage| {
+            (!present.contains(stage)).then_some(MiddlewareOrderIssue {
+                code: "required-stage-missing".into(),
+                message: format!("consumer policy requires middleware stage {stage:?}"),
                 severity: OrderIssueSeverity::Error,
                 stage: Some(stage.clone()),
             })
-    });
+        });
 
-    let first = policy.first.as_ref().and_then(|stage| {
-        (names.first() != Some(stage)).then_some(MiddlewareOrderIssue {
-            code: "consumer-first-stage-mismatch".into(),
-            message: format!("consumer policy requires {stage:?} to be the first stage"),
-            severity: OrderIssueSeverity::Error,
-            stage: Some(stage.clone()),
-        })
-    });
+    let forbidden = policy
+        .forbidden
+        .iter()
+        .filter(|stage| !stage.trim().is_empty())
+        .filter_map(|stage| {
+            present.contains(stage).then_some(MiddlewareOrderIssue {
+                code: "forbidden-stage-present".into(),
+                message: format!("consumer policy forbids middleware stage {stage:?}"),
+                severity: OrderIssueSeverity::Error,
+                stage: Some(stage.clone()),
+            })
+        });
 
-    let order = policy.rules.iter().filter_map(|rule| {
-        let before = positions
-            .get(&rule.before)
-            .and_then(|value| value.last())
-            .copied();
-        let after = positions
-            .get(&rule.after)
-            .and_then(|value| value.first())
-            .copied();
-        match (before, after) {
-            (Some(left), Some(right)) if left < right => None,
-            (Some(_), Some(_)) => Some(MiddlewareOrderIssue {
-                code: rule.code.clone(),
-                message: rule.message.clone(),
-                severity: rule.severity,
-                stage: None,
-            }),
-            _ if rule.require_both => Some(MiddlewareOrderIssue {
-                code: rule.code.clone(),
-                message: rule.message.clone(),
-                severity: rule.severity,
-                stage: None,
-            }),
-            _ => None,
-        }
-    });
+    let unique = policy
+        .unique
+        .iter()
+        .filter(|stage| !stage.trim().is_empty())
+        .filter_map(|stage| {
+            positions
+                .get(stage)
+                .is_some_and(|indexes| indexes.len() > 1)
+                .then_some(MiddlewareOrderIssue {
+                    code: "consumer-unique-stage-duplicated".into(),
+                    message: format!(
+                        "consumer policy requires stage {stage:?} to occur at most once"
+                    ),
+                    severity: OrderIssueSeverity::Error,
+                    stage: Some(stage.clone()),
+                })
+        });
 
-    required
+    let first = policy
+        .first
+        .as_ref()
+        .filter(|stage| !stage.trim().is_empty())
+        .and_then(|stage| {
+            (names.first() != Some(stage)).then_some(MiddlewareOrderIssue {
+                code: "consumer-first-stage-mismatch".into(),
+                message: format!("consumer policy requires {stage:?} to be the first stage"),
+                severity: OrderIssueSeverity::Error,
+                stage: Some(stage.clone()),
+            })
+        });
+
+    let order = policy
+        .rules
+        .iter()
+        .filter(|rule| valid_order_rule(rule))
+        .filter_map(|rule| {
+            let before = positions
+                .get(&rule.before)
+                .and_then(|value| value.last())
+                .copied();
+            let after = positions
+                .get(&rule.after)
+                .and_then(|value| value.first())
+                .copied();
+            match (before, after) {
+                (Some(left), Some(right)) if left < right => None,
+                (Some(_), Some(_)) => Some(MiddlewareOrderIssue {
+                    code: rule.code.clone(),
+                    message: rule.message.clone(),
+                    severity: rule.severity,
+                    stage: None,
+                }),
+                _ if rule.require_both => Some(MiddlewareOrderIssue {
+                    code: rule.code.clone(),
+                    message: rule.message.clone(),
+                    severity: rule.severity,
+                    stage: None,
+                }),
+                _ => None,
+            }
+        });
+
+    validate_policy_shape(policy)
+        .into_iter()
+        .chain(required)
         .chain(forbidden)
         .chain(unique)
         .chain(first)
         .chain(order)
+        .chain(active_order_cycle_issue(&names, policy))
         .collect()
 }
 
-/// Validate only the shape of a declaration, independently of the stage order
-/// against which its consumer-authored policy is evaluated.
+/// Validate only plan-owned stage declarations. Policy shape is checked by
+/// `validate_consumer_middleware_order(...)` so callers receive one copy of each
+/// policy issue.
 fn validate_plan_shape(plan: &MiddlewareCompositionPlan) -> Vec<MiddlewareOrderIssue> {
-    let blank_stages = plan.stages.iter().filter_map(|stage| {
-        stage.trim().is_empty().then_some(MiddlewareOrderIssue {
-            code: "blank-stage-name".into(),
-            message: "middleware stage names must not be blank".into(),
-            severity: OrderIssueSeverity::Error,
-            stage: Some(stage.clone()),
+    plan.stages
+        .iter()
+        .filter_map(|stage| {
+            stage.trim().is_empty().then_some(MiddlewareOrderIssue {
+                code: "blank-stage-name".into(),
+                message: "middleware stage names must not be blank".into(),
+                severity: OrderIssueSeverity::Error,
+                stage: Some(stage.clone()),
+            })
         })
-    });
-
-    let malformed_rules = plan.policy.rules.iter().filter_map(|rule| {
-        let malformed = rule.before.trim().is_empty()
-            || rule.after.trim().is_empty()
-            || rule.code.trim().is_empty()
-            || rule.before == rule.after;
-        malformed.then_some(MiddlewareOrderIssue {
-            code: "invalid-order-rule".into(),
-            message: "order rules require non-empty, distinct before/after names and a non-empty code"
-                .into(),
-            severity: OrderIssueSeverity::Error,
-            stage: None,
-        })
-    });
-
-    blank_stages.chain(malformed_rules).collect()
+        .collect()
 }
 
 /// Validate the declaration itself before a runtime pipeline is built.
@@ -415,9 +585,21 @@ mod tests {
             .require_first("recovery");
         let stages = ["request-id", "test-bypass", "handler"];
         let issues = validate_consumer_middleware_order(&stages, &policy);
-        assert!(issues.iter().any(|issue| issue.code == "required-stage-missing"));
-        assert!(issues.iter().any(|issue| issue.code == "forbidden-stage-present"));
-        assert!(issues.iter().any(|issue| issue.code == "consumer-first-stage-mismatch"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "required-stage-missing")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "forbidden-stage-present")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "consumer-first-stage-mismatch")
+        );
     }
 
     #[test]
@@ -428,6 +610,86 @@ mod tests {
         .expect("rule without optional fields");
         assert_eq!(rule.severity, OrderIssueSeverity::Error);
         assert!(!rule.require_both);
+    }
+
+    #[test]
+    fn policy_rejects_blank_selectors_and_contradictions() {
+        let policy = MiddlewareOrderPolicy::new()
+            .require("auth")
+            .require(" ")
+            .forbid("auth")
+            .unique("")
+            .require_first("auth");
+        let issues = validate_consumer_middleware_order(&["auth"], &policy);
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "blank-policy-stage-name")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "contradictory-stage-policy")
+        );
+    }
+
+    #[test]
+    fn active_order_cycle_is_reported_explicitly() {
+        let policy = MiddlewareOrderPolicy::new()
+            .rule(MiddlewareOrderingRule::before(
+                "auth",
+                "limit",
+                "auth-before-limit",
+                "auth before limit",
+            ))
+            .rule(MiddlewareOrderingRule::before(
+                "limit",
+                "auth",
+                "limit-before-auth",
+                "limit before auth",
+            ));
+        let issues = validate_consumer_middleware_order(&["auth", "limit"], &policy);
+
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "consumer-order-cycle")
+        );
+    }
+
+    #[test]
+    fn optional_absent_rules_do_not_create_an_active_cycle() {
+        let policy = MiddlewareOrderPolicy::new()
+            .rule(MiddlewareOrderingRule::before(
+                "auth",
+                "optional-metrics",
+                "auth-before-metrics",
+                "auth before metrics",
+            ))
+            .rule(MiddlewareOrderingRule::before(
+                "optional-metrics",
+                "auth",
+                "metrics-before-auth",
+                "metrics before auth",
+            ));
+        let issues = validate_consumer_middleware_order(&["auth", "handler"], &policy);
+
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.code != "consumer-order-cycle")
+        );
+    }
+
+    #[test]
+    fn malformed_rule_requires_diagnostic_message() {
+        let policy = MiddlewareOrderPolicy::new().rule(MiddlewareOrderingRule::before(
+            "auth", "handler", "auth-first", " ",
+        ));
+        let issues = validate_consumer_middleware_order(&["auth", "handler"], &policy);
+        assert!(issues.iter().any(|issue| issue.code == "invalid-order-rule"));
+        assert!(issues.iter().all(|issue| issue.code != "auth-first"));
     }
 
     #[test]
@@ -460,7 +722,11 @@ mod tests {
                 .iter()
                 .any(|issue| issue.code == "runtime-stage-plan-mismatch")
         );
-        assert!(issues.iter().any(|issue| issue.code == "auth-before-limit"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "auth-before-limit")
+        );
     }
 
     #[test]
@@ -471,8 +737,16 @@ mod tests {
             .with_policy(MiddlewareOrderPolicy::new().require("auth"));
 
         let issues = validate_runtime_middleware_plan(&["handler"], &plan);
-        assert!(issues.iter().any(|issue| issue.code == "runtime-stage-plan-mismatch"));
-        assert!(issues.iter().any(|issue| issue.code == "required-stage-missing"));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "runtime-stage-plan-mismatch")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.code == "required-stage-missing")
+        );
     }
 
     #[test]
