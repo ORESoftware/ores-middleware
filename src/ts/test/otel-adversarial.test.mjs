@@ -72,7 +72,11 @@ test("parallel requests never cross-contaminate request, user, tenant, or baggag
         "otel.slot": request.headers.get("x-test-slot"),
         authorization: "must-not-propagate"
       }
-    })
+    }),
+    authBaggageEnricher: async (_request, _context, auth) => {
+      const slot = auth.claims?.["otel.slot"];
+      return slot ? { "otel.slot": slot } : {};
+    }
   });
 
   const requestCount = 48;
@@ -156,7 +160,11 @@ test("malformed correlation identifiers are replaced and unsafe claims are dropp
         authorization: "Bearer must-not-propagate",
         cookie: "must-not-propagate"
       }
-    })
+    }),
+    authBaggageEnricher: async (_request, _context, auth) => {
+      const vendor = auth.claims?.["otel.vendor"];
+      return vendor ? { "otel.vendor": vendor } : {};
+    }
   });
 
   let observed;
