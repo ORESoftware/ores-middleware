@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::{
     AuthDecision, AuthVerifier, IntegrationError,
@@ -29,24 +29,30 @@ impl AuthDecisionEnricher for NoopAuthDecisionEnricher {
     }
 }
 
-/// Framework-neutral authentication stage backed by any ORES auth provider.
+/// Framework-neutral authentication stage.
 ///
-/// The stage is generic over the provider only because consumers commonly know
-/// that concrete type at construction time. The provider contract itself is the
-/// same object-safe [`AuthVerifier`] used by `MiddlewareStack`, so consumers do
-/// not need parallel static/dynamic auth interfaces.
-pub struct AuthStage<P, E = NoopAuthDecisionEnricher> {
+/// Authentication is an integration/plugin boundary, so the provider is stored
+/// as `Arc<dyn AuthVerifier>`. That keeps the stage type stable when a service
+/// selects or swaps providers at runtime. The decision enricher remains generic
+/// because it is normally a small consumer-owned closure and does not need a
+/// second boxed callback boundary.
+pub struct AuthStage<E = NoopAuthDecisionEnricher> {
     name: &'static str,
-    verifier: P,
+    verifier: Arc<dyn AuthVerifier>,
     decision_enricher: E,
 }
 
-impl<P> AuthStage<P, NoopAuthDecisionEnricher>
-where
-    P: AuthVerifier,
-{
+impl AuthStage<NoopAuthDecisionEnricher> {
     #[must_use]
-    pub fn from_provider(name: &'static str, provider: P) -> Self {
+    pub fn from_provider<P>(name: &'static str, provider: P) -> Self
+    where
+        P: AuthVerifier + 'static,
+    {
+        Self::from_shared(name, Arc::new(provider))
+    }
+
+    #[must_use]
+    pub fn from_shared(name: &'static str, provider: Arc<dyn AuthVerifier>) -> Self {
         Self {
             name,
             verifier: provider,
@@ -55,9 +61,8 @@ where
     }
 }
 
-impl<P, E> AuthStage<P, E>
+impl<E> AuthStage<E>
 where
-    P: AuthVerifier,
     E: AuthDecisionEnricher,
 {
     #[must_use]
@@ -66,8 +71,8 @@ where
     }
 
     #[must_use]
-    pub fn provider(&self) -> &P {
-        &self.verifier
+    pub fn provider(&self) -> &(dyn AuthVerifier + 'static) {
+        self.verifier.as_ref()
     }
 
     /// Let the consumer map selected, reviewed auth decision data into
@@ -77,7 +82,7 @@ where
     /// logs. The stage establishes user/tenant context and copies only `otel.*`
     /// claims into request baggage, matching the bundled stack behavior.
     #[must_use]
-    pub fn with_decision_enricher<F>(self, enricher: F) -> AuthStage<P, F>
+    pub fn with_decision_enricher<F>(self, enricher: F) -> AuthStage<F>
     where
         F: AuthDecisionEnricher,
     {
@@ -111,9 +116,8 @@ where
     }
 }
 
-impl<P, E> MiddlewareStageHandler for AuthStage<P, E>
+impl<E> MiddlewareStageHandler for AuthStage<E>
 where
-    P: AuthVerifier + 'static,
     E: AuthDecisionEnricher + 'static,
 {
     fn name(&self) -> &'static str {
@@ -143,7 +147,7 @@ fn reject_auth(stage_name: &'static str, error: IntegrationError) -> StageDecisi
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
     use serde_json::json;
 
@@ -191,6 +195,30 @@ mod tests {
             StageDecision::Continue(input) => {
                 assert_eq!(input.context.user_id.as_deref(), Some("direct-user"));
                 assert_eq!(input.context.tenant_id.as_deref(), Some("direct-tenant"));
+            }
+            StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
+            StageDecision::Respond(response) => {
+                panic!("unexpected direct response: {}", response.status)
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn shared_dynamic_provider_handle_can_be_used_directly() {
+        let provider: Arc<dyn AuthVerifier> = Arc::new(auth_provider_fn(
+            |_request: RequestMetadata| async {
+                Ok(AuthDecision {
+                    user_id: Some("shared-user".into()),
+                    tenant_id: None,
+                    claims: BTreeMap::new(),
+                })
+            },
+        ));
+        let auth = AuthStage::from_shared("shared-auth", provider);
+
+        match auth.evaluate(input("token")).await {
+            StageDecision::Continue(input) => {
+                assert_eq!(input.context.user_id.as_deref(), Some("shared-user"));
             }
             StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
             StageDecision::Respond(response) => {
