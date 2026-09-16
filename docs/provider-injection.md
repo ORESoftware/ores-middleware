@@ -27,8 +27,12 @@ consumer Cargo.toml
                            v
                ores_middleware::AuthVerifier
                            |
-                           v
-                 MiddlewareStack / Axum
+                 +---------+----------+
+                 |                    |
+                 v                    v
+             AuthStage       standalone Axum layer
+                 |
+                 +-- compatibility: MiddlewareStack
 ```
 
 The concrete SDK types never become part of the `ores-middleware` public API.
@@ -38,9 +42,9 @@ The concrete SDK types never become part of the `ores-middleware` public API.
 `auth_provider_fn(...)` converts an async closure into an `AuthVerifier`. The closure receives owned `RequestMetadata`, which lets it capture and use any auth client without borrowing from the middleware stack.
 
 ```rust
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 use ores_middleware::{
-    AuthDecision, IntegrationError, MiddlewareStack, RequestMetadata,
+    AuthDecision, AuthStage, IntegrationError, RequestMetadata,
     auth_provider_fn,
 };
 
@@ -75,19 +79,25 @@ let auth = auth_provider_fn(move |request: RequestMetadata| {
     }
 });
 
-let stack = MiddlewareStack::new(config)?
-    .with_auth_verifier(Arc::new(auth));
+// The consuming service chooses this stage's exact position.
+let auth_stage = AuthStage::from_provider("company-auth", auth);
 ```
 
-`dyn_auth_provider(...)` is available when a caller wants an `Arc<dyn AuthVerifier>` directly:
+`AuthStage` sanitizes public failures itself and establishes stable user/tenant context. Provider-specific error messages are not copied to the public response.
+
+## Compatibility with `MiddlewareStack`
+
+`dyn_auth_provider(...)` is the recommended compatibility boundary when a caller needs an `Arc<dyn AuthVerifier>` for the older bundled `MiddlewareStack` API:
 
 ```rust
-use ores_middleware::{auth_provider_fn, dyn_auth_provider};
+use ores_middleware::{
+    MiddlewareStack, auth_provider_fn, dyn_auth_provider,
+};
 
 let provider = dyn_auth_provider(auth_provider_fn(move |request| {
     let client = client.clone();
     async move {
-        // map this concrete SDK/version into AuthDecision / IntegrationError
+        // Map this concrete SDK/version into AuthDecision / IntegrationError.
         authenticate(client, request).await
     }
 }));
@@ -95,6 +105,10 @@ let provider = dyn_auth_provider(auth_provider_fn(move |request| {
 let stack = MiddlewareStack::new(config)?
     .with_auth_verifier(provider);
 ```
+
+The compatibility wrapper deliberately sanitizes provider failures before handing them to `MiddlewareStack`: it logs only the bounded provider error code and returns `authentication_failed` / `authentication failed`. Raw SDK error messages are not logged or exposed because they can contain tokens, signing-key IDs, tenant data, or other sensitive/high-cardinality diagnostics.
+
+New consumer-owned compositions should prefer `AuthStage` or `frameworks::axum_composable::authenticate` rather than building new dependencies on the bundled stack lifecycle.
 
 ## Pinning a specific auth version belongs to the consumer
 
@@ -191,25 +205,21 @@ The same pattern applies independently to the Neon verifier. `SharedAuthReadySta
 
 ## Middleware order remains consumer-owned
 
-Provider injection does not imply a canonical middleware order. A consuming Axum service chooses both middleware types and ordering:
+Provider injection does not imply a canonical middleware order. A consuming Axum service chooses both middleware types and ordering. Prefer explicit route/router composition or the framework-neutral `StagePipeline`.
 
 ```rust
-use axum::{middleware, Router};
-use tower::ServiceBuilder;
+use std::sync::Arc;
+use ores_middleware::{StagePipeline, AuthStage};
 
-let stack = ServiceBuilder::new()
-    .layer(middleware::from_fn(request_id))
-    .layer(middleware::from_fn(auth))
-    .layer(middleware::from_fn(tenant_context))
-    .layer(middleware::from_fn(rate_limit))
-    .layer(middleware::from_fn(telemetry));
-
-let app = Router::new()
-    .merge(routes())
-    .layer(stack);
+let pipeline = StagePipeline::new()
+    .with_stage(Arc::new(request_id_stage))
+    .with_stage(Arc::new(AuthStage::from_provider("auth-v2", modern_auth)))
+    .with_stage(Arc::new(tenant_context_stage))
+    .with_stage(Arc::new(rate_limit_stage))
+    .with_stage(Arc::new(telemetry_stage));
 ```
 
-Another service may intentionally choose a different chain. `ores-middleware` may expose reviewed defaults and optional order-validation/advisory helpers, but the consuming service owns selection, ordering, and route scope.
+Another service may intentionally choose a different chain. `ores-middleware` exposes `MiddlewareOrderPolicy` and `MiddlewareCompositionPlan` so the consumer can validate only the invariants it owns. The legacy `DEFAULT_MIDDLEWARE_ORDER` is an opt-in reference profile, not a universal requirement.
 
 ## Route-specific providers
 
@@ -235,8 +245,9 @@ This is useful for migrations, admin/customer separation, tenant-specific identi
 
 1. Concrete provider SDKs are dependencies of the consumer, not `ores-middleware` core.
 2. Pin exact versions or immutable Git revisions when determinism is required.
-3. Map provider-specific errors into stable ORES error types at the adapter boundary.
-4. Do not leak provider SDK types into route/business interfaces.
-5. Keep credentials and secrets outside provider descriptors and logs.
-6. Consumers own middleware selection/order; provider adapters are composable primitives.
-7. Prefer a small adapter closure first; use a named newtype/struct when the mapping becomes substantial or needs dedicated tests.
+3. Map provider-specific success values into stable ORES types at the adapter boundary.
+4. Keep raw provider failure diagnostics inside the adapter boundary; public middleware failures are sanitized.
+5. Do not leak provider SDK types into route/business interfaces.
+6. Keep credentials and secrets outside provider descriptors and logs.
+7. Consumers own middleware selection/order; provider adapters are composable primitives.
+8. Prefer a small adapter closure first; use a named newtype/struct when the mapping becomes substantial or needs dedicated tests.
