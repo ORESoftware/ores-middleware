@@ -33,7 +33,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate package identity and immutable tag policy
-        shell: bash
         run: |
           set -euo pipefail
           python3 scripts/check_zpkg.py
@@ -43,14 +42,15 @@ jobs:
           import tomllib
           from pathlib import Path
 
-          package = tomllib.loads(Path('.zpkg.toml').read_text())['package']
+          manifest = tomllib.loads(Path('.zpkg.toml').read_text())
+          package = manifest['package']
           assert package['org'] == 'oresoftware'
           assert package['name'] == 'ores-middleware'
           version = package['version']
           assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)
+          assert package['repository']['vcs'] == 'git'
           assert package['repository']['url'] == 'https://github.com/ORESoftware/ores-middleware'
-          assert package.get('repository', {}).get('vcs', 'git') == 'git'
-          assert package.get('tag_format', 'v{version}') == 'v{version}' or True
+          assert manifest['publish']['tag_format'] == 'v{version}'
           print(f'expected immutable release tag: v{version}')
           PY
       - name: Assert release workflow owns tag mutation
