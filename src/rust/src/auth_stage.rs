@@ -1,12 +1,12 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin};
 
 use crate::{
-    AuthDecision, AuthVerifier, IntegrationError,
+    AuthDecision, IntegrationError, StaticAuthVerifier,
     stage::{MiddlewareStageHandler, StageDecision, StageInput, StageRejection},
 };
 
-/// Consumer hook for copying a reviewed subset of authentication decision data
-/// into generic stage attributes.
+/// Consumer hook for copying a reviewed subset of auth decision data into
+/// generic stage attributes.
 pub trait AuthDecisionEnricher: Send + Sync {
     fn enrich(&self, input: StageInput, decision: &AuthDecision) -> StageInput;
 }
@@ -29,30 +29,22 @@ impl AuthDecisionEnricher for NoopAuthDecisionEnricher {
     }
 }
 
-/// Framework-neutral authentication stage.
+/// Framework-neutral authentication stage backed by a concrete provider type.
 ///
-/// Authentication is an integration/plugin boundary, so the provider is stored
-/// as `Arc<dyn AuthVerifier>`. That keeps the stage type stable when a service
-/// selects or swaps providers at runtime. The decision enricher remains generic
-/// because it is normally a small consumer-owned closure and does not need a
-/// second boxed callback boundary.
-pub struct AuthStage<E = NoopAuthDecisionEnricher> {
+/// `P` remains concrete. Type erasure occurs only if the consumer inserts this
+/// stage into the heterogeneous `StagePipeline` registry.
+pub struct AuthStage<P, E = NoopAuthDecisionEnricher> {
     name: &'static str,
-    verifier: Arc<dyn AuthVerifier>,
+    verifier: P,
     decision_enricher: E,
 }
 
-impl AuthStage<NoopAuthDecisionEnricher> {
+impl<P> AuthStage<P, NoopAuthDecisionEnricher>
+where
+    P: StaticAuthVerifier,
+{
     #[must_use]
-    pub fn from_provider<P>(name: &'static str, provider: P) -> Self
-    where
-        P: AuthVerifier + 'static,
-    {
-        Self::from_shared(name, Arc::new(provider))
-    }
-
-    #[must_use]
-    pub fn from_shared(name: &'static str, provider: Arc<dyn AuthVerifier>) -> Self {
+    pub fn from_provider(name: &'static str, provider: P) -> Self {
         Self {
             name,
             verifier: provider,
@@ -61,8 +53,9 @@ impl AuthStage<NoopAuthDecisionEnricher> {
     }
 }
 
-impl<E> AuthStage<E>
+impl<P, E> AuthStage<P, E>
 where
+    P: StaticAuthVerifier,
     E: AuthDecisionEnricher,
 {
     #[must_use]
@@ -71,18 +64,12 @@ where
     }
 
     #[must_use]
-    pub fn provider(&self) -> &(dyn AuthVerifier + 'static) {
-        self.verifier.as_ref()
+    pub fn provider(&self) -> &P {
+        &self.verifier
     }
 
-    /// Let the consumer map selected, reviewed auth decision data into
-    /// [`StageInput::attributes`] without allocating a dynamic callback.
-    ///
-    /// By default arbitrary claims are *not* copied into generic attributes or
-    /// logs. The stage establishes user/tenant context and copies only `otel.*`
-    /// claims into request baggage, matching the bundled stack behavior.
     #[must_use]
-    pub fn with_decision_enricher<F>(self, enricher: F) -> AuthStage<F>
+    pub fn with_decision_enricher<F>(self, enricher: F) -> AuthStage<P, F>
     where
         F: AuthDecisionEnricher,
     {
@@ -93,10 +80,8 @@ where
         }
     }
 
-    /// Evaluate this stage directly without registering it in the heterogeneous
-    /// [`crate::StagePipeline`].
     pub async fn evaluate(&self, input: StageInput) -> StageDecision {
-        match self.verifier.verify(&input.request).await {
+        match self.verifier.verify_owned(input.request.clone()).await {
             Ok(decision) => StageDecision::Continue(Box::new(self.apply_decision(input, &decision))),
             Err(error) => reject_auth(self.name, error),
         }
@@ -116,8 +101,9 @@ where
     }
 }
 
-impl<E> MiddlewareStageHandler for AuthStage<E>
+impl<P, E> MiddlewareStageHandler for AuthStage<P, E>
 where
+    P: StaticAuthVerifier + 'static,
     E: AuthDecisionEnricher + 'static,
 {
     fn name(&self) -> &'static str {
@@ -128,6 +114,8 @@ where
         &'a self,
         input: StageInput,
     ) -> Pin<Box<dyn Future<Output = StageDecision> + Send + 'a>> {
+        // The boxed future belongs to the heterogeneous stage-registry boundary;
+        // the auth provider itself remains statically dispatched.
         Box::pin(self.evaluate(input))
     }
 }
@@ -147,14 +135,12 @@ fn reject_auth(stage_name: &'static str, error: IntegrationError) -> StageDecisi
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use serde_json::json;
 
     use super::*;
-    use crate::{
-        RequestContext, RequestMetadata, StagePipeline, StageResponse, auth_provider_fn,
-    };
+    use crate::{RequestContext, RequestMetadata, StagePipeline, StageResponse, auth_provider_fn};
 
     fn input(token: &str) -> StageInput {
         StageInput::new(
@@ -181,7 +167,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_evaluate_uses_the_same_provider_port_as_the_stack() {
+    async fn direct_evaluate_preserves_concrete_provider() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async {
             Ok(AuthDecision {
                 user_id: Some("direct-user".into()),
@@ -190,105 +176,17 @@ mod tests {
             })
         });
         let auth = AuthStage::from_provider("direct-auth", provider);
-
         match auth.evaluate(input("token")).await {
             StageDecision::Continue(input) => {
                 assert_eq!(input.context.user_id.as_deref(), Some("direct-user"));
                 assert_eq!(input.context.tenant_id.as_deref(), Some("direct-tenant"));
             }
-            StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
-            StageDecision::Respond(response) => {
-                panic!("unexpected direct response: {}", response.status)
-            }
+            _ => panic!("auth should continue"),
         }
     }
 
     #[tokio::test]
-    async fn shared_dynamic_provider_handle_can_be_used_directly() {
-        let provider: Arc<dyn AuthVerifier> = Arc::new(auth_provider_fn(
-            |_request: RequestMetadata| async {
-                Ok(AuthDecision {
-                    user_id: Some("shared-user".into()),
-                    tenant_id: None,
-                    claims: BTreeMap::new(),
-                })
-            },
-        ));
-        let auth = AuthStage::from_shared("shared-auth", provider);
-
-        match auth.evaluate(input("token")).await {
-            StageDecision::Continue(input) => {
-                assert_eq!(input.context.user_id.as_deref(), Some("shared-user"));
-            }
-            StageDecision::Reject(rejection) => panic!("unexpected rejection: {}", rejection.code),
-            StageDecision::Respond(response) => {
-                panic!("unexpected direct response: {}", response.status)
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn injected_provider_establishes_principal_at_consumer_selected_stage() {
-        #[derive(Clone)]
-        struct PinnedSdkV9;
-
-        impl PinnedSdkV9 {
-            async fn verify(&self, token: &str) -> Result<String, &'static str> {
-                token
-                    .strip_prefix("v9:")
-                    .map(ToOwned::to_owned)
-                    .ok_or("bad token")
-            }
-        }
-
-        let sdk = PinnedSdkV9;
-        let provider = auth_provider_fn(move |request: RequestMetadata| {
-            let sdk = sdk.clone();
-            async move {
-                let token = request
-                    .headers
-                    .get("authorization")
-                    .ok_or_else(|| IntegrationError {
-                        code: "missing_auth",
-                        message: "missing token".into(),
-                    })?;
-                let subject = sdk.verify(token).await.map_err(|message| IntegrationError {
-                    code: "provider_rejected",
-                    message: message.into(),
-                })?;
-                Ok(AuthDecision {
-                    user_id: Some(subject),
-                    tenant_id: Some("tenant-v9".into()),
-                    claims: BTreeMap::from([
-                        ("otel.auth_method".into(), "sdk-v9".into()),
-                        ("secret.internal_claim".into(), "must-not-auto-copy".into()),
-                    ]),
-                })
-            }
-        });
-
-        let auth = AuthStage::from_provider("company-auth-v9", provider);
-        let pipeline = StagePipeline::new().with_stage(Arc::new(auth));
-
-        assert_eq!(pipeline.stage_names(), vec!["company-auth-v9"]);
-        let response = pipeline
-            .execute(input("v9:alice"), |input| async move {
-                assert_eq!(input.context.user_id.as_deref(), Some("alice"));
-                assert_eq!(input.context.tenant_id.as_deref(), Some("tenant-v9"));
-                assert_eq!(
-                    input.context.baggage.get("otel.auth_method").map(String::as_str),
-                    Some("sdk-v9")
-                );
-                assert!(!input.attributes.contains_key("secret.internal_claim"));
-                StageResponse::empty(204)
-            })
-            .await;
-
-        assert_eq!(response.status, 204);
-    }
-
-    #[tokio::test]
-    async fn consumer_can_use_concrete_enricher_without_dynamic_callback() {
+    async fn concrete_enricher_is_consumer_owned() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async {
             Ok(AuthDecision {
                 user_id: Some("alice".into()),
@@ -304,13 +202,9 @@ mod tests {
             },
         );
         let pipeline = StagePipeline::new().with_stage(Arc::new(auth));
-
         let response = pipeline
             .execute(input("token"), |input| async move {
-                assert_eq!(
-                    input.attributes.get("authorization.role"),
-                    Some(&json!("admin"))
-                );
+                assert_eq!(input.attributes.get("authorization.role"), Some(&json!("admin")));
                 StageResponse::empty(200)
             })
             .await;
@@ -318,7 +212,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_failure_is_generic_and_does_not_leak_sdk_diagnostic() {
+    async fn provider_failure_does_not_leak_diagnostic() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async {
             Err(IntegrationError {
                 code: "provider_secret_code",
@@ -326,10 +220,8 @@ mod tests {
             })
         });
         let pipeline = StagePipeline::new().with_stage(Arc::new(AuthStage::from_provider(
-            "auth",
-            provider,
+            "auth", provider,
         )));
-
         let response = pipeline
             .execute(input("bad"), |_| async { StageResponse::empty(200) })
             .await;
