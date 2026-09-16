@@ -6,51 +6,13 @@ use crate::shared_auth::{
     SharedAuthVerifiedPrincipal,
 };
 
-/// Static-dispatch authentication provider boundary.
-///
-/// New consumer-owned middleware paths should prefer this trait. The returned
-/// `impl Future` remains a concrete compiler-generated type after monomorphization;
-/// only the older compatibility API crosses into `dyn AuthVerifier`.
-pub trait StaticAuthVerifier: Send + Sync {
-    fn verify_owned(
-        &self,
-        request: RequestMetadata,
-    ) -> impl Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static;
-}
-
-impl<P> StaticAuthVerifier for Arc<P>
-where
-    P: StaticAuthVerifier + ?Sized,
-{
-    fn verify_owned(
-        &self,
-        request: RequestMetadata,
-    ) -> impl Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static {
-        self.as_ref().verify_owned(request)
-    }
-}
-
-/// Static-dispatch Shared Auth provider boundary.
-///
-/// This trait is intentionally not object-safe. Provider-specific callers keep
-/// the provider and returned future concrete; the separate
-/// [`SharedAuthProviderVerifier`] trait remains for legacy dynamic consumers.
-pub trait StaticSharedAuthProviderVerifier: Send + Sync {
-    fn verify_owned(
-        &self,
-        request: RequestMetadata,
-        context: SharedAuthProviderContext,
-    ) -> impl Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
-    + Send
-    + 'static;
-}
-
 /// Closure-backed authentication provider adapter.
 ///
-/// This adapter is deliberately independent of any concrete authentication SDK.
-/// The consuming application owns and pins the concrete auth dependency/version,
-/// captures that client in the closure, and maps the SDK result into the stable
-/// ORES `AuthDecision` / `IntegrationError` contract.
+/// The consuming application owns and pins the concrete authentication SDK,
+/// captures that client in the closure, and maps SDK-specific values into the
+/// stable ORES `AuthDecision` / `IntegrationError` boundary. The adapter itself
+/// implements the existing object-safe [`AuthVerifier`] port so there is one
+/// provider interface across standalone composition and `MiddlewareStack`.
 pub struct FnAuthProvider<F> {
     f: F,
 }
@@ -62,11 +24,6 @@ impl<F> FnAuthProvider<F> {
     }
 }
 
-/// Adapt an async closure into the static ORES auth-provider boundary.
-///
-/// The returned adapter also implements the older object-safe [`AuthVerifier`]
-/// port, but new code should normally keep it concrete and call it through
-/// [`StaticAuthVerifier`].
 #[must_use]
 pub fn auth_provider_fn<F, Fut>(f: F) -> FnAuthProvider<F>
 where
@@ -76,21 +33,21 @@ where
     FnAuthProvider::new(f)
 }
 
-impl<F, Fut> StaticAuthVerifier for FnAuthProvider<F>
+impl<F, Fut> AuthVerifier for FnAuthProvider<F>
 where
     F: Fn(RequestMetadata) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static,
 {
-    fn verify_owned(
-        &self,
-        request: RequestMetadata,
-    ) -> impl Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static {
-        (self.f)(request)
+    fn verify<'a>(
+        &'a self,
+        request: &'a RequestMetadata,
+    ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        Box::pin((self.f)(request.clone()))
     }
 }
 
 /// Compatibility wrapper used when a provider is handed to APIs that expose
-/// provider errors too directly (notably the legacy bundled `MiddlewareStack`).
+/// provider errors too directly (notably the bundled `MiddlewareStack`).
 struct SanitizingAuthProvider<P> {
     inner: P,
 }
@@ -129,12 +86,11 @@ where
     }
 }
 
-/// Explicit compatibility escape hatch for APIs that still require
-/// `Arc<dyn AuthVerifier>`.
+/// Convert any concrete auth provider into the sanitizing object-safe provider
+/// handle used by the bundled middleware stack.
 ///
-/// Do not use this helper for `AuthStage` or the standalone Axum auth primitive;
-/// both now preserve the concrete provider type. The wrapper sanitizes provider
-/// failures before crossing the older dynamic boundary.
+/// `dyn` is intentional here: auth implementations are runtime-pluggable and the
+/// stack should not become generic over every integration it owns.
 #[must_use]
 pub fn dyn_auth_provider<P>(provider: P) -> Arc<dyn AuthVerifier>
 where
@@ -143,20 +99,7 @@ where
     Arc::new(SanitizingAuthProvider::new(provider))
 }
 
-impl<F, Fut> AuthVerifier for FnAuthProvider<F>
-where
-    F: Fn(RequestMetadata) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'static,
-{
-    fn verify<'a>(
-        &'a self,
-        request: &'a RequestMetadata,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
-        Box::pin(self.verify_owned(request.clone()))
-    }
-}
-
-/// Closure-backed adapter for the stricter paired Shared Auth provider boundary.
+/// Closure-backed adapter for the stricter Shared Auth provider boundary.
 pub struct FnSharedAuthProvider<F> {
     f: F,
 }
@@ -179,24 +122,6 @@ where
     FnSharedAuthProvider::new(f)
 }
 
-impl<F, Fut> StaticSharedAuthProviderVerifier for FnSharedAuthProvider<F>
-where
-    F: Fn(RequestMetadata, SharedAuthProviderContext) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
-        + Send
-        + 'static,
-{
-    fn verify_owned(
-        &self,
-        request: RequestMetadata,
-        context: SharedAuthProviderContext,
-    ) -> impl Future<Output = Result<SharedAuthVerifiedPrincipal, SharedAuthProviderFailure>>
-    + Send
-    + 'static {
-        (self.f)(request, context)
-    }
-}
-
 impl<F, Fut> SharedAuthProviderVerifier for FnSharedAuthProvider<F>
 where
     F: Fn(RequestMetadata, SharedAuthProviderContext) -> Fut + Send + Sync + 'static,
@@ -215,7 +140,7 @@ where
                 + 'a,
         >,
     > {
-        Box::pin(self.verify_owned(request.clone(), context.clone()))
+        Box::pin((self.f)(request.clone(), context.clone()))
     }
 }
 
@@ -268,7 +193,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn consumer_can_adapt_different_auth_sdk_versions_without_dynamic_dispatch() {
+    async fn consumer_can_adapt_different_auth_sdk_versions_through_one_port() {
         let v1 = FakeAuthV1 { prefix: "v1:" };
         let v2 = FakeAuthV2 { prefix: "v2:" };
 
@@ -315,8 +240,8 @@ mod tests {
             }
         });
 
-        let v1_decision = provider_v1.verify_owned(request("v1:alice")).await.unwrap();
-        let v2_decision = provider_v2.verify_owned(request("v2:bob")).await.unwrap();
+        let v1_decision = provider_v1.verify(&request("v1:alice")).await.unwrap();
+        let v2_decision = provider_v2.verify(&request("v2:bob")).await.unwrap();
 
         assert_eq!(v1_decision.user_id.as_deref(), Some("alice"));
         assert_eq!(v1_decision.tenant_id, None);
@@ -325,7 +250,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shared_auth_closure_has_static_dispatch_path() {
+    async fn shared_auth_closure_uses_existing_provider_port() {
         let provider = shared_auth_provider_fn(
             |request: RequestMetadata, context: SharedAuthProviderContext| async move {
                 let token = request.headers.get("authorization").cloned().ok_or_else(|| {
@@ -357,7 +282,7 @@ mod tests {
         };
 
         let principal = provider
-            .verify_owned(request("subject-1"), context)
+            .verify(&request("subject-1"), &context)
             .await
             .unwrap();
 
@@ -383,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_erasure_is_explicit_and_compatibility_only() {
+    fn dynamic_erasure_is_available_for_stack_boundaries() {
         let provider = auth_provider_fn(|_request: RequestMetadata| async {
             Ok(AuthDecision::default())
         });
