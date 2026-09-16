@@ -424,7 +424,7 @@ fn authenticate(
           ..context,
           user_id: auth.user_id,
           tenant_id: auth.tenant_id,
-          baggage: auth.baggage,
+          baggage: context.baggage,
         )
       case config.shared_auth_mode != Disabled && context.user_id == "" {
         True ->
