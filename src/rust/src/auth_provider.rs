@@ -38,13 +38,65 @@ where
     FnAuthProvider::new(f)
 }
 
-/// Type-erase any concrete auth provider for APIs that accept `Arc<dyn AuthVerifier>`.
+/// Compatibility wrapper used when a provider is handed to APIs that expose
+/// provider errors too directly (notably the legacy bundled `MiddlewareStack`).
+///
+/// The original provider error code is logged for internal diagnostics, while the
+/// returned error is deliberately generic. The provider message is never logged
+/// here because SDK error strings can contain tokens, key IDs, tenant data, or
+/// other high-cardinality/sensitive diagnostics.
+struct SanitizingAuthProvider<P> {
+    inner: P,
+}
+
+impl<P> SanitizingAuthProvider<P> {
+    const fn new(inner: P) -> Self {
+        Self { inner }
+    }
+}
+
+impl<P> AuthVerifier for SanitizingAuthProvider<P>
+where
+    P: AuthVerifier,
+{
+    fn verify<'a>(
+        &'a self,
+        request: &'a RequestMetadata,
+    ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        Box::pin(async move {
+            match self.inner.verify(request).await {
+                Ok(decision) => Ok(decision),
+                Err(error) => {
+                    tracing::warn!(
+                        code = error.code,
+                        method = %request.method,
+                        path = %request.path,
+                        "authentication provider rejected request"
+                    );
+                    Err(IntegrationError {
+                        code: "authentication_failed",
+                        message: "authentication failed".into(),
+                    })
+                }
+            }
+        })
+    }
+}
+
+/// Type-erase a concrete auth provider for APIs that accept
+/// `Arc<dyn AuthVerifier>`, while sanitizing provider failures at the compatibility
+/// boundary.
+///
+/// Consumers using `AuthStage` or the standalone Axum auth primitive may pass the
+/// concrete provider directly; those newer surfaces already sanitize public
+/// responses themselves. This helper is especially useful with
+/// `MiddlewareStack::with_auth_verifier(...)`.
 #[must_use]
 pub fn dyn_auth_provider<P>(provider: P) -> Arc<dyn AuthVerifier>
 where
     P: AuthVerifier + 'static,
 {
-    Arc::new(provider)
+    Arc::new(SanitizingAuthProvider::new(provider))
 }
 
 impl<F, Fut> AuthVerifier for FnAuthProvider<F>
@@ -261,6 +313,22 @@ mod tests {
         assert_eq!(principal.provider, SharedAuthProvider::Supabase);
         assert_eq!(principal.subject, "subject-1");
         assert_eq!(principal.organization, "example-org");
+    }
+
+    #[tokio::test]
+    async fn type_erased_compatibility_provider_sanitizes_sdk_failures() {
+        let provider = auth_provider_fn(|_request: RequestMetadata| async {
+            Err(IntegrationError {
+                code: "provider_secret_code",
+                message: "internal signing key id 12345".into(),
+            })
+        });
+        let provider = dyn_auth_provider(provider);
+        let error = provider.verify(&request("bad")).await.unwrap_err();
+
+        assert_eq!(error.code, "authentication_failed");
+        assert_eq!(error.message, "authentication failed");
+        assert!(!error.message.contains("12345"));
     }
 
     #[test]
