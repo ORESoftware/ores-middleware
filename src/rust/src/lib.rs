@@ -1,31 +1,30 @@
-use serde::{Deserialize, Serialize};
+#![forbid(unsafe_code)]
+#![expect(
+    clippy::too_many_arguments,
+    reason = "SharedAuthVerifiedPrincipal keeps all provider, identity, tenant, session, issuer, audience, organization, and realm evidence explicit at construction"
+)]
 
-pub mod adapter;
-pub mod audit;
-pub mod auth;
-pub mod cache;
-pub mod compression;
-pub mod config;
-pub mod content_negotiation;
-pub mod contracts;
-pub mod cors;
-pub mod csrf;
-pub mod deadline;
-pub mod error;
-pub mod fault_injection;
+pub mod auth_provider;
+pub mod auth_stage;
+mod bootstrap;
+mod compat;
+pub mod composition;
+mod config;
+mod context;
+pub mod docs_serving;
+pub mod fallthrough;
 pub mod frameworks;
 pub mod hardening;
-pub mod headers;
-pub mod idempotency;
-pub mod ip_policy;
-pub mod json;
-pub mod metrics;
-pub mod middleware;
-pub mod observability;
-pub mod payload;
-pub mod persistence;
+mod integrations;
+pub mod middleware_order;
+mod net;
+pub mod operation;
+pub mod otel;
+pub mod placement;
+mod pipeline;
 pub mod rate_limit;
-pub mod request_context;
+pub mod rate_limit_routes;
+pub mod rate_limit_v2;
 pub mod resilience;
 pub mod runtime_manifest;
 pub mod security;
@@ -34,47 +33,70 @@ pub mod shutdown;
 pub mod stage;
 pub mod validation;
 
-pub use adapter::{
-    Adapter, AdapterContext, AdapterError, AdapterMetadata, MiddlewareAdapter, MiddlewareAdapterResult,
+use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+
+impl std::fmt::Debug for hardening::HardenedStagePipeline {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("HardenedStagePipeline").finish_non_exhaustive()
+    }
+}
+
+pub use auth_provider::{
+    FnAuthProvider, FnSharedAuthProvider, StaticAuthVerifier, StaticSharedAuthProviderVerifier,
+    auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn,
 };
-pub use audit::{AuditEvent, AuditOutcome, AuditRecord, AuditSink, AuditStage};
-pub use auth::{
-    AuthContext, AuthDecision, AuthError, AuthProvider, AuthProviderKind, AuthStage, AuthenticatedUser,
-    AuthorizationDecision, AuthorizationPolicy, AuthorizationStage,
+pub use auth_stage::{AuthDecisionEnricher, AuthStage, NoopAuthDecisionEnricher};
+pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
+pub use composition::{
+    MiddlewareCompositionPlan, MiddlewareOrderIssue, MiddlewareOrderPolicy,
+    MiddlewareOrderingRule, OrderIssueSeverity, validate_consumer_middleware_order,
+    validate_declared_middleware_plan, validate_runtime_middleware_plan,
 };
-pub use cache::{CacheControl, CachePolicy, CacheStage, EtagPolicy};
-pub use compression::{CompressionAlgorithm, CompressionPolicy, CompressionStage};
-pub use config::{MiddlewareConfig, MiddlewareConfigError, MiddlewareConfigLoader};
-pub use content_negotiation::{ContentNegotiationPolicy, ContentNegotiationStage};
-pub use contracts::{
-    ContractDigest, ContractDigestError, ContractManifest, ContractManifestError, ContractVersion,
+pub use config::{
+    MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
+    validate_config,
 };
-pub use cors::{CorsError, CorsOrigin, CorsOriginPattern};
-pub use csrf::{CsrfDecision, CsrfError, CsrfRequestContext};
-pub use deadline::{Deadline, DeadlineError, DeadlinePolicy, DeadlineStage};
-pub use error::{MiddlewareError, MiddlewareErrorKind, MiddlewareResult};
-pub use fault_injection::{FaultInjectionPolicy, FaultInjectionStage};
-pub use hardening::{
-    SanitizedProblem, StageHeaderPolicy, StageProblemPolicy, sanitized_problem_response,
+pub use context::{
+    ContextRegistry, RequestContext, current_context, current_logged_in_user_id,
+    current_request_id, current_tenant_id, current_trace_id, current_user_id, run_with_context,
 };
-pub use headers::{HeaderPolicy, HeaderPolicyError, HeaderStage};
-pub use idempotency::{
-    IdempotencyDecision, IdempotencyError, IdempotencyKey, IdempotencyPolicy, IdempotencyStage,
+pub use integrations::{
+    AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
+    RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
 };
-pub use ip_policy::{IpDecision, IpPolicy, IpPolicyError, IpStage};
-pub use json::{JsonBodyPolicy, JsonStage};
-pub use metrics::{MetricsRecorder, MetricsStage, RedMetric};
-pub use middleware::{
-    MiddlewareChain, MiddlewareContext, MiddlewareDecision, MiddlewareHandler, MiddlewareRequest,
-    MiddlewareResponse,
+pub use middleware_order::{
+    DEFAULT_MIDDLEWARE_ORDER, MiddlewareStage, OperationClass, OrderViolation,
+    RateLimitConsistency, RateLimitPosture, rate_limit_posture, validate_middleware_order,
 };
-pub use observability::{ObservabilityContext, ObservabilityStage};
-pub use payload::{PayloadLimitPolicy, PayloadLimitStage};
-pub use persistence::{
-    PersistenceAdmission, PersistenceBackend, PersistenceError, PersistencePolicy, PersistenceStage,
+pub use operation::{
+    OperationDescriptor, OperationFailure, OperationFailureKind, OperationOutcome, OperationScope,
+    OperationTransport, run_operation_boundary, run_operation_boundary_with_cancellation,
+    run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
 };
+pub use otel::{
+    RequestLogger, ServerOtelRuntime, ServerOtelRuntimeError, load_server_otel_runtime,
+    load_server_otel_runtime_from_process_env, run_with_ores_log_context,
+    server_otel_runtime_from_resolved, should_sample_trace, to_ores_log_context,
+};
+pub use placement::{
+    MiddlewareCapabilities, MiddlewareExecutionTarget, MiddlewarePlacement,
+    MiddlewarePlacementViolation,
+};
+pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use rate_limit::{
-    RateLimitAdmission, RateLimitDecision, RateLimitError, RateLimitKey, RateLimitPolicy,
+    DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm, RateLimitDecision,
+    RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
+    RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer, RateLimitPrincipal,
+    RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
+};
+pub use rate_limit_routes::{
+    RateLimitRouteSelector, ResolvedRouteRateLimitPolicy, RouteRateLimitPolicySource,
+    RouteRateLimitRequest, RouteRateLimitResolutionError, RouteRateLimitRule,
+    RouteRateLimitTable, RouteRateLimitViolation,
+};
+pub use rate_limit_v2::{
+    RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError, RateLimitPolicyV2,
     RateLimitPolicyViolation,
 };
 pub use resilience::{
@@ -117,15 +139,81 @@ pub fn capabilities() -> &'static [&'static str] { CAPABILITIES }
 pub struct AdapterDescriptor {
     pub contract_version: String,
     pub language: String,
-    pub framework: String,
+    pub runtime: String,
+    pub package_name: String,
+    pub framework_adapters: Vec<String>,
     pub capabilities: Vec<String>,
+    pub operation_symbols: BTreeMap<String, String>,
 }
 
-pub fn descriptor(language: impl Into<String>, framework: impl Into<String>) -> AdapterDescriptor {
+pub fn descriptor() -> AdapterDescriptor {
     AdapterDescriptor {
-        contract_version: CONTRACT_VERSION.to_string(),
-        language: language.into(),
-        framework: framework.into(),
-        capabilities: capabilities().iter().map(|value| (*value).to_string()).collect(),
+        contract_version: CONTRACT_VERSION.into(),
+        language: "rust".into(),
+        runtime: "tokio".into(),
+        package_name: "ores-middleware".into(),
+        framework_adapters: vec!["axum".into(), "mash".into(), "leptos".into(), "dioxus".into()],
+        capabilities: CAPABILITIES.iter().map(|value| (*value).to_owned()).collect(),
+        operation_symbols: BTreeMap::from([
+            ("descriptor".into(), "descriptor".into()),
+            ("defaultConfig".into(), "default_config".into()),
+            ("validateConfig".into(), "validate_config".into()),
+            ("createMiddleware".into(), "MiddlewareStack::new".into()),
+            ("runWithContext".into(), "run_with_context".into()),
+            ("currentContext".into(), "current_context".into()),
+            ("capabilities".into(), "capabilities".into()),
+        ]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn production_rejects_test_only_middleware() {
+        let mut config = default_config("test-service");
+        config.environment = RuntimeEnvironment::Production;
+        config.settings.fault_injection.enabled = true;
+        config.settings.test_auth_bypass.enabled = true;
+        let issues = validate_config(&config);
+        assert!(issues.iter().any(|issue| issue.path.contains("faultInjection")));
+        assert!(issues.iter().any(|issue| issue.path.contains("testAuthBypass")));
+    }
+
+    #[tokio::test]
+    async fn request_context_is_task_scoped() {
+        let context = RequestContext {
+            request_id: "r1".into(),
+            trace_id: "0123456789abcdef0123456789abcdef".into(),
+            span_id: None,
+            tenant_id: None,
+            user_id: None,
+            locale: None,
+            started_at_unix_ms: 0,
+            deadline_unix_ms: None,
+            baggage: Default::default(),
+        };
+        run_with_context(context, async {
+            assert_eq!(current_context().unwrap().request_id, "r1");
+            assert_eq!(current_request_id().as_deref(), Some("r1"));
+        }).await;
+        assert!(current_context().is_none());
+        assert!(current_request_id().is_none());
+    }
+
+    #[test]
+    fn descriptor_has_standard_operations() {
+        let value = descriptor();
+        assert_eq!(value.operation_symbols.len(), 7);
+        assert_eq!(value.capabilities.len(), CAPABILITIES.len());
+    }
+
+    #[test]
+    fn disabled_tls_cannot_claim_to_enforce_https() {
+        let mut config = default_config("test-service");
+        config.settings.tls.mode = "disabled".into();
+        config.settings.tls.require_https = true;
+        assert!(validate_config(&config).iter().any(|issue| issue.code == "disabled_tls_requires_false"));
     }
 }
