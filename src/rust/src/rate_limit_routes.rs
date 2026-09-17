@@ -100,14 +100,14 @@ impl RateLimitRouteSelector {
             }
         }
 
-        if let Some(template) = &self.path_template {
-            if let Err(code) = validate_path_template(template) {
-                violations.push(RouteRateLimitViolation {
-                    code,
-                    path: "selector.path_template".into(),
-                    message: "path_template must be an absolute normalized route template",
-                });
-            }
+        if let Some(template) = &self.path_template
+            && let Err(code) = validate_path_template(template)
+        {
+            violations.push(RouteRateLimitViolation {
+                code,
+                path: "selector.path_template".into(),
+                message: "path_template must be an absolute normalized route template",
+            });
         }
 
         if self.operation_id.as_deref().is_some_and(|value| {
