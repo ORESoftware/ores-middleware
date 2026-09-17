@@ -104,7 +104,11 @@ export class ShutdownCoordinator {
     this.startDraining();
     const activeAtStart = this.#activeRequests;
 
-    if (this.#phase === "forced") {
+    // Read through the public accessor at async control-flow boundaries. A
+    // concurrent forceShutdown() may mutate the private field while drain()
+    // is suspended, and TypeScript must not narrow that mutable field as if
+    // the earlier observation remained true across an await.
+    if (this.phase === "forced") {
       return { kind: "forced", remaining: activeAtStart };
     }
     if (activeAtStart === 0) {
@@ -112,7 +116,7 @@ export class ShutdownCoordinator {
     }
 
     const deadline = performance.now() + this.#drainTimeoutMs;
-    while (this.#activeRequests > 0 && this.#phase !== "forced") {
+    while (this.#activeRequests > 0 && this.phase !== "forced") {
       const remainingMs = Math.max(0, deadline - performance.now());
       if (remainingMs === 0) {
         const remaining = this.#activeRequests;
