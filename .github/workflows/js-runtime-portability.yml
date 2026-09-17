@@ -61,6 +61,16 @@ jobs:
           node scripts/check-ts-package-exports.mjs
           git diff --exit-code -- package.json src/ts/package.json src/ts/package-lock.json
 
+      - name: Materialize self-contained publishable TypeScript closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/build_targets.py --languages ts
+          test -s target/ts/dist/index.js
+          test -s target/ts/dist/generic.js
+          test -s target/ts/dist/context.js
+          test -s target/ts/runtime-dependencies.json
+
       - name: Install Rust 1.95.0 for independent authority generation
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
@@ -80,7 +90,7 @@ jobs:
           set -euo pipefail
           node scripts/js_runtime_portability.mjs
 
-      - name: Execute generic provider composition and context under Node, Bun, and Deno
+      - name: Execute source and packaged generic/context semantics under Node, Bun, and Deno
         shell: bash
         run: |
           set -euo pipefail
@@ -112,10 +122,12 @@ jobs:
             and .commit == $expected
             and .status == "passed"
             and .zeroUnexplainedFindings == true
-            and .surface == ["generic", "context"]
+            and .surface == ["generic", "context", "descriptor", "packaged-closure"]
+            and .packageSurfaces == ["source", "packaged"]
             and ([.runtimes[].name] | sort) == ["bun", "deno", "node"]
-            and (.runtimeWitnesses | length) == 3
+            and (.runtimeWitnesses | length) == 6
             and ([.runtimeWitnesses[].state] | all(. == "executed"))
+            and ([.runtimeWitnesses[].surface] | sort) == ["packaged", "packaged", "packaged", "source", "source", "source"]
             and (.discrepancies | length) == 0
           ' target/js-generic-runtime-portability/receipt.json
 
@@ -127,5 +139,6 @@ jobs:
           path: |
             target/js-runtime-portability/**/*
             target/js-generic-runtime-portability/**/*
+            target/ts/runtime-dependencies.json
           if-no-files-found: error
           retention-days: 90
