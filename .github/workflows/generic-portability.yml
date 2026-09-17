@@ -18,6 +18,8 @@ on:
       - "src/ts/src/generic.ts"
       - "src/ts/src/context.ts"
       - "src/ts/src/index.ts"
+      - "src/ts/src/bun.ts"
+      - "src/ts/src/deno.ts"
       - "src/ts/test/generic.test.mjs"
       - "src/golang/go.mod"
       - "src/golang/go.sum"
@@ -29,7 +31,16 @@ on:
       - "src/gleam/src/ores_middleware.gleam"
       - "src/gleam/src/ores_middleware/generic.gleam"
       - "src/gleam/test/generic_test.gleam"
+      - "src/elixir/mix.exs"
+      - "src/elixir/mix.lock"
+      - "src/elixir/lib/ores_middleware/generic.ex"
+      - "src/elixir/test/generic_test.exs"
+      - "src/erlang/rebar.config"
+      - "src/erlang/rebar.lock"
+      - "src/erlang/src/ores_middleware_generic.erl"
+      - "src/erlang/test/ores_middleware_generic_tests.erl"
       - "tests/runtime-portability/generic-context-smoke.mjs"
+      - "tests/runtime-adapters/fetch-smoke.mjs"
       - "scripts/check-generic-portability.mjs"
       - "scripts/check-ts-package-exports.mjs"
       - "scripts/js_generic_runtime_portability.mjs"
@@ -186,3 +197,58 @@ jobs:
       - name: Execute generic Gleam conformance
         working-directory: src/gleam
         run: gleam test
+
+  elixir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Verify exact candidate revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          elixir-version: "1.18.4"
+          rebar3-version: "3.24.0"
+      - name: Execute generic Elixir conformance
+        working-directory: src/elixir
+        run: |
+          set -euo pipefail
+          mix local.hex --force
+          mix deps.get
+          git diff --exit-code -- mix.lock
+          mix format --check-formatted "lib/**/*.ex" "test/**/*.exs" mix.exs
+          mix compile --warnings-as-errors
+          mix test test/generic_test.exs --trace
+
+  erlang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+      - name: Verify exact candidate revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          rebar3-version: "3.24.0"
+      - name: Execute generic Erlang conformance
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          rebar3 compile
+          rebar3 eunit --module=ores_middleware_generic_tests
