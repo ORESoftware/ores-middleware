@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(rejection.status, SHUTDOWN_HTTP_STATUS);
         assert_eq!(rejection.status, 429);
         assert_eq!(rejection.code, "service_draining");
-        assert!(rejection.headers.get("connection").is_none());
+        assert!(!rejection.headers.contains_key("connection"));
         assert_eq!(rejection.headers.get("retry-after").map(String::as_str), Some("5"));
         assert_eq!(coordinator.active_requests(), 1);
 
