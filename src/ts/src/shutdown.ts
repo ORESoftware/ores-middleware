@@ -1,5 +1,6 @@
 export const DEFAULT_DRAIN_TIMEOUT_MS = 5_000;
 export const DEFAULT_RETRY_AFTER_MS = 5_000;
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
 export const SHUTDOWN_HTTP_STATUS = 429 as const;
 
 export type ShutdownPhase = "running" | "draining" | "forced";
@@ -182,7 +183,15 @@ export class ShutdownCoordinator {
 }
 
 function assertDuration(name: string, value: number, allowZero: boolean): void {
-  if (!Number.isFinite(value) || !Number.isSafeInteger(value) || value < 0 || (!allowZero && value === 0)) {
-    throw new RangeError(`${name} must be ${allowZero ? "a non-negative" : "a positive"} safe integer number of milliseconds`);
+  if (
+    !Number.isFinite(value) ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > MAX_TIMER_DELAY_MS ||
+    (!allowZero && value === 0)
+  ) {
+    throw new RangeError(
+      `${name} must be ${allowZero ? "a non-negative" : "a positive"} integer number of milliseconds no greater than ${MAX_TIMER_DELAY_MS}`
+    );
   }
 }
