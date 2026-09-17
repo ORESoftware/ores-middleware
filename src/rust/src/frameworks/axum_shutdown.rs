@@ -171,7 +171,7 @@ mod tests {
             .expect("draining response");
 
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-        assert!(response.headers().get(CONNECTION).is_none());
+        assert!(!response.headers().contains_key(CONNECTION));
         assert_eq!(
             response.headers().get(RETRY_AFTER).and_then(|value| value.to_str().ok()),
             Some("5")
