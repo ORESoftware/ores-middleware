@@ -10,7 +10,8 @@ defmodule OresMiddleware.Generic do
   @type provider(input, output) :: (input -> output)
   @type contextual_input(request, context) :: %{request: request, context: context}
   @type handler(request, response) :: (request -> response)
-  @type middleware(request, response) :: (handler(request, response) -> handler(request, response))
+  @type middleware(request, response) :: (handler(request, response) ->
+                                            handler(request, response))
   @type contextual_handler(request, context, response) :: (request, context -> response)
   @type contextual_middleware(request, context, response) ::
           (contextual_handler(request, context, response) ->
@@ -20,7 +21,8 @@ defmodule OresMiddleware.Generic do
           required(:middleware) => middleware(request, response)
         }
 
-  @spec provider_from(provider(input, output)) :: provider(input, output) when input: var, output: var
+  @spec provider_from(provider(input, output)) :: provider(input, output)
+        when input: var, output: var
   def provider_from(provider) when is_function(provider, 1), do: provider
 
   @spec contextual_provider_from((request, context -> output)) ::
@@ -48,8 +50,11 @@ defmodule OresMiddleware.Generic do
   def compose_named(handler, stages) when is_list(stages) do
     middleware =
       Enum.map(stages, fn
-        %{name: _, middleware: stage} when is_function(stage, 1) -> stage
-        _ -> raise ArgumentError, "named middleware stage must contain :name and unary :middleware"
+        %{name: _, middleware: stage} when is_function(stage, 1) ->
+          stage
+
+        _ ->
+          raise ArgumentError, "named middleware stage must contain :name and unary :middleware"
       end)
 
     compose(handler, middleware)
@@ -60,7 +65,8 @@ defmodule OresMiddleware.Generic do
           [contextual_middleware(request, context, response)]
         ) :: contextual_handler(request, context, response)
         when request: var, context: var, response: var
-  def compose_contextual(handler, middleware) when is_function(handler, 2) and is_list(middleware) do
+  def compose_contextual(handler, middleware)
+      when is_function(handler, 2) and is_list(middleware) do
     Enum.reduce(Enum.reverse(middleware), handler, fn stage, next ->
       unless is_function(stage, 1),
         do: raise(ArgumentError, "contextual middleware stage must be unary")
@@ -77,8 +83,11 @@ defmodule OresMiddleware.Generic do
   def compose_named_contextual(handler, stages) when is_list(stages) do
     middleware =
       Enum.map(stages, fn
-        %{name: _, middleware: stage} when is_function(stage, 1) -> stage
-        _ -> raise ArgumentError, "named contextual stage must contain :name and unary :middleware"
+        %{name: _, middleware: stage} when is_function(stage, 1) ->
+          stage
+
+        _ ->
+          raise ArgumentError, "named contextual stage must contain :name and unary :middleware"
       end)
 
     compose_contextual(handler, middleware)

@@ -3,10 +3,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 provider_identity_and_failure_values_test() ->
-    Prefix = <<"v17:">>,
     Provider = ores_middleware_generic:provider_from(fun(Token) ->
         case Token of
-            <<Prefix/binary, Subject/binary>> -> {ok, Subject};
+            <<"v17:", Subject/binary>> -> {ok, Subject};
             _ -> {error, {bad_token, Token}}
         end
     end),
@@ -29,7 +28,7 @@ middleware_order_and_duplicate_names_test() ->
             fun(Request) ->
                 Parent ! {before, Name},
                 Response = Next(Request),
-                Parent ! {after, Name},
+                Parent ! {'after', Name},
                 Response
             end
         end
@@ -48,9 +47,9 @@ middleware_order_and_duplicate_names_test() ->
     ?assertEqual({before, auth}, receive_message()),
     ?assertEqual({before, audit}, receive_message()),
     ?assertEqual(handler, receive_message()),
-    ?assertEqual({after, audit}, receive_message()),
-    ?assertEqual({after, auth}, receive_message()),
-    ?assertEqual({after, auth}, receive_message()).
+    ?assertEqual({'after', audit}, receive_message()),
+    ?assertEqual({'after', auth}, receive_message()),
+    ?assertEqual({'after', auth}, receive_message()).
 
 empty_chains_preserve_handler_identity_test() ->
     Handler = fun(Request) -> Request end,
@@ -74,7 +73,7 @@ contextual_middleware_test() ->
 invalid_named_stage_fails_closed_test() ->
     Handler = fun(Request) -> Request end,
     ?assertError(
-        {invalid_named_middleware, #{name => missing_middleware}},
+        {invalid_named_middleware, #{name := missing_middleware}},
         ores_middleware_generic:compose_named(Handler, [#{name => missing_middleware}])
     ).
 
