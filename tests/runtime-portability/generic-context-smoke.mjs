@@ -1,3 +1,4 @@
+import { descriptor } from "../../src/ts/dist/index.js";
 import {
   composeContextualMiddleware,
   composeMiddleware,
@@ -70,6 +71,13 @@ function requestContext(id) {
 }
 
 let checks = 0;
+
+const runtimeDescriptor = descriptor();
+assertEqual(runtimeDescriptor.language, "ts", "descriptor language");
+assertEqual(runtimeDescriptor.runtime, "node-deno-bun", "descriptor runtime claim");
+assert(runtimeDescriptor.frameworkAdapters.includes("bun"), "descriptor must declare Bun adapter");
+assert(runtimeDescriptor.frameworkAdapters.includes("deno"), "descriptor must declare Deno adapter");
+checks += 1;
 
 const sdk = Object.freeze({ version: "v17", prefix: "v17:" });
 const provider = providerFrom(async (token) => {
