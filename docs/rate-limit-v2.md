@@ -58,3 +58,9 @@ java -cp /tmp/tla2tools.jar tlc2.TLC \
 ```
 
 The initial organization rollouts remain audit-only. Production enforcement requires a separate reviewed change after trusted-proxy behavior, coordinator capacity, reconnect repair, telemetry cardinality, operation classification, and rollback behavior are verified from real traffic.
+
+## Full peer-authority TJSV reconciliation
+
+The V2 policy now exposes a named `RateLimitPolicyV2` declaration in the authored Draft 2020-12 schema and the TypeSpec authority carries the same numeric bounds and conditional policy invariants already enforced by JSON Schema and Rust runtime validation. The authored root still validates through `$ref`, so the wire shape is unchanged; naming the root only makes declaration identity explicit for cross-authority evidence.
+
+`contracts/rate-limit-v2/tjsv/mapping.json` maps all seven TypeSpec/generated/authored declarations one-to-one. All three ignore lists are intentionally empty. The dedicated `rate-limit-v2-peer-authority` workflow uses TJSV with `--int64-strategy=number`, because these bounded `uint64` fields are JSON integer wire values rather than decimal strings. It requires seven compared declarations, synthesized differential probes with zero divergence/refusal, zero unexplained findings, verified Contract IR, and an intentional numeric-bound drift that must stop evaluation.
