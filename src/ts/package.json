@@ -5,87 +5,33 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./generic": {
-      "types": "./dist/generic.d.ts",
-      "import": "./dist/generic.js"
-    },
-    "./adapters": {
-      "types": "./dist/adapters.d.ts",
-      "import": "./dist/adapters.js"
-    },
-    "./fallthrough": {
-      "types": "./dist/fallthrough.d.ts",
-      "import": "./dist/fallthrough.js"
-    },
-    "./payload-codecs": {
-      "types": "./dist/payload-codecs.d.ts",
-      "import": "./dist/payload-codecs.js"
-    },
-    "./body-crypto": {
-      "types": "./dist/body-crypto.d.ts",
-      "import": "./dist/body-crypto.js"
-    },
-    "./redirect": {
-      "types": "./dist/redirect.d.ts",
-      "import": "./dist/redirect.js"
-    },
-    "./koa": {
-      "types": "./dist/koa.d.ts",
-      "import": "./dist/koa.js"
-    },
-    "./fastify": {
-      "types": "./dist/fastify.d.ts",
-      "import": "./dist/fastify.js"
-    },
-    "./nextjs": {
-      "types": "./dist/nextjs.d.ts",
-      "import": "./dist/nextjs.js"
-    },
-    "./proxy-auth": {
-      "types": "./dist/proxy-auth.d.ts",
-      "import": "./dist/proxy-auth.js"
-    },
-    "./context": {
-      "types": "./dist/context.d.ts",
-      "import": "./dist/context.js"
-    },
-    "./docs-serving": {
-      "types": "./dist/docs-serving.d.ts",
-      "import": "./dist/docs-serving.js"
-    },
-    "./operation": {
-      "types": "./dist/operation.d.ts",
-      "import": "./dist/operation.js"
-    },
-    "./contract-drift": {
-      "types": "./dist/contract-drift.d.ts",
-      "import": "./dist/contract-drift.js"
-    },
-    "./request-contract": {
-      "types": "./dist/request-contract.d.ts",
-      "import": "./dist/request-contract.js"
-    },
-    "./otel": {
-      "types": "./dist/otel.d.ts",
-      "import": "./dist/otel.js"
-    },
-    "./rate-limit-routes": {
-      "types": "./dist/rate-limit-routes.d.ts",
-      "import": "./dist/rate-limit-routes.js"
-    }
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./generic": { "types": "./dist/generic.d.ts", "import": "./dist/generic.js" },
+    "./adapters": { "types": "./dist/adapters.d.ts", "import": "./dist/adapters.js" },
+    "./bun": { "types": "./dist/bun.d.ts", "import": "./dist/bun.js" },
+    "./deno": { "types": "./dist/deno.d.ts", "import": "./dist/deno.js" },
+    "./fallthrough": { "types": "./dist/fallthrough.d.ts", "import": "./dist/fallthrough.js" },
+    "./payload-codecs": { "types": "./dist/payload-codecs.d.ts", "import": "./dist/payload-codecs.js" },
+    "./body-crypto": { "types": "./dist/body-crypto.d.ts", "import": "./dist/body-crypto.js" },
+    "./redirect": { "types": "./dist/redirect.d.ts", "import": "./dist/redirect.js" },
+    "./koa": { "types": "./dist/koa.d.ts", "import": "./dist/koa.js" },
+    "./fastify": { "types": "./dist/fastify.d.ts", "import": "./dist/fastify.js" },
+    "./nextjs": { "types": "./dist/nextjs.d.ts", "import": "./dist/nextjs.js" },
+    "./proxy-auth": { "types": "./dist/proxy-auth.d.ts", "import": "./dist/proxy-auth.js" },
+    "./context": { "types": "./dist/context.d.ts", "import": "./dist/context.js" },
+    "./docs-serving": { "types": "./dist/docs-serving.d.ts", "import": "./dist/docs-serving.js" },
+    "./operation": { "types": "./dist/operation.d.ts", "import": "./dist/operation.js" },
+    "./contract-drift": { "types": "./dist/contract-drift.d.ts", "import": "./dist/contract-drift.js" },
+    "./request-contract": { "types": "./dist/request-contract.d.ts", "import": "./dist/request-contract.js" },
+    "./otel": { "types": "./dist/otel.d.ts", "import": "./dist/otel.js" },
+    "./rate-limit-routes": { "types": "./dist/rate-limit-routes.d.ts", "import": "./dist/rate-limit-routes.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-docs-serving.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "descriptor": "node dist/contractcheck.js"
   },
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": { "node": ">=22" },
   "oresRuntimeSupport": {
     "node": ">=22.23.1",
     "bun": ">=1.4.2",
