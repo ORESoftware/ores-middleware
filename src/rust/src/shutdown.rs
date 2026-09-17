@@ -88,12 +88,12 @@ impl ShutdownCoordinator {
 
     #[must_use]
     pub fn phase(&self) -> ShutdownPhase {
-        phase_from_raw(self.inner.phase.load(Ordering::Acquire))
+        phase_from_raw(self.inner.phase.load(Ordering::SeqCst))
     }
 
     #[must_use]
     pub fn active_requests(&self) -> usize {
-        self.inner.active_requests.load(Ordering::Acquire)
+        self.inner.active_requests.load(Ordering::SeqCst)
     }
 
     #[must_use]
@@ -107,12 +107,15 @@ impl ShutdownCoordinator {
     /// That second check closes the race where draining starts between the first
     /// phase read and request registration: a request that loses that race is
     /// removed from the count and rejected rather than silently admitted.
+    /// Sequential consistency is intentional here: admission and the drain
+    /// transition touch separate atomics, and the total order prevents a drain
+    /// from observing zero after a request has already won admission.
     pub fn begin_request(&self) -> Result<DrainGuard, ShutdownRejection> {
         if self.phase() != ShutdownPhase::Running {
             return Err(self.rejection());
         }
 
-        self.inner.active_requests.fetch_add(1, Ordering::AcqRel);
+        self.inner.active_requests.fetch_add(1, Ordering::SeqCst);
         if self.phase() == ShutdownPhase::Running {
             return Ok(DrainGuard {
                 inner: Some(Arc::clone(&self.inner)),
@@ -136,8 +139,8 @@ impl ShutdownCoordinator {
             .compare_exchange(
                 PHASE_RUNNING,
                 PHASE_DRAINING,
-                Ordering::AcqRel,
-                Ordering::Acquire,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
             )
             .is_ok();
         if changed {
@@ -148,7 +151,7 @@ impl ShutdownCoordinator {
 
     /// Escalate immediately to forced shutdown, for example on a second signal.
     pub fn force_shutdown(&self) -> bool {
-        let previous = self.inner.phase.swap(PHASE_FORCED, Ordering::AcqRel);
+        let previous = self.inner.phase.swap(PHASE_FORCED, Ordering::SeqCst);
         self.inner.changed.notify_waiters();
         previous != PHASE_FORCED
     }
@@ -236,7 +239,7 @@ impl Drop for DrainGuard {
 }
 
 fn release_request(inner: &ShutdownInner) {
-    let previous = inner.active_requests.fetch_sub(1, Ordering::AcqRel);
+    let previous = inner.active_requests.fetch_sub(1, Ordering::SeqCst);
     debug_assert!(previous > 0, "request drain guard underflow");
     if previous <= 1 {
         inner.changed.notify_waiters();
