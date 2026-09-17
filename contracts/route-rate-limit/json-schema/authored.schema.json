@@ -26,7 +26,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 512,
-      "pattern": "^/[^?#\\\\r\\\\n]{0,511}$"
+      "pattern": "^/[^?#\\r\\n]{0,511}$"
     },
     "OperationId": {
       "type": "string",
@@ -143,7 +143,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4096,
-      "pattern": "^/[^#\\\\r\\\\n\\\\u0000]{0,4095}$"
+      "pattern": "^/[^#\\r\\n\\u0000]{0,4095}$"
     },
     "RouteRateLimitBindingRequest": {
       "type": "object",
