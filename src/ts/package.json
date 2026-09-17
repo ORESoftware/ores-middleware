@@ -76,6 +76,10 @@
     "./rate-limit-routes": {
       "types": "./dist/rate-limit-routes.d.ts",
       "import": "./dist/rate-limit-routes.js"
+    },
+    "./shutdown": {
+      "types": "./dist/shutdown.d.ts",
+      "import": "./dist/shutdown.js"
     }
   },
   "scripts": {
