@@ -11,6 +11,7 @@ import (
 const (
 	DefaultDrainTimeout = 5 * time.Second
 	DefaultRetryAfter   = 5 * time.Second
+	ShutdownHTTPStatus  = http.StatusTooManyRequests
 )
 
 type ShutdownPhase uint8
@@ -25,6 +26,8 @@ type ShutdownRejection struct {
 	Status  int
 	Code    string
 	Message string
+	// Headers contains end-to-end response metadata only. Hop-by-hop fields
+	// such as Connection belong to the concrete transport adapter.
 	Headers map[string]string
 }
 
@@ -204,17 +207,19 @@ func (coordinator *ShutdownCoordinator) Rejection() ShutdownRejection {
 }
 
 func (coordinator *ShutdownCoordinator) rejectionLocked() ShutdownRejection {
-	retryAfterSeconds := int64((coordinator.retryAfter + time.Second - 1) / time.Second)
+	retryAfterSeconds := coordinator.retryAfter / time.Second
+	if coordinator.retryAfter%time.Second != 0 {
+		retryAfterSeconds++
+	}
 	if retryAfterSeconds < 1 {
 		retryAfterSeconds = 1
 	}
 	return ShutdownRejection{
-		Status:  http.StatusServiceUnavailable,
+		Status:  ShutdownHTTPStatus,
 		Code:    "service_draining",
 		Message: "service is draining and is not accepting new requests",
 		Headers: map[string]string{
-			"connection":  "close",
-			"retry-after": strconv.FormatInt(retryAfterSeconds, 10),
+			"retry-after": strconv.FormatInt(int64(retryAfterSeconds), 10),
 		},
 	}
 }
