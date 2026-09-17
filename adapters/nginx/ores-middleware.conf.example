@@ -67,6 +67,10 @@ server {
   proxy_set_header X-Request-ID $request_id;
   proxy_set_header Host $host;
 
+  # Do not forward a client-controlled legacy Proxy header into CGI-style
+  # environments where it can become HTTP_PROXY.
+  proxy_set_header Proxy "";
+
   # W3C trace headers are propagated as untrusted telemetry context, not
   # interpreted as identity or authorization evidence. Application OTel parsing
   # must reject malformed values.
@@ -94,9 +98,8 @@ server {
     proxy_pass http://ores_origin;
   }
 
-  # The login route gets BOTH the general edge guard and the stricter POST-only
-  # policy. NGINX does not inherit the parent location limit_req after a local
-  # limit_req is declared, so both directives are explicit here.
+  # The exact login location is selected instead of the generic location above,
+  # so emit BOTH the general edge guard and the stricter POST-only policy here.
   location = /v1/auth/login {
     limit_req zone=ores_edge_default_ip burst=40 nodelay;
     limit_req zone=ores_auth_login_ip burst=5 nodelay;
