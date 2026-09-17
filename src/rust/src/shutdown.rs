@@ -196,7 +196,10 @@ impl ShutdownCoordinator {
 
     #[must_use]
     pub fn rejection(&self) -> ShutdownRejection {
-        let retry_after_seconds = self.inner.retry_after.as_secs().max(1);
+        let whole_seconds = self.inner.retry_after.as_secs();
+        let retry_after_seconds = whole_seconds
+            .saturating_add(u64::from(self.inner.retry_after.subsec_nanos() != 0))
+            .max(1);
         ShutdownRejection {
             status: 503,
             code: "service_draining",
@@ -280,6 +283,27 @@ mod tests {
         assert_eq!(coordinator.active_requests(), 0);
     }
 
+    #[test]
+    fn retry_after_rounds_fractional_durations_up_to_delay_seconds() {
+        let coordinator = ShutdownCoordinator::with_retry_after(
+            Duration::from_secs(5),
+            Duration::from_millis(1501),
+        );
+        coordinator.start_draining();
+        let rejection = coordinator.rejection();
+        assert_eq!(rejection.headers.get("retry-after").map(String::as_str), Some("2"));
+
+        let subsecond = ShutdownCoordinator::with_retry_after(
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+        );
+        subsecond.start_draining();
+        assert_eq!(
+            subsecond.rejection().headers.get("retry-after").map(String::as_str),
+            Some("1")
+        );
+    }
+
     #[tokio::test]
     async fn drain_waits_for_existing_requests() {
         let coordinator = ShutdownCoordinator::new(Duration::from_secs(5));
@@ -298,6 +322,17 @@ mod tests {
             waiter.await.expect("drain task joins"),
             DrainOutcome::Drained { active_at_start: 1 }
         );
+    }
+
+    #[tokio::test]
+    async fn drain_without_active_requests_is_immediately_drained() {
+        let coordinator = ShutdownCoordinator::default();
+        assert_eq!(
+            coordinator.drain().await,
+            DrainOutcome::Drained { active_at_start: 0 }
+        );
+        assert_eq!(coordinator.phase(), ShutdownPhase::Draining);
+        assert!(!coordinator.is_accepting_requests());
     }
 
     #[tokio::test(start_paused = true)]
@@ -336,5 +371,31 @@ mod tests {
             waiter.await.expect("drain task joins"),
             DrainOutcome::Forced { remaining: 1 }
         );
+    }
+
+    #[tokio::test]
+    async fn force_from_running_rejects_new_requests_and_drain_reports_forced() {
+        let coordinator = ShutdownCoordinator::new(Duration::from_secs(60));
+        let request = coordinator.begin_request().expect("request admitted");
+        assert!(coordinator.force_shutdown());
+        assert_eq!(coordinator.phase(), ShutdownPhase::Forced);
+        assert!(coordinator.begin_request().is_err());
+        assert_eq!(
+            coordinator.drain().await,
+            DrainOutcome::Forced { remaining: 1 }
+        );
+        drop(request);
+        assert_eq!(coordinator.active_requests(), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn zero_drain_timeout_forces_inflight_requests_immediately() {
+        let coordinator = ShutdownCoordinator::new(Duration::ZERO);
+        let _request = coordinator.begin_request().expect("request admitted");
+        assert_eq!(
+            coordinator.drain().await,
+            DrainOutcome::TimedOut { remaining: 1 }
+        );
+        assert_eq!(coordinator.phase(), ShutdownPhase::Forced);
     }
 }
