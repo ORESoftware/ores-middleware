@@ -61,7 +61,13 @@
         },
         {
           "type": "object",
-          "properties": { "methods": { "$ref": "#/$defs/HttpMethodSet", "minItems": 1 } },
+          "properties": {
+            "methods": {
+              "$ref": "#/$defs/HttpMethodSet",
+              "type": "array",
+              "minItems": 1
+            }
+          },
           "required": ["methods"]
         }
       ]
