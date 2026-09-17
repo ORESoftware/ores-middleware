@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/route-rate-limit-bindings/v1/authored.schema.json",
+  "title": "ORES route rate-limit policy bindings",
+  "$ref": "#/$defs/RouteRateLimitBindingTable",
+  "$defs": {
+    "RouteClassId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$"
+    },
+    "PolicyId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_.:][a-z0-9]+)*$"
+    },
+    "HttpMethod": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[A-Z][A-Z0-9-]{0,31}$"
+    },
+    "PathTemplate": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^/[^?#\\r\\n]{0,511}$"
+    },
+    "OperationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}$"
+    },
+    "HttpMethodSet": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/HttpMethod" }
+    },
+    "RouteRateLimitBindingSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "methods": { "$ref": "#/$defs/HttpMethodSet" },
+        "path_template": { "$ref": "#/$defs/PathTemplate" },
+        "operation_id": { "$ref": "#/$defs/OperationId" }
+      },
+      "anyOf": [
+        { "required": ["path_template"] },
+        { "required": ["operation_id"] },
+        {
+          "properties": { "methods": { "type": "array", "minItems": 1 } },
+          "required": ["methods"]
+        }
+      ]
+    },
+    "RouteRateLimitBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_class_id", "policy_id", "selector"],
+      "properties": {
+        "route_class_id": { "$ref": "#/$defs/RouteClassId" },
+        "policy_id": { "$ref": "#/$defs/PolicyId" },
+        "selector": { "$ref": "#/$defs/RouteRateLimitBindingSelector" }
+      }
+    },
+    "RouteRateLimitBindingList": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/RouteRateLimitBinding" }
+    },
+    "RouteRateLimitBindingTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "routes"],
+      "properties": {
+        "schema": { "const": "ores.middleware.route-rate-limit-bindings/v1" },
+        "default_policy_id": { "$ref": "#/$defs/PolicyId" },
+        "routes": { "$ref": "#/$defs/RouteRateLimitBindingList" }
+      }
+    }
+  }
+}
