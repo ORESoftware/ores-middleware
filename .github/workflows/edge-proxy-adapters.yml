@@ -1,0 +1,66 @@
+name: edge-proxy-adapters
+
+on:
+  pull_request:
+    paths:
+      - "adapters/nginx/**"
+      - "adapters/haproxy/**"
+      - "docs/edge-proxy-adapters.md"
+      - "scripts/check-edge-proxy-adapters.sh"
+      - ".github/workflows/edge-proxy-adapters.yml"
+  push:
+    branches: [main, dev]
+    paths:
+      - "adapters/nginx/**"
+      - "adapters/haproxy/**"
+      - "docs/edge-proxy-adapters.md"
+      - "scripts/check-edge-proxy-adapters.sh"
+      - ".github/workflows/edge-proxy-adapters.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-proxy-adapters-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Verify exact candidate revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+
+      - name: Install NGINX and HAProxy validators
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends nginx haproxy
+          nginx -v
+          haproxy -vv | head -n 5
+
+      - name: Validate adapter syntax and security invariants
+        shell: bash
+        run: bash scripts/check-edge-proxy-adapters.sh
+
+      - name: Ensure validation did not rewrite tracked sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --exit-code

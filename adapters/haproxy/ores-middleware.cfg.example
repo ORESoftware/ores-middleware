@@ -1,0 +1,70 @@
+# ORES HAProxy edge/transport middleware example.
+#
+# Consumer *-infra repositories own concrete values/order/placement. This file
+# is an example target, not a policy authority and not a production default.
+
+global
+  log stdout format raw local0
+
+  # Example only. Consumer deployment owns process/thread sizing and TLS.
+  maxconn 20000
+
+defaults
+  mode http
+  log global
+  option httplog
+  timeout connect 3s
+  timeout client 30s
+  timeout server 30s
+  timeout http-request 10s
+
+# Separate tables preserve separate windows/semantics for route policy classes.
+backend ores_rl_default
+  stick-table type ip size 1m expire 1m store http_req_rate(10s)
+
+backend ores_rl_auth_login
+  stick-table type ip size 1m expire 10m store http_req_rate(1m)
+
+frontend ores_http
+  bind :8080
+
+  # Generate an edge request ID. The consumer may use a different reviewed
+  # format; do not accept an arbitrary public request ID as a trust primitive.
+  unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
+  http-request set-header X-Request-ID %[unique-id]
+
+  # Replace public forwarding metadata at this boundary. When HAProxy itself is
+  # behind another proxy, use an explicitly trusted PROXY-protocol hop or other
+  # reviewed transport mechanism rather than trusting arbitrary X-Forwarded-*.
+  http-request del-header X-Forwarded-For
+  http-request set-header X-Forwarded-For %[src]
+  http-request del-header X-Forwarded-Proto
+  http-request set-header X-Forwarded-Proto http
+  http-request set-header X-Forwarded-Proto https if { ssl_fc }
+
+  # traceparent and baggage pass through unchanged. They are telemetry context,
+  # never identity or authorization evidence.
+
+  acl ores_auth_login_path path -i /v1/auth/login
+  acl ores_auth_login_method method POST
+
+  # Example rates are non-authoritative. sc0 counts the general edge policy;
+  # sc1 counts only POST /v1/auth/login in its own one-minute table.
+  http-request track-sc0 src table ores_rl_default
+  http-request track-sc1 src table ores_rl_auth_login if ores_auth_login_path ores_auth_login_method
+
+  acl ores_default_rate_exceeded sc_http_req_rate(0,ores_rl_default) gt 200
+  acl ores_auth_login_rate_exceeded sc_http_req_rate(1,ores_rl_auth_login) gt 10
+
+  http-request deny deny_status 429 if ores_default_rate_exceeded
+  http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded
+
+  http-response set-header X-Content-Type-Options nosniff
+  http-response set-header Referrer-Policy strict-origin-when-cross-origin
+
+  default_backend ores_origin
+
+backend ores_origin
+  balance roundrobin
+  option httpchk GET /healthz
+  server origin1 127.0.0.1:8081 check

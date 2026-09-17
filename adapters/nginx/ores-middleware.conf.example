@@ -1,0 +1,82 @@
+# ORES NGINX edge/transport middleware example.
+#
+# Consumer *-infra repositories own concrete values/order/placement. This file
+# is an example target, not a policy authority and not a production default.
+
+# Fail closed unless deployment supplies explicit trusted proxy CIDRs, e.g.
+#   set_real_ip_from 10.0.0.0/8;
+# Never generate 0.0.0.0/0 as a trusted proxy range.
+include /etc/nginx/ores/trusted-proxies.conf;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+
+# Method-specific rate policies use an empty key when they do not apply. NGINX
+# does not account requests whose limit_req_zone key evaluates to an empty
+# string, so GET/HEAD/etc. on this path do not consume the POST login budget.
+map $request_method $ores_auth_login_ip_key {
+  default "";
+  POST $binary_remote_addr;
+}
+
+# Distinct route policies get distinct zones unless their complete observable
+# semantics are intentionally identical. Example rates are non-authoritative.
+limit_req_zone $binary_remote_addr zone=ores_edge_default_ip:10m rate=20r/s;
+limit_req_zone $ores_auth_login_ip_key zone=ores_auth_login_ip:10m rate=10r/m;
+
+log_format ores_json escape=json
+  '{"request_id":"$request_id",'
+  '"method":"$request_method",'
+  '"uri":"$uri",'
+  '"status":$status,'
+  '"request_time":$request_time,'
+  '"upstream_time":"$upstream_response_time"}';
+
+upstream ores_origin {
+  server 127.0.0.1:8081;
+  keepalive 64;
+}
+
+server {
+  listen 8080;
+  server_name _;
+
+  access_log /var/log/nginx/ores-access.log ores_json;
+
+  # Edge rejection should be distinguishable from origin failures.
+  limit_req_status 429;
+
+  # Replace public forwarding metadata at this trusted boundary. Because the
+  # real_ip module has already validated the immediate proxy chain, $remote_addr
+  # is the admitted client address here.
+  proxy_set_header X-Forwarded-For $remote_addr;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Request-ID $request_id;
+
+  # W3C trace headers are propagated, not interpreted as an identity source.
+  proxy_set_header traceparent $http_traceparent;
+  proxy_set_header baggage $http_baggage;
+
+  proxy_http_version 1.1;
+  proxy_connect_timeout 3s;
+  proxy_send_timeout 30s;
+  proxy_read_timeout 30s;
+
+  client_max_body_size 2m;
+
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+  # Coarse edge guard. Strict distributed/account limits still run in the app.
+  location / {
+    limit_req zone=ores_edge_default_ip burst=40 nodelay;
+    proxy_pass http://ores_origin;
+  }
+
+  # Separate route/method-class policy. The location selects the path while the
+  # empty-key map above excludes non-POST methods from this policy budget.
+  location = /v1/auth/login {
+    limit_req zone=ores_auth_login_ip burst=5 nodelay;
+    client_max_body_size 64k;
+    proxy_pass http://ores_origin;
+  }
+}
