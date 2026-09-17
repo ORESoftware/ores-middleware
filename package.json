@@ -10,6 +10,10 @@
       "types": "./src/ts/dist/index.d.ts",
       "import": "./src/ts/dist/index.js"
     },
+    "./generic": {
+      "types": "./src/ts/dist/generic.d.ts",
+      "import": "./src/ts/dist/generic.js"
+    },
     "./adapters": {
       "types": "./src/ts/dist/adapters.d.ts",
       "import": "./src/ts/dist/adapters.js"
@@ -29,6 +33,14 @@
     "./redirect": {
       "types": "./src/ts/dist/redirect.d.ts",
       "import": "./src/ts/dist/redirect.js"
+    },
+    "./koa": {
+      "types": "./src/ts/dist/koa.d.ts",
+      "import": "./src/ts/dist/koa.js"
+    },
+    "./fastify": {
+      "types": "./src/ts/dist/fastify.d.ts",
+      "import": "./src/ts/dist/fastify.js"
     },
     "./nextjs": {
       "types": "./src/ts/dist/nextjs.d.ts",
@@ -65,6 +77,11 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "oresRuntimeSupport": {
+    "node": ">=22.23.1",
+    "bun": ">=1.4.2",
+    "deno": ">=2.9.6"
   },
   "scripts": {
     "prepare": "npm --prefix src/ts ci --include=dev && npm --prefix src/ts run build",

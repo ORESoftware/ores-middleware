@@ -52,6 +52,25 @@ jobs:
         with:
           deno-version: "v2.9.6"
 
+      - name: Build exact TypeScript package and audit package surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --no-audit --no-fund
+          npm --prefix src/ts run build
+          node scripts/check-ts-package-exports.mjs
+          git diff --exit-code -- package.json src/ts/package.json src/ts/package-lock.json
+
+      - name: Materialize self-contained publishable TypeScript closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/build_targets.py --languages ts
+          test -s target/ts/dist/index.js
+          test -s target/ts/dist/generic.js
+          test -s target/ts/dist/context.js
+          test -s target/ts/runtime-dependencies.json
+
       - name: Install Rust 1.95.0 for independent authority generation
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
@@ -65,13 +84,19 @@ jobs:
           test -s target/schema-convergence/typespec/typescript/idempotency_record.mjs
           test -s target/schema-convergence/json-schema-openapi/typescript/idempotency_record.mjs
 
-      - name: Execute generated contracts and portable middleware under Node, Bun, and Deno
+      - name: Execute generated contracts and docs-serving under Node, Bun, and Deno
         shell: bash
         run: |
           set -euo pipefail
           node scripts/js_runtime_portability.mjs
 
-      - name: Assert complete source-bound runtime receipt
+      - name: Execute source and packaged generic/context semantics under Node, Bun, and Deno
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/js_generic_runtime_portability.mjs
+
+      - name: Assert complete source-bound generated-contract runtime receipt
         shell: bash
         run: |
           set -euo pipefail
@@ -88,11 +113,32 @@ jobs:
             and (.discrepancies | length) == 0
           ' target/js-runtime-portability/receipt.json
 
-      - name: Upload runtime portability receipt and raw logs
+      - name: Assert complete source-bound generic runtime receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e --arg expected "$ORES_WORKFLOW_SOURCE_SHA" '
+            .schema == "ores.middleware.js-generic-runtime-portability-report/v1"
+            and .commit == $expected
+            and .status == "passed"
+            and .zeroUnexplainedFindings == true
+            and .surface == ["generic", "context", "descriptor", "packaged-closure"]
+            and .packageSurfaces == ["source", "packaged"]
+            and ([.runtimes[].name] | sort) == ["bun", "deno", "node"]
+            and (.runtimeWitnesses | length) == 6
+            and ([.runtimeWitnesses[].state] | all(. == "executed"))
+            and ([.runtimeWitnesses[].surface] | sort) == ["packaged", "packaged", "packaged", "source", "source", "source"]
+            and (.discrepancies | length) == 0
+          ' target/js-generic-runtime-portability/receipt.json
+
+      - name: Upload runtime portability receipts and raw logs
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: js-runtime-portability-${{ github.run_id }}
-          path: target/js-runtime-portability/**/*
+          path: |
+            target/js-runtime-portability/**/*
+            target/js-generic-runtime-portability/**/*
+            target/ts/runtime-dependencies.json
           if-no-files-found: error
           retention-days: 90

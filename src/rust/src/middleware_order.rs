@@ -2,10 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::RateLimitFailureMode;
 
-/// Observable request/response execution order.
+/// Stages in the historical reviewed ORES middleware profile.
 ///
-/// This is an execution trace, not the lexical nesting order of framework
-/// layers. Response stages occur after the handler in the order listed here.
+/// This closed enum exists for the opt-in compatibility/reference validator
+/// below. It is not the universe of middleware a consumer may compose. New
+/// consumer-owned plans can use arbitrary string stage names through
+/// `crate::composition::MiddlewareOrderPolicy`.
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MiddlewareStage {
@@ -50,6 +52,11 @@ impl MiddlewareStage {
     }
 }
 
+/// Opt-in reviewed reference profile retained for compatibility.
+///
+/// This constant does not define the required order for downstream services.
+/// Consumers that select a different middleware set/order should author a
+/// `MiddlewareOrderPolicy` and use `validate_consumer_middleware_order(...)`.
 pub const DEFAULT_MIDDLEWARE_ORDER: [MiddlewareStage; 16] = [
     MiddlewareStage::PanicBoundary,
     MiddlewareStage::Deadline,
@@ -203,13 +210,16 @@ const ORDER_RULES: [OrderRule; 11] = [
     },
 ];
 
-/// Validates the ordering invariants shared by framework adapters and service
-/// composition roots. Every declared stage must occur exactly once, and the
-/// complete request/response execution sequence must match the reviewed order.
+/// Validates the complete historical reviewed ORES reference profile.
+///
+/// This is intentionally strict and is retained for consumers that explicitly
+/// choose that profile. It is **not** a universal composition validator. New
+/// services with their own middleware selection/order should use
+/// `crate::composition::validate_consumer_middleware_order`, whose empty policy
+/// imposes no library-owned order at all.
 ///
 /// Rule helpers return new violation values instead of mutating a caller-owned
-/// accumulator. That keeps the validation boundary referentially transparent:
-/// callers provide stages and receive a newly constructed result vector.
+/// accumulator. That keeps the validation boundary referentially transparent.
 pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolation> {
     let duplicates = stages.iter().enumerate().filter_map(|(index, stage)| {
         stages[..index].contains(stage).then_some(OrderViolation {

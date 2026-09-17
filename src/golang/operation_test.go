@@ -73,9 +73,9 @@ func TestOperationBoundaryReporterPanicIsFailOpen(t *testing.T) {
 }
 
 func TestOperationBoundaryClassifiesDeadlineAndCancellation(t *testing.T) {
-	deadlineParent, cancelDeadline := context.WithTimeout(context.Background(), time.Nanosecond)
+	deadlineParent, cancelDeadline := context.WithDeadline(context.Background(), time.Unix(1, 0))
 	defer cancelDeadline()
-	time.Sleep(time.Millisecond)
+	<-deadlineParent.Done()
 	deadline := RunOperationBoundary(
 		deadlineParent,
 		testOperationContext(3),

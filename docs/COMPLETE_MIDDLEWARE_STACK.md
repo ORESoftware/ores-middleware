@@ -1,95 +1,107 @@
-# Complete ORES middleware stack
+# Complete ORES middleware capability profile
 
-This document is the reviewed composition contract for deployable HTTP/RPC servers that use `ORESoftware/ores-middleware`.
+This document is a reviewed **reference composition** for deployable HTTP/RPC servers that use `ORESoftware/ores-middleware`. It is not a mandatory library-owned stack. A consuming service owns which capabilities it enables, their exact order, their route/server scope, and the provider implementations/versions injected behind ORES ports.
 
-`ores-middleware` is the lifecycle/orchestration layer. It must not silently reimplement the authoritative packages it composes:
+`ores-middleware` is a lifecycle/composition toolkit. It must not silently reimplement the authoritative packages it composes:
 
 - shared value/request contracts: `oresoftware/ores-interfaces`
 - admission/rate limiting: `ores-rate-limit/ores-rl-lib-core`
 - bounded local/Redis LRU cache profiles: `ores-redis-lru-cache/ores-lru-redis-lib-core`
-- authentication/session verification: `shared-auth/shared-auth-lib-core`
+- authentication/session verification: consumer-selected auth provider, optionally `shared-auth/shared-auth-lib-core`
 - telemetry/log context: `ores-otel/ores.otel.log`
 
 Consumers may use native package-manager projections, but `.zpkg.toml` is the cross-repository dependency declaration and provenance boundary.
 
+For the implemented consumer-owned APIs, see [`consumer-composition.md`](consumer-composition.md): `StagePipeline`, injectable `AuthStage`, standalone Axum auth middleware, and `MiddlewareOrderPolicy`.
+
 ## Request data model
 
-Every adapter must project the incoming request into a data-only request envelope. The semantic contract belongs in `ores-interfaces`; language runtimes use idiomatic maps:
+Every adapter that uses the portable ORES pipeline should project the incoming request into a data-only request envelope. The semantic contract belongs in `ores-interfaces`; language runtimes use idiomatic maps/types:
 
 - `headers`: case-insensitive-on-input, canonical lowercase string map. Authored/generated names should be lowercase, including the reserved `x-ores-*` extension namespace.
 - `query`: string or multi-string map.
 - `json_payload`: typed `string -> JSON value` map when the decoded root is an object.
 - `decoded_payload`: representation-tagged decoded value for JSON, XML, MessagePack, or Protobuf.
 - `raw_body`: bounded bytes retained only when a downstream contract explicitly needs them.
-- `attributes`: middleware-owned typed metadata such as request ID, trace ID, authenticated subject, tenant, cache decision, and rate-limit decision.
+- `attributes`: bounded middleware-owned typed metadata such as request ID, trace ID, authenticated subject, tenant, cache decision, and rate-limit decision.
 
 The request envelope is per-request data. It is never a process-global mutable map and must not contain plaintext secrets in telemetry.
 
-## Reviewed lifecycle order
+## Reviewed reference profile
 
-Request stages execute in this order. Response stages execute on unwind in the documented response order.
+The sequence below is a useful reviewed profile, **not** an instruction that every service must install all stages in this order. A service may omit stages, add custom stages, split the profile across routers, or choose another order when its semantics require it. Where one stage depends on another, the consumer should encode that relationship explicitly with its own composition/order policy.
 
 1. **panic/error boundary** — convert uncaught failures to sanitized `5xx` problem responses.
 2. **deadline/cancellation** — establish request deadline and cancellation propagation.
 3. **request ID and trace context** — accept only valid inbound values; otherwise generate fresh values.
 4. **trusted-proxy/TLS termination policy** — derive effective HTTPS only from a directly secure connection or forwarded metadata from an explicitly trusted proxy.
-5. **request decompression** — decode supported `Content-Encoding` values before payload parsing, while enforcing both compressed and expanded byte limits to avoid decompression bombs.
+5. **request decompression** — decode supported `Content-Encoding` values before payload parsing, while enforcing compressed/expanded byte limits.
 6. **payload byte limit** — bound the post-decompression payload before parser allocation.
-7. **anonymous flood guard** — coarse abuse control before expensive authentication.
-8. **content-type dispatch / deserialization** — JSON, XML, MessagePack, or Protobuf. Unsupported media type is `415`; malformed payload is `400`; contract/schema mismatch is `422` unless an application-specific contract intentionally chooses another 4xx.
-9. **authentication** — Shared Auth is authoritative. Authentication must fail closed whenever the configured route requires identity.
-10. **principal rate limit** — use the authenticated principal when available. Security-sensitive operations use strict/fail-closed policy; public reads may use bounded/local degradation according to `.ores-rl.toml`.
-11. **authorization** — route/application policy after authentication and principal admission.
-12. **cache lookup / conditional request** — bounded local cache may front Redis according to `.ores-lru.toml`; authorization-sensitive data must include tenant/subject scope in the cache key or bypass shared caching.
+7. **anonymous flood guard** — coarse abuse control where the service chooses to place it.
+8. **content-type dispatch / deserialization** — JSON, XML, MessagePack, or Protobuf.
+9. **authentication** — invoke the provider injected by the consumer; protected routes fail closed.
+10. **principal rate limit** — optionally use the authenticated principal when the consumer places this stage after auth.
+11. **authorization** — application/route policy, commonly after authentication when identity is required.
+12. **cache lookup / conditional request** — authorization-sensitive data must be safely scoped or bypass shared caching.
 13. **idempotency admission** — for configured mutation methods.
-14. **redirect policy** — only normalized, explicitly allowed destinations; reject protocol-relative, credential-bearing, control-character, or untrusted-host targets. Permanent redirects are application policy, not an automatic middleware rewrite.
+14. **redirect policy** — normalized, explicitly allowed destinations only.
 15. **application handler**.
-16. **catch-all / fall-through 4xx** — an otherwise unhandled route becomes a structured `404` problem response; a method mismatch becomes `405` with `Allow` where the framework can determine it. Fall-through must never become a generic `500`.
-17. **cache write / ETag finalization** — only cache responses allowed by status, auth scope, `Cache-Control`, and configured cache policy.
-18. **response compression** — negotiate an enabled algorithm only when worthwhile and never double-compress an already encoded response.
-19. **encryption/wrapping** — application/message encryption is explicit policy. Transport TLS is not replaced by payload encryption. Decryption happens before representation parsing; encryption happens after serialization and before transport framing.
+16. **catch-all / fall-through 4xx** — structured `404`/`405` where applicable.
+17. **cache write / ETag finalization** — only when response/cache policy permits it.
+18. **response compression** — negotiate an enabled algorithm and avoid double compression.
+19. **encryption/wrapping** — explicit application/message encryption policy.
 20. **security headers and correlation headers**.
-21. **telemetry/finalization/cleanup** — emit bounded metadata, remove request context, release leases/resources.
+21. **telemetry/finalization/cleanup** — emit bounded metadata and release resources.
+
+The portable execution guarantee is simpler than this profile: request stages run in the order the **consumer declared**; response hooks unwind in reverse entered order. `DEFAULT_MIDDLEWARE_ORDER` / `validate_middleware_order(...)` are compatibility/reference helpers only. New consumers should use `MiddlewareOrderPolicy` / `validate_consumer_middleware_order(...)` when they want explicit validation of their own composition.
 
 ## Content representations
 
-The portable middleware contract recognizes these canonical media types:
+The portable middleware contract recognizes these canonical media types when the consumer enables corresponding codec stages:
 
 | Representation | Canonical media type | Notes |
 | --- | --- | --- |
 | JSON | `application/json` | `application/problem+json` is the canonical structured error representation. |
 | XML | `application/xml` | `text/xml` may be accepted as a compatibility alias but should normalize to `application/xml`. Disable DTD/external-entity resolution. |
 | MessagePack | `application/msgpack` | `application/x-msgpack` may be accepted as a compatibility alias. |
-| Protobuf | `application/protobuf` | `application/x-protobuf` may be accepted as a compatibility alias. Protobuf decoding requires a route/message descriptor; there is no safe schema-free object decoder. |
+| Protobuf | `application/protobuf` | `application/x-protobuf` may be accepted as a compatibility alias. Protobuf decoding requires a route/message descriptor. |
 
-All parsers receive bounded bytes and must reject trailing garbage where the codec exposes that distinction.
+All parsers receive bounded bytes and should reject trailing garbage where the codec exposes that distinction.
 
 ## Encryption and compression
 
-Compression and encryption are transforms around the representation codec, not alternate representations.
+Compression and encryption are transforms around the representation codec, not alternate representations. If a consumer enables all of these transforms, their semantic relationship is:
 
-Inbound order is:
+Inbound:
 
-`transport -> trusted TLS/proxy admission -> decrypt (when explicitly configured) -> decompress -> representation decode -> contract validation`
+`transport -> trusted TLS/proxy admission -> decrypt -> decompress -> representation decode -> contract validation`
 
-Outbound order is:
+Outbound:
 
 `application value -> representation encode -> optional compress -> optional encrypt -> transport`
+
+These local transform dependencies do not imply a universal 21-stage application chain; they apply only when those transforms are selected.
 
 Authenticated encryption must be used for payload encryption. Nonce/key material is injected by an approved secret provider and is never committed to `.ores-*.toml`, `.zpkg.toml`, logs, or generated receipts.
 
 ## Rate limiting
 
-`ores-middleware` owns *where* rate limiting runs; `ores-rate-limit` owns admission semantics. A consumer should not instantiate a second unrelated token bucket when an ORES rate-limit adapter is configured.
+`ores-rate-limit` owns rate/admission semantics. **The consuming service owns where each rate-limit stage is positioned and which routes use it.** `ores-middleware` provides adapters/primitives so consumers do not need to reimplement admission logic.
 
-- anonymous flood limiting occurs before authentication;
-- principal/tenant limiting occurs after authentication;
-- authorization, account recovery, payments/ledger writes, and mutation admission fail closed if the authoritative coordinator is required and unavailable;
-- local fallback is allowed only when `.ores-rl.toml` declares a bounded/local policy for that operation class.
+Common patterns include:
+
+- anonymous flood limiting before expensive work;
+- principal/tenant limiting after authentication when the key depends on authenticated identity;
+- strict/fail-closed policy for security-sensitive operations;
+- bounded/local degradation for explicitly configured public-read profiles.
+
+Those are reviewed patterns, not hidden order rules. If a service requires auth before a principal-aware limiter, encode `auth -> limiter` in its own `MiddlewareOrderPolicy`.
+
+A consumer should not instantiate a second unrelated token bucket when an ORES rate-limit adapter is configured for the same policy boundary.
 
 ## LRU / Redis cache
 
-`ores-redis-lru-cache` owns cache profiles and Redis-backed bounded-LRU semantics. Middleware integrates it through a cache interface and must preserve:
+`ores-redis-lru-cache` owns cache profiles and Redis-backed bounded-LRU semantics. Middleware integrates it through a cache interface and should preserve:
 
 - bounded entries and TTLs for local memory;
 - namespace/versioned keys;
@@ -98,17 +110,24 @@ Authenticated encryption must be used for payload encryption. Nonce/key material
 - stampede/single-flight behavior where provided by the cache package;
 - no caching of `Set-Cookie`, secrets, or private responses unless an explicit route policy says otherwise.
 
-A cache outage must not bypass authentication or authorization.
+A cache outage must not bypass authentication or authorization on routes where those controls are required.
 
-## Shared Auth
+## Authentication / Shared Auth
 
-`shared-auth` owns session/token verification and identity semantics. `ores-middleware` may host an embedded verifier or call an HTTP verifier, but it must not invent a parallel user/session model.
+The consuming service owns the concrete authentication dependency and exact version/revision. `shared-auth` is an important ORES provider option, but `ores-middleware` must not make one auth SDK/version a transitive universal requirement.
 
-- normalized identity fields are attached to the request context/envelope;
-- auth failures are structured `401`/`403` responses;
-- configured Shared Auth integration is fail-closed;
-- authorization decisions happen after identity establishment;
-- test bypasses are forbidden in production and must remain explicit in test/staging configuration.
+The stable boundary is `AuthVerifier` / `AuthDecision`, with closure/provider adapters such as `auth_provider_fn(...)`. Consumers can therefore inject a selected Shared Auth build, another provider, or two incompatible provider versions during migration without changing the middleware crate.
+
+When authentication is enabled for a protected route:
+
+- normalized identity fields are attached to request context/extensions;
+- provider-specific diagnostics are not exposed to clients;
+- failures produce sanitized `401`/`403` responses as appropriate;
+- the configured auth boundary fails closed;
+- authorization can consume the stable identity established by auth when the consumer orders it that way;
+- test bypasses are forbidden in production and remain explicit in test/staging configuration.
+
+`AuthStage` copies stable user/tenant identity and only `otel.*` baggage by default. A service that needs additional provider claims for authorization should explicitly allow-list them with a decision enricher rather than copying arbitrary claims wholesale.
 
 ## TLS termination
 
@@ -133,7 +152,7 @@ Redirect middleware is policy, not string concatenation. The default posture is 
 
 ## 4xx catch-all / fall-through
 
-Every server adapter must install a terminal 4xx fallback. The fallback emits `application/problem+json` and includes the request correlation header.
+A server that chooses the ORES fall-through stage should emit `application/problem+json` and preserve correlation data.
 
 Canonical status mapping:
 
@@ -150,7 +169,7 @@ Canonical status mapping:
 - `422` decoded payload failed the selected request contract;
 - `429` admission/rate limit denied.
 
-The fallback is *after* application routing but still inside correlation/security/telemetry finalization.
+If a service wants telemetry/security finalization to observe fall-through responses, it should place those response-capable stages around the router/fall-through boundary explicitly.
 
 ## Configuration ownership
 
@@ -158,7 +177,7 @@ Environment-variable names and non-secret metadata must be declared, never disco
 
 | Concern | Canonical repo-local config |
 | --- | --- |
-| middleware target/orchestration + middleware-owned env metadata | `.ores-mw.toml` |
+| middleware target/composition + middleware-owned env metadata | `.ores-mw.toml` |
 | rate-limit policy | `.ores-rl.toml` |
 | Redis/LRU policy | `.ores-lru.toml` |
 | Shared Auth integration | `.auth-shared.toml` |
@@ -166,22 +185,25 @@ Environment-variable names and non-secret metadata must be declared, never disco
 | CLI/env argument mapping | `.cli-flags.toml` via `flags-2-env` |
 | cross-repository package provenance | `.zpkg.toml` / lock |
 
+Composition fields in `.ores-mw.toml` should describe the consumer's actual target/router composition: selected stage names, exact order, provider references, and optional required/forbidden/unique/before/after validation rules. Omitted composition must not silently expand to the legacy reference profile unless the consumer explicitly opts into that profile.
+
 Secrets are references/keys only in those files. Secret values belong in the approved secret-delivery boundary (for example sops+age decrypted at runtime, platform secret stores, or workload identity).
 
-A deployable consumer must not introduce undocumented `process.env.*`, `std::env::var`, `os.Getenv`, or equivalent middleware configuration reads. Fleet audits should fail when a middleware-affecting environment key has no declaration in the appropriate `.ores-*.toml` / `.cli-flags.toml` contract.
+A deployable consumer should not introduce undocumented `process.env.*`, `std::env::var`, `os.Getenv`, or equivalent middleware configuration reads. Fleet audits can fail when a middleware-affecting environment key has no declaration in the appropriate `.ores-*.toml` / `.cli-flags.toml` contract.
 
 ## Consumer acceptance gate
 
-A repository counts as a hardened live adoption only when all of the following are true on its default branch:
+A repository counts as a hardened live adoption only when all applicable items are true on its default branch:
 
-1. it imports/installs the shared middleware adapter in live server composition code;
+1. it imports/installs ORES middleware primitives/adapters in live server composition code;
 2. its native package manifest uses an immutable reviewed middleware revision or released artifact;
 3. `.zpkg.toml` declares the ORES package relationship used by the repo;
-4. `.ores-mw.toml` selects the live server target and stack config;
+4. `.ores-mw.toml`, when used for composition, describes the live server target and the consumer-selected stage plan/policy;
 5. applicable `.ores-rl.toml`, `.ores-lru.toml`, `.auth-shared.toml`, and `.ores-otel.toml` are present and validated;
-6. no plaintext secrets are committed;
-7. 4xx fall-through, malformed-body, unsupported-media, auth, rate-limit, cache-outage, TLS-forwarding, compression/decompression, redirect, and codec tests pass;
-8. temporary rollout workflows/flags are removed;
-9. the default branch CI passes after adoption.
+6. concrete provider libraries/versions are owned by the consumer and injected behind stable ports;
+7. no plaintext secrets are committed;
+8. tests cover the middleware actually selected by the service, including its declared ordering invariants and relevant failure paths;
+9. temporary rollout workflows/flags are removed;
+10. the default branch CI passes after adoption.
 
-A template or planning document alone does not count as adoption.
+A template, planning document, or use of the legacy default profile alone does not prove that a service's intended consumer-owned composition is correct.

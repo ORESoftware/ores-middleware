@@ -15,13 +15,41 @@ if (files.length === 0) {
   files = (await readdir(directory, { withFileTypes: true })).filter((item) => item.isFile() && item.name.endsWith(".json")).map((item) => resolve(directory, item.name));
 }
 
+const expectedRuntimeByLanguage = Object.freeze({
+  rust: "tokio",
+  ts: "node-deno-bun",
+  golang: "go-net-http",
+  gleam: "erlang-otp",
+  elixir: "beam-otp",
+  erlang: "erlang-otp",
+});
+const expectedCapabilities = [...schema.$defs.capability.enum].sort();
+
 const seen = new Set();
 for (const file of files) {
   const descriptor = JSON.parse(await readFile(file, "utf8"));
   assert(validate(descriptor), `${file}: ${JSON.stringify(validate.errors, null, 2)}`);
   assert(!seen.has(descriptor.language), `duplicate descriptor for ${descriptor.language}`);
+  const expectedRuntime = expectedRuntimeByLanguage[descriptor.language];
+  assert(expectedRuntime, `${file}: unexpected descriptor language ${descriptor.language}`);
+  assert.equal(
+    descriptor.runtime,
+    expectedRuntime,
+    `${file}: runtime drift for ${descriptor.language}; expected ${expectedRuntime}`,
+  );
+  assert.deepEqual(
+    [...descriptor.capabilities].sort(),
+    expectedCapabilities,
+    `${file}: ${descriptor.language} must implement the complete portable capability set`,
+  );
+  if (descriptor.language === "ts") {
+    assert(
+      descriptor.frameworkAdapters.includes("bun") && descriptor.frameworkAdapters.includes("deno"),
+      `${file}: TypeScript runtime descriptor must include Bun and Deno adapters`,
+    );
+  }
   seen.add(descriptor.language);
-  console.log(`descriptor ok: ${descriptor.language} (${basename(file)})`);
+  console.log(`descriptor ok: ${descriptor.language}/${descriptor.runtime} (${basename(file)})`);
 }
 
 if (requireAll) {

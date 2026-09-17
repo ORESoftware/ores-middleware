@@ -170,16 +170,25 @@ pub fn middleware_callback_receives_authenticated_pinned_logger_test() {
     )
   let hooks0 = ores_middleware.default_hooks()
   let hooks =
-    ores_middleware.Hooks(..hooks0, authenticate: fn(_, _) {
-      Ok(ores_middleware.AuthDecision(
-        user_id: "user-callback",
-        tenant_id: "tenant-callback",
-        baggage: dict.from_list([
-          #("otel.allowed", "yes"),
-          #("authorization", "must-not-propagate"),
-        ]),
-      ))
-    })
+    ores_middleware.Hooks(
+      ..hooks0,
+      authenticate: fn(_, _) {
+        Ok(ores_middleware.AuthDecision(
+          user_id: "user-callback",
+          tenant_id: "tenant-callback",
+          baggage: dict.from_list([
+            #("otel.allowed", "yes"),
+            #("authorization", "must-not-propagate"),
+          ]),
+        ))
+      },
+      auth_baggage_enricher: fn(_, _, auth: ores_middleware.AuthDecision) {
+        case dict.get(auth.baggage, "otel.allowed") {
+          Ok(value) -> dict.from_list([#("otel.allowed", value)])
+          Error(_) -> dict.new()
+        }
+      },
+    )
   let assert Ok(middleware) = otel.create_middleware(config, hooks, logger)
   let request =
     ores_middleware.Request(

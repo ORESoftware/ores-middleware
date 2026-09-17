@@ -4,8 +4,11 @@
     reason = "SharedAuthVerifiedPrincipal keeps all provider, identity, tenant, session, issuer, audience, organization, and realm evidence explicit at construction"
 )]
 
+pub mod auth_provider;
+pub mod auth_stage;
 mod bootstrap;
 mod compat;
+pub mod composition;
 mod config;
 mod context;
 pub mod docs_serving;
@@ -30,18 +33,25 @@ pub mod stage;
 pub mod validation;
 
 use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 impl std::fmt::Debug for hardening::HardenedStagePipeline {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("HardenedStagePipeline")
-            .finish_non_exhaustive()
+        formatter.debug_struct("HardenedStagePipeline").finish_non_exhaustive()
     }
 }
 
+pub use auth_provider::{
+    FnAuthProvider, FnSharedAuthProvider, StaticAuthVerifier, StaticSharedAuthProviderVerifier,
+    auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn,
+};
+pub use auth_stage::{AuthDecisionEnricher, AuthStage, NoopAuthDecisionEnricher};
 pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
+pub use composition::{
+    MiddlewareCompositionPlan, MiddlewareOrderIssue, MiddlewareOrderPolicy,
+    MiddlewareOrderingRule, OrderIssueSeverity, validate_consumer_middleware_order,
+    validate_declared_middleware_plan, validate_runtime_middleware_plan,
+};
 pub use config::{
     MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
     validate_config,
@@ -109,34 +119,14 @@ pub use validation::{ContractViolation, RequestContractValidator, ValidationStag
 
 pub const CONTRACT_VERSION: &str = "1.0.0";
 pub const CAPABILITIES: &[&str] = &[
-    "request-context",
-    "panic-recovery",
-    "request-id",
-    "trace-context",
-    "structured-logging",
-    "metrics-red",
-    "deadline-timeout",
-    "payload-limit",
-    "rate-limit",
-    "auth",
-    "sync-observer",
-    "json",
-    "headers",
-    "compression",
-    "tls-policy",
-    "security-headers",
-    "idempotency",
-    "ip-policy",
-    "cache-etag",
-    "content-negotiation",
-    "fault-injection",
-    "test-auth-bypass",
-    "schema-capture",
+    "request-context", "panic-recovery", "request-id", "trace-context",
+    "structured-logging", "metrics-red", "deadline-timeout", "payload-limit",
+    "rate-limit", "auth", "sync-observer", "json", "headers", "compression",
+    "tls-policy", "security-headers", "idempotency", "ip-policy", "cache-etag",
+    "content-negotiation", "fault-injection", "test-auth-bypass", "schema-capture",
 ];
 
-pub fn capabilities() -> &'static [&'static str] {
-    CAPABILITIES
-}
+pub fn capabilities() -> &'static [&'static str] { CAPABILITIES }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -156,16 +146,8 @@ pub fn descriptor() -> AdapterDescriptor {
         language: "rust".into(),
         runtime: "tokio".into(),
         package_name: "ores-middleware".into(),
-        framework_adapters: vec![
-            "axum".into(),
-            "mash".into(),
-            "leptos".into(),
-            "dioxus".into(),
-        ],
-        capabilities: CAPABILITIES
-            .iter()
-            .map(|value| (*value).to_owned())
-            .collect(),
+        framework_adapters: vec!["axum".into(), "mash".into(), "leptos".into(), "dioxus".into()],
+        capabilities: CAPABILITIES.iter().map(|value| (*value).to_owned()).collect(),
         operation_symbols: BTreeMap::from([
             ("descriptor".into(), "descriptor".into()),
             ("defaultConfig".into(), "default_config".into()),
@@ -189,16 +171,8 @@ mod tests {
         config.settings.fault_injection.enabled = true;
         config.settings.test_auth_bypass.enabled = true;
         let issues = validate_config(&config);
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.path.contains("faultInjection"))
-        );
-        assert!(
-            issues
-                .iter()
-                .any(|issue| issue.path.contains("testAuthBypass"))
-        );
+        assert!(issues.iter().any(|issue| issue.path.contains("faultInjection")));
+        assert!(issues.iter().any(|issue| issue.path.contains("testAuthBypass")));
     }
 
     #[tokio::test]
@@ -217,8 +191,7 @@ mod tests {
         run_with_context(context, async {
             assert_eq!(current_context().unwrap().request_id, "r1");
             assert_eq!(current_request_id().as_deref(), Some("r1"));
-        })
-        .await;
+        }).await;
         assert!(current_context().is_none());
         assert!(current_request_id().is_none());
     }
@@ -235,10 +208,6 @@ mod tests {
         let mut config = default_config("test-service");
         config.settings.tls.mode = "disabled".into();
         config.settings.tls.require_https = true;
-        assert!(
-            validate_config(&config)
-                .iter()
-                .any(|issue| issue.code == "disabled_tls_requires_false")
-        );
+        assert!(validate_config(&config).iter().any(|issue| issue.code == "disabled_tls_requires_false"));
     }
 }
