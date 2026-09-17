@@ -4,10 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const rootPackagePath = new URL("../package.json", import.meta.url);
 const tsPackagePath = new URL("../src/ts/package.json", import.meta.url);
+const adapterManifestPath = new URL("../src/ts/adapter.manifest.json", import.meta.url);
 
-const [rootPackage, tsPackage] = await Promise.all([
+const [rootPackage, tsPackage, adapterManifest] = await Promise.all([
   readFile(rootPackagePath, "utf8").then(JSON.parse),
   readFile(tsPackagePath, "utf8").then(JSON.parse),
+  readFile(adapterManifestPath, "utf8").then(JSON.parse),
 ]);
 
 const requiredPortableExports = Object.freeze([
@@ -17,6 +19,12 @@ const requiredPortableExports = Object.freeze([
   "./context",
   "./docs-serving",
 ]);
+
+const expectedRuntimeSupport = Object.freeze({
+  node: ">=22.23.1",
+  bun: ">=1.4.2",
+  deno: ">=2.9.6",
+});
 
 function fail(message) {
   console.error(`ts-package-exports: ${message}`);
@@ -54,23 +62,33 @@ for (const subpath of tsKeys) {
   }
 }
 
-const runtime = tsPackage.oresRuntimeSupport;
-if (!runtime || typeof runtime !== "object") {
-  fail("src/ts package must declare oresRuntimeSupport");
-} else {
-  for (const name of ["node", "bun", "deno"]) {
-    if (typeof runtime[name] !== "string" || runtime[name].length === 0) {
-      fail(`src/ts package must declare oresRuntimeSupport.${name}`);
-    }
-  }
+if (JSON.stringify(tsPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
+  fail(
+    `src/ts oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`,
+  );
+}
+if (JSON.stringify(rootPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
+  fail(
+    `root oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`,
+  );
 }
 
-if (JSON.stringify(rootPackage.oresRuntimeSupport) !== JSON.stringify(tsPackage.oresRuntimeSupport)) {
-  fail("root/src oresRuntimeSupport metadata must match exactly");
+if (adapterManifest.language !== "ts") {
+  fail(`adapter manifest language must be ts, got ${JSON.stringify(adapterManifest.language)}`);
+}
+if (adapterManifest.runtime !== "node-deno-bun") {
+  fail(
+    `adapter manifest runtime must be node-deno-bun, got ${JSON.stringify(adapterManifest.runtime)}`,
+  );
+}
+for (const runtimeAdapter of ["bun", "deno"]) {
+  if (!Array.isArray(adapterManifest.frameworkAdapters) || !adapterManifest.frameworkAdapters.includes(runtimeAdapter)) {
+    fail(`adapter manifest must declare ${runtimeAdapter} framework adapter`);
+  }
 }
 
 if (!process.exitCode) {
   console.log(
-    `ts-package-exports: ${tsKeys.length} export subpaths aligned; Node/Bun/Deno runtime metadata present`,
+    `ts-package-exports: ${tsKeys.length} export subpaths aligned; Node/Bun/Deno runtime metadata and descriptor claims match tested floors`,
   );
 }
