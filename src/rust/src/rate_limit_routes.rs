@@ -186,7 +186,7 @@ impl RouteRateLimitTable {
                 rule.policy.validate(),
             );
 
-            if !selectors.insert(rule.selector.clone()) {
+            if !selectors.insert(canonical_selector_key(&rule.selector)) {
                 violations.push(RouteRateLimitViolation {
                     code: "duplicate-route-selector",
                     path: format!("{prefix}.selector"),
@@ -247,6 +247,18 @@ impl RouteRateLimitTable {
             }),
         }
     }
+}
+
+fn canonical_selector_key(
+    selector: &RateLimitRouteSelector,
+) -> (Vec<String>, Option<String>, Option<String>) {
+    let mut methods = selector.methods.clone();
+    methods.sort();
+    (
+        methods,
+        selector.path_template.clone(),
+        selector.operation_id.clone(),
+    )
 }
 
 fn append_policy_violations(
@@ -481,6 +493,38 @@ mod tests {
             }),
             Err(RouteRateLimitResolutionError::Ambiguous { .. })
         ));
+        assert!(
+            table
+                .validate()
+                .iter()
+                .any(|v| v.code == "duplicate-route-selector")
+        );
+    }
+
+    #[test]
+    fn duplicate_selector_detection_ignores_method_order() {
+        let table = RouteRateLimitTable {
+            default_policy: None,
+            routes: vec![
+                RouteRateLimitRule {
+                    selector: RateLimitRouteSelector {
+                        methods: vec!["GET".into(), "POST".into()],
+                        path_template: Some("/search".into()),
+                        operation_id: None,
+                    },
+                    policy: policy("search-a", OperationClass::PublicRead),
+                },
+                RouteRateLimitRule {
+                    selector: RateLimitRouteSelector {
+                        methods: vec!["POST".into(), "GET".into()],
+                        path_template: Some("/search".into()),
+                        operation_id: None,
+                    },
+                    policy: policy("search-b", OperationClass::PublicRead),
+                },
+            ],
+        };
+
         assert!(
             table
                 .validate()
