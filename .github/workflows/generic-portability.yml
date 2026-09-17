@@ -29,6 +29,14 @@ on:
       - "src/gleam/src/ores_middleware.gleam"
       - "src/gleam/src/ores_middleware/generic.gleam"
       - "src/gleam/test/generic_test.gleam"
+      - "src/elixir/mix.exs"
+      - "src/elixir/mix.lock"
+      - "src/elixir/lib/ores_middleware/generic.ex"
+      - "src/elixir/test/generic_test.exs"
+      - "src/erlang/rebar.config"
+      - "src/erlang/rebar.lock"
+      - "src/erlang/src/ores_middleware_generic.erl"
+      - "src/erlang/test/ores_middleware_generic_tests.erl"
       - "tests/runtime-portability/generic-context-smoke.mjs"
       - "scripts/check-generic-portability.mjs"
       - "scripts/check-ts-package-exports.mjs"
@@ -86,19 +94,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
-          persist-credentials: false
-          show-progress: false
-          fetch-depth: 1
-      - name: Verify exact candidate revision
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+        with: { ref: "${{ env.ORES_WORKFLOW_SOURCE_SHA }}", persist-credentials: false, fetch-depth: 1 }
+      - run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
-        with:
-          toolchain: 1.95.0
+        with: { toolchain: "1.95.0" }
       - name: Execute Rust provider and composition conformance
-        shell: bash
         run: |
           set -euo pipefail
           cargo test --locked --manifest-path src/rust/Cargo.toml --test provider_injection
@@ -111,20 +111,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
-          persist-credentials: false
-          show-progress: false
-          fetch-depth: 1
-      - name: Verify exact candidate revision
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+        with: { ref: "${{ env.ORES_WORKFLOW_SOURCE_SHA }}", persist-credentials: false, fetch-depth: 1 }
+      - run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22.23.1"
-          package-manager-cache: false
+        with: { node-version: "22.23.1", package-manager-cache: false }
       - name: Build exact TypeScript package
-        shell: bash
         run: |
           set -euo pipefail
           npm ci --prefix src/ts --no-audit --no-fund
@@ -137,22 +128,13 @@ jobs:
   go:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      GOFLAGS: -mod=readonly
+    env: { GOFLAGS: -mod=readonly }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
-          persist-credentials: false
-          show-progress: false
-          fetch-depth: 1
-      - name: Verify exact candidate revision
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+        with: { ref: "${{ env.ORES_WORKFLOW_SOURCE_SHA }}", persist-credentials: false, fetch-depth: 1 }
+      - run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
-          go-version: "1.25.0"
-          cache: false
+        with: { go-version: "1.25.0", cache: false }
       - name: Execute generic Go conformance
         working-directory: src/golang
         run: go test -count=1 ./...
@@ -162,27 +144,60 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
-          persist-credentials: false
-          show-progress: false
-          fetch-depth: 1
-      - name: Verify exact candidate revision
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+        with: { ref: "${{ env.ORES_WORKFLOW_SOURCE_SHA }}", persist-credentials: false, fetch-depth: 1 }
+      - run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: "27.3.4.14"
           elixir-version: "1.18.4"
           gleam-version: "1.18.1"
           rebar3-version: "3.24.0"
-      - name: Build and format-check Gleam package
+      - name: Build and execute generic Gleam conformance
         working-directory: src/gleam
-        shell: bash
         run: |
           set -euo pipefail
           gleam build
           gleam format --check src test
-      - name: Execute generic Gleam conformance
-        working-directory: src/gleam
-        run: gleam test
+          gleam test
+
+  elixir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env: { MIX_ENV: test }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "${{ env.ORES_WORKFLOW_SOURCE_SHA }}", persist-credentials: false, fetch-depth: 1 }
+      - run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          elixir-version: "1.18.4"
+          rebar3-version: "3.24.0"
+      - name: Execute generic Elixir conformance
+        working-directory: src/elixir
+        run: |
+          set -euo pipefail
+          mix local.hex --force
+          mix deps.get
+          git diff --exit-code -- mix.lock
+          mix format --check-formatted "lib/**/*.ex" "test/**/*.exs" mix.exs
+          mix compile --warnings-as-errors
+          mix test test/generic_test.exs --trace
+
+  erlang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "${{ env.ORES_WORKFLOW_SOURCE_SHA }}", persist-credentials: false, fetch-depth: 1 }
+      - run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: "27.3.4.14"
+          rebar3-version: "3.24.0"
+      - name: Execute generic Erlang conformance
+        working-directory: src/erlang
+        run: |
+          set -euo pipefail
+          rebar3 compile
+          rebar3 eunit --module=ores_middleware_generic_tests
