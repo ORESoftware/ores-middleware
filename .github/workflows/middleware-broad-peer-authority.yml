@@ -79,7 +79,7 @@ jobs:
           npm rebuild --prefix target/tools/tjsv @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
           test -s target/tools/tjsv/node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
 
-      - name: Enforce complete 32-declaration peer inventory
+      - name: Enforce complete 33-declaration peer inventory
         shell: bash
         run: |
           set -euo pipefail
@@ -109,7 +109,7 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const mapping = JSON.parse(fs.readFileSync('contracts/tjsv/middleware-broad.mapping.json', 'utf8'));
-          if (mapping.declarations.length !== 32) throw new Error('expected exactly 32 declaration mappings');
+          if (mapping.declarations.length !== 33) throw new Error('expected exactly 33 declaration mappings');
           for (const lane of ['typespec', 'generated', 'authored']) {
             if (!Array.isArray(mapping.ignore?.[lane]) || mapping.ignore[lane].length !== 0) {
               throw new Error(`ignore.${lane} must remain empty`);
@@ -117,7 +117,7 @@ jobs:
           }
           const report = JSON.parse(fs.readFileSync('target/middleware-broad-tjsv/report.json', 'utf8'));
           for (const field of ['typespecDeclarations', 'generatedDeclarations', 'authoredDeclarations']) {
-            if (report.counts?.[field] !== 32) throw new Error(`${field} must equal 32`);
+            if (report.counts?.[field] !== 32) throw new Error(`${field} must equal 33`);
           }
           if ((report.coverage?.outOfScopeTypeSpecDeclarations ?? []).length !== 0) {
             throw new Error('out-of-scope TypeSpec data declarations are forbidden');
