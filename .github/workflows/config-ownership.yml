@@ -1,0 +1,48 @@
+name: config-ownership
+
+on:
+  pull_request:
+    paths:
+      - ".zpkg.toml"
+      - ".ores-mw.toml"
+      - ".cli-flags.toml"
+      - "scripts/check_config_ownership.py"
+      - "scripts/ores_mw_config.py"
+      - "scripts/ores_mw_config_core.py"
+      - "tests/test_config_ownership.py"
+      - "contracts/ores-mw-config/**"
+      - "docs/config-ownership.md"
+      - ".github/workflows/config-ownership.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".zpkg.toml"
+      - ".ores-mw.toml"
+      - ".cli-flags.toml"
+      - "scripts/check_config_ownership.py"
+      - "scripts/ores_mw_config.py"
+      - "scripts/ores_mw_config_core.py"
+      - "tests/test_config_ownership.py"
+      - "contracts/ores-mw-config/**"
+      - "docs/config-ownership.md"
+      - ".github/workflows/config-ownership.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ownership:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Verify Python runtime
+        run: python3 --version
+
+      - name: Audit checked-in ownership boundary
+        run: python3 scripts/check_config_ownership.py
+
+      - name: Run adversarial ownership tests
+        run: python3 -m unittest tests/test_config_ownership.py -v
