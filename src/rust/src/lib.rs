@@ -92,7 +92,8 @@ pub use rate_limit::{
     RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
 };
 pub use rate_limit_bindings::{
-    MAX_ROUTE_METHODS, MAX_ROUTE_RATE_LIMIT_BINDINGS, ROUTE_RATE_LIMIT_BINDING_SCHEMA,
+    MAX_ROUTE_METHODS, MAX_ROUTE_RATE_LIMIT_BINDINGS, MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH,
+    ROUTE_RATE_LIMIT_BINDING_SCHEMA,
     ResolvedRouteRateLimitBinding, RouteRateLimitBinding, RouteRateLimitBindingRequest,
     RouteRateLimitBindingResolutionError, RouteRateLimitBindingSelector,
     RouteRateLimitBindingSource, RouteRateLimitBindingTable, RouteRateLimitBindingViolation,
