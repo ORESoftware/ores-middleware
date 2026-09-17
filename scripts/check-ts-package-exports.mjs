@@ -19,6 +19,7 @@ const requiredPortableExports = Object.freeze([
   "./context",
   "./docs-serving",
 ]);
+const requiredFrameworkExports = Object.freeze(["./koa", "./fastify"]);
 
 const expectedRuntimeSupport = Object.freeze({
   node: ">=22.23.1",
@@ -35,13 +36,46 @@ function normalizedRootTarget(target) {
   return target.replace(/^\.\/src\/ts\//u, "./");
 }
 
+function validateTargetShape(subpath, condition, value) {
+  if (typeof value !== "string") {
+    fail(`${subpath} must expose string ${condition} target`);
+    return;
+  }
+  if (!value.startsWith("./dist/")) {
+    fail(`${subpath}.${condition} must stay inside ./dist, got ${value}`);
+  }
+  const expectedSuffix = condition === "types" ? ".d.ts" : ".js";
+  if (!value.endsWith(expectedSuffix)) {
+    fail(`${subpath}.${condition} must end with ${expectedSuffix}, got ${value}`);
+  }
+}
+
+if (rootPackage.name !== tsPackage.name) {
+  fail(`package name drift: root=${JSON.stringify(rootPackage.name)} ts=${JSON.stringify(tsPackage.name)}`);
+}
+if (rootPackage.version !== tsPackage.version) {
+  fail(`package version drift: root=${JSON.stringify(rootPackage.version)} ts=${JSON.stringify(tsPackage.version)}`);
+}
+if (rootPackage.type !== "module" || tsPackage.type !== "module") {
+  fail("both root and src/ts package surfaces must remain ESM modules");
+}
+if (normalizedRootTarget(rootPackage.main ?? "") !== tsPackage.main) {
+  fail(`main entrypoint drift: root=${rootPackage.main} ts=${tsPackage.main}`);
+}
+if (normalizedRootTarget(rootPackage.types ?? "") !== tsPackage.types) {
+  fail(`types entrypoint drift: root=${rootPackage.types} ts=${tsPackage.types}`);
+}
+if (JSON.stringify(rootPackage.engines) !== JSON.stringify(tsPackage.engines)) {
+  fail(`engine metadata drift: root=${JSON.stringify(rootPackage.engines)} ts=${JSON.stringify(tsPackage.engines)}`);
+}
+
 const rootKeys = Object.keys(rootPackage.exports ?? {}).sort();
 const tsKeys = Object.keys(tsPackage.exports ?? {}).sort();
 if (JSON.stringify(rootKeys) !== JSON.stringify(tsKeys)) {
   fail(`root/src export keys drift: root=${JSON.stringify(rootKeys)} ts=${JSON.stringify(tsKeys)}`);
 }
 
-for (const subpath of requiredPortableExports) {
+for (const subpath of [...requiredPortableExports, ...requiredFrameworkExports]) {
   if (!(subpath in (rootPackage.exports ?? {}))) fail(`root package missing ${subpath}`);
   if (!(subpath in (tsPackage.exports ?? {}))) fail(`src/ts package missing ${subpath}`);
 }
@@ -59,6 +93,7 @@ for (const subpath of tsKeys) {
     if (normalizedRootTarget(rootValue) !== tsValue) {
       fail(`${subpath}.${condition} drift: root=${rootValue} ts=${tsValue}`);
     }
+    validateTargetShape(subpath, condition, tsValue);
   }
 }
 
@@ -89,6 +124,6 @@ for (const runtimeAdapter of ["bun", "deno"]) {
 
 if (!process.exitCode) {
   console.log(
-    `ts-package-exports: ${tsKeys.length} export subpaths aligned; Node/Bun/Deno runtime metadata and descriptor claims match tested floors`,
+    `ts-package-exports: ${tsKeys.length} export subpaths aligned; generic/Koa/Fastify roots, entrypoints, engine metadata, Node/Bun/Deno runtime floors, and descriptor claims are consistent`,
   );
 }
