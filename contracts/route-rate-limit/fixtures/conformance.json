@@ -1,0 +1,277 @@
+{
+  "schema": "ores.middleware.route-rate-limit-conformance/v1",
+  "cases": [
+    {
+      "id": "valid-exact-route",
+      "schema_valid": true,
+      "runtime_valid": true,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "default_policy_id": "public-read-default",
+        "routes": [
+          {
+            "route_class_id": "auth-login",
+            "policy_id": "auth:login-strict",
+            "selector": {
+              "methods": ["POST"],
+              "path_template": "/auth/login",
+              "operation_id": "auth.login"
+            }
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "path": "/auth/login",
+        "route_template": "/auth/login",
+        "operation_id": "auth.login"
+      },
+      "expect": {
+        "kind": "route",
+        "route_class_id": "auth-login",
+        "policy_id": "auth:login-strict"
+      }
+    },
+    {
+      "id": "valid-parameterized-query",
+      "schema_valid": true,
+      "runtime_valid": true,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "ledger-entry",
+            "policy_id": "ledger:read",
+            "selector": {
+              "methods": ["GET"],
+              "path_template": "/ledger/{ledger_id}/entries/:entry_id"
+            }
+          }
+        ]
+      },
+      "request": {
+        "method": "GET",
+        "path": "/ledger/a/entries/42?expand=true"
+      },
+      "expect": {
+        "kind": "route",
+        "route_class_id": "ledger-entry",
+        "policy_id": "ledger:read"
+      }
+    },
+    {
+      "id": "valid-operation-precedence",
+      "schema_valid": true,
+      "runtime_valid": true,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "job-path",
+            "policy_id": "jobs:default",
+            "selector": { "methods": ["POST"], "path_template": "/jobs/{job_id}" }
+          },
+          {
+            "route_class_id": "job-retry",
+            "policy_id": "jobs:retry",
+            "selector": { "methods": ["POST"], "operation_id": "jobs.retry" }
+          }
+        ]
+      },
+      "request": {
+        "method": "POST",
+        "path": "/jobs/42",
+        "route_template": "/jobs/{job_id}",
+        "operation_id": "jobs.retry"
+      },
+      "expect": {
+        "kind": "route",
+        "route_class_id": "job-retry",
+        "policy_id": "jobs:retry"
+      }
+    },
+    {
+      "id": "valid-default-fallback",
+      "schema_valid": true,
+      "runtime_valid": true,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "default_policy_id": "public:default",
+        "routes": []
+      },
+      "request": { "method": "GET", "path": "/unmatched" },
+      "expect": { "kind": "default", "policy_id": "public:default" }
+    },
+    {
+      "id": "valid-no-default-unbound",
+      "schema_valid": true,
+      "runtime_valid": true,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": []
+      },
+      "request": { "method": "GET", "path": "/unmatched" },
+      "expect": { "kind": "none" }
+    },
+    {
+      "id": "valid-config-ambiguous-resolution",
+      "schema_valid": true,
+      "runtime_valid": true,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "users-b",
+            "policy_id": "users:beta",
+            "selector": { "methods": ["GET"], "path_template": "/users/:id" }
+          },
+          {
+            "route_class_id": "users-a",
+            "policy_id": "users:alpha",
+            "selector": { "methods": ["GET"], "path_template": "/users/{id}" }
+          }
+        ]
+      },
+      "request": { "method": "GET", "path": "/users/42" },
+      "expect": {
+        "kind": "ambiguous",
+        "route_class_ids": ["users-a", "users-b"],
+        "policy_ids": ["users:alpha", "users:beta"]
+      }
+    },
+    {
+      "id": "invalid-schema-version",
+      "schema_valid": false,
+      "runtime_valid": false,
+      "config": { "schema": "route-bindings/v0", "routes": [] }
+    },
+    {
+      "id": "invalid-route-class-uppercase",
+      "schema_valid": false,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "UsersRead",
+            "policy_id": "users:read",
+            "selector": { "path_template": "/users" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-policy-id-space",
+      "schema_valid": false,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "default_policy_id": "public default",
+        "routes": []
+      }
+    },
+    {
+      "id": "invalid-empty-selector",
+      "schema_valid": false,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "empty-selector",
+            "policy_id": "public:read",
+            "selector": { "methods": [] }
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-method-dash-only",
+      "schema_valid": false,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "bad-method",
+            "policy_id": "public:read",
+            "selector": { "methods": ["-"], "path_template": "/read" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-too-many-methods",
+      "schema_valid": false,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "method-heavy",
+            "policy_id": "public:read",
+            "selector": {
+              "methods": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT"],
+              "path_template": "/read"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "runtime-invalid-duplicate-route-class",
+      "schema_valid": true,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "search",
+            "policy_id": "search:read",
+            "selector": { "methods": ["GET"], "path_template": "/search" }
+          },
+          {
+            "route_class_id": "search",
+            "policy_id": "search:write",
+            "selector": { "methods": ["POST"], "path_template": "/search" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "runtime-invalid-duplicate-selector",
+      "schema_valid": true,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "search-a",
+            "policy_id": "search:a",
+            "selector": { "methods": ["GET"], "path_template": "/search" }
+          },
+          {
+            "route_class_id": "search-b",
+            "policy_id": "search:b",
+            "selector": { "methods": ["GET"], "path_template": "/search" }
+          }
+        ]
+      }
+    },
+    {
+      "id": "runtime-invalid-dot-path-segment",
+      "schema_valid": true,
+      "runtime_valid": false,
+      "config": {
+        "schema": "ores.middleware.route-rate-limit-bindings/v1",
+        "routes": [
+          {
+            "route_class_id": "dot-path",
+            "policy_id": "public:read",
+            "selector": { "methods": ["GET"], "path_template": "/users/../admin" }
+          }
+        ]
+      }
+    }
+  ]
+}
