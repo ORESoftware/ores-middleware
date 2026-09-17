@@ -12,7 +12,7 @@ const REQUIRE_NATIVE_ENV: &str = "ORES_EDGE_PROXY_REQUIRE_NATIVE";
 
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("edge-proxy-adapters: {}", message.as_ref());
-    std::process::exit(1);
+    std::process::exit(1)
 }
 
 fn read_required(root: &Path, relative: &str) -> String {
@@ -25,15 +25,24 @@ fn read_required(root: &Path, relative: &str) -> String {
     source
 }
 
+fn active_source(source: &str) -> String {
+    source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn require_contains(name: &str, source: &str, needle: &str) {
     if !source.contains(needle) {
-        fail(format!("{name} missing required text: {needle}"));
+        fail(format!("{name} missing active directive/text: {needle}"));
     }
 }
 
 fn forbid_contains(name: &str, source: &str, needle: &str) {
     if source.contains(needle) {
-        fail(format!("{name} contains forbidden text: {needle}"));
+        fail(format!("{name} contains forbidden active text: {needle}"));
     }
 }
 
@@ -41,7 +50,7 @@ fn require_occurrences(name: &str, source: &str, needle: &str, minimum: usize) {
     let count = source.matches(needle).count();
     if count < minimum {
         fail(format!(
-            "{name} requires at least {minimum} occurrences of {needle:?}; found {count}"
+            "{name} requires at least {minimum} active occurrences of {needle:?}; found {count}"
         ));
     }
 }
@@ -52,153 +61,233 @@ fn normalized_whitespace(source: &str) -> String {
 
 fn check_nginx(source: &str) {
     const NAME: &str = "NGINX adapter";
+    let source = active_source(source);
+
     require_contains(
         NAME,
-        source,
+        &source,
         "include /etc/nginx/ores/trusted-proxies.conf;",
     );
-    require_contains(NAME, source, "real_ip_recursive on;");
-    require_contains(NAME, source, "proxy_set_header Forwarded \"\";");
+    require_contains(NAME, &source, "include /etc/nginx/ores/allowed-hosts.map;");
+    require_contains(NAME, &source, "real_ip_recursive on;");
+    require_contains(NAME, &source, "merge_slashes on;");
+    require_contains(NAME, &source, "ignore_invalid_headers on;");
+    require_contains(NAME, &source, "underscores_in_headers off;");
+    require_contains(NAME, &source, "if ($ores_host_allowed = 0)");
+    require_contains(NAME, &source, "return 421;");
+    require_contains(NAME, &source, "if ($ores_method_allowed = 0)");
+    require_contains(NAME, &source, "return 405;");
+    require_contains(NAME, &source, "TRACE 0;");
+    require_contains(NAME, &source, "CONNECT 0;");
+
+    require_contains(NAME, &source, "proxy_set_header Forwarded \"\";");
     require_contains(
         NAME,
-        source,
+        &source,
         "proxy_set_header X-Forwarded-For $remote_addr;",
     );
-    require_contains(NAME, source, "proxy_set_header X-Real-IP $remote_addr;");
-    require_contains(NAME, source, "proxy_set_header X-Forwarded-Proto $scheme;");
-    require_contains(NAME, source, "proxy_set_header X-Forwarded-Host \"\";");
-    require_contains(NAME, source, "proxy_set_header X-Forwarded-Port \"\";");
-    require_contains(NAME, source, "proxy_set_header X-Request-ID $request_id;");
-    require_contains(NAME, source, "proxy_set_header Proxy \"\";");
-    require_contains(NAME, source, "proxy_set_header Connection \"\";");
-    require_contains(NAME, source, "proxy_next_upstream off;");
+    require_contains(NAME, &source, "proxy_set_header X-Real-IP $remote_addr;");
+    require_contains(NAME, &source, "proxy_set_header X-Forwarded-Proto $scheme;");
+    require_contains(NAME, &source, "proxy_set_header X-Forwarded-Host \"\";");
+    require_contains(NAME, &source, "proxy_set_header X-Forwarded-Port \"\";");
+    require_contains(NAME, &source, "proxy_set_header X-Request-ID $request_id;");
+    require_contains(NAME, &source, "proxy_set_header Proxy \"\";");
+    require_contains(NAME, &source, "proxy_set_header tracestate \"\";");
+    require_contains(NAME, &source, "proxy_set_header baggage \"\";");
+    require_contains(NAME, &source, "proxy_set_header Connection \"\";");
+    require_contains(NAME, &source, "proxy_set_header Upgrade \"\";");
+    require_contains(NAME, &source, "proxy_set_header TE \"\";");
+    require_contains(NAME, &source, "proxy_set_header Trailer \"\";");
+    require_contains(NAME, &source, "proxy_next_upstream off;");
 
-    let normalized = normalized_whitespace(source);
+    let normalized = normalized_whitespace(&source);
     forbid_contains(NAME, &normalized, "set_real_ip_from 0.0.0.0/0;");
     forbid_contains(NAME, &normalized, "set_real_ip_from ::/0;");
 
     require_contains(
         NAME,
-        source,
+        &source,
         "map $request_method $ores_auth_login_ip_key {",
     );
-    require_contains(NAME, source, "POST $binary_remote_addr;");
+    require_contains(NAME, &source, "POST $binary_remote_addr;");
     require_contains(
         NAME,
-        source,
+        &source,
         "limit_req_zone $binary_remote_addr zone=ores_edge_default_ip:",
     );
     require_contains(
         NAME,
-        source,
+        &source,
         "limit_req_zone $ores_auth_login_ip_key zone=ores_auth_login_ip:",
     );
-    require_contains(NAME, source, "location = /v1/auth/login {");
+    require_contains(NAME, &source, "location = /v1/auth/login {");
     require_occurrences(
         NAME,
-        source,
+        &source,
         "limit_req zone=ores_edge_default_ip burst=40 nodelay;",
         2,
     );
     require_contains(
         NAME,
-        source,
+        &source,
         "limit_req zone=ores_auth_login_ip burst=5 nodelay;",
     );
-    require_contains(NAME, source, "limit_req_status 429;");
-    require_contains(NAME, source, "limit_req_log_level warn;");
+    require_contains(NAME, &source, "limit_req_status 429;");
 
-    require_contains(NAME, source, "client_header_timeout 10s;");
-    require_contains(NAME, source, "client_body_timeout 10s;");
-    require_contains(NAME, source, "proxy_connect_timeout 3s;");
-    require_contains(NAME, source, "proxy_read_timeout 30s;");
-    require_contains(NAME, source, "client_max_body_size 2m;");
-    require_contains(NAME, source, "client_max_body_size 64k;");
+    require_contains(NAME, &source, "client_header_timeout 10s;");
+    require_contains(NAME, &source, "client_body_timeout 10s;");
+    require_contains(NAME, &source, "proxy_connect_timeout 3s;");
+    require_contains(NAME, &source, "proxy_read_timeout 30s;");
+    require_contains(NAME, &source, "client_max_body_size 2m;");
+    require_contains(NAME, &source, "client_max_body_size 64k;");
 
-    require_contains(NAME, source, "'\"path\":\"$uri\",'");
-    forbid_contains(NAME, source, "$request_uri");
-    forbid_contains(NAME, source, "$args");
-    forbid_contains(NAME, source, "$http_authorization");
-    forbid_contains(NAME, source, "$http_cookie");
+    require_contains(NAME, &source, "'\"path\":\"$uri\",'");
+    forbid_contains(NAME, &source, "$request_uri");
+    forbid_contains(NAME, &source, "$args");
+    forbid_contains(NAME, &source, "$http_authorization");
+    forbid_contains(NAME, &source, "$http_cookie");
+    require_contains(NAME, &source, "proxy_hide_header X-Content-Type-Options;");
+    require_contains(NAME, &source, "proxy_hide_header Referrer-Policy;");
+    require_contains(NAME, &source, "proxy_hide_header X-Request-ID;");
     require_contains(
         NAME,
-        source,
+        &source,
         "add_header X-Content-Type-Options \"nosniff\" always;",
     );
     require_contains(
         NAME,
-        source,
+        &source,
         "add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;",
     );
+    require_contains(NAME, &source, "add_header X-Request-ID $request_id always;");
 }
 
 fn check_haproxy(source: &str) {
     const NAME: &str = "HAProxy adapter";
-    require_contains(NAME, source, "unique-id-format \"%[uuid]\"");
+    let source = active_source(source);
+
+    require_contains(NAME, &source, "unique-id-format \"%[uuid]\"");
     require_contains(
         NAME,
-        source,
+        &source,
         "http-request set-header X-Request-ID %[unique-id]",
     );
-    forbid_contains(NAME, source, "option httplog");
+    forbid_contains(NAME, &source, "option httplog");
     require_contains(
         NAME,
-        source,
+        &source,
         "log-format 'request_id=%ID method=%HM path=%HP status=%ST bytes=%B total_ms=%Ta'",
     );
-    forbid_contains(NAME, source, "%HQ");
-    forbid_contains(NAME, source, "%HU");
-    forbid_contains(NAME, source, "%ci");
-    forbid_contains(NAME, source, "%cp");
+    forbid_contains(NAME, &source, "%HQ");
+    forbid_contains(NAME, &source, "%HU");
+    forbid_contains(NAME, &source, "%ci");
+    forbid_contains(NAME, &source, "%cp");
 
-    require_contains(NAME, source, "http-request del-header Forwarded");
-    require_contains(NAME, source, "http-request del-header X-Forwarded-For");
-    require_contains(NAME, source, "http-request del-header X-Forwarded-Proto");
-    require_contains(NAME, source, "http-request del-header X-Forwarded-Host");
-    require_contains(NAME, source, "http-request del-header X-Forwarded-Port");
-    require_contains(NAME, source, "http-request del-header X-Real-IP");
-    require_contains(NAME, source, "http-request del-header Proxy");
+    require_contains(NAME, &source, "retries 0");
+    require_contains(NAME, &source, "http-reuse safe");
+    forbid_contains(NAME, &source, "retry-on");
+    forbid_contains(NAME, &source, "option redispatch");
+    forbid_contains(NAME, &source, "http-request set-retries");
+
     require_contains(
         NAME,
-        source,
+        &source,
+        "acl ores_host_allowed req.hdr(host),lower -f /etc/haproxy/ores-allowed-hosts.lst",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request return status 421 if !ores_host_allowed",
+    );
+    forbid_contains(NAME, &source, "deny_status 421");
+    require_contains(
+        NAME,
+        &source,
+        "acl ores_forbidden_method method TRACE CONNECT",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 405 if ores_forbidden_method",
+    );
+    require_contains(NAME, &source, "acl ores_path_double_slash path_reg //");
+    require_contains(
+        NAME,
+        &source,
+        "acl ores_path_dot_segment path_reg (^|/)\\.{1,2}(/|$)",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 400 if ores_path_double_slash",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 400 if ores_path_dot_segment",
+    );
+
+    require_contains(NAME, &source, "http-request del-header Forwarded");
+    require_contains(NAME, &source, "http-request del-header X-Forwarded-For");
+    require_contains(NAME, &source, "http-request del-header X-Forwarded-Proto");
+    require_contains(NAME, &source, "http-request del-header X-Forwarded-Host");
+    require_contains(NAME, &source, "http-request del-header X-Forwarded-Port");
+    require_contains(NAME, &source, "http-request del-header X-Real-IP");
+    require_contains(NAME, &source, "http-request del-header Proxy");
+    require_contains(NAME, &source, "http-request del-header tracestate");
+    require_contains(NAME, &source, "http-request del-header baggage");
+    require_contains(NAME, &source, "http-request del-header Upgrade");
+    require_contains(NAME, &source, "http-request del-header TE");
+    require_contains(NAME, &source, "http-request del-header Trailer");
+    require_contains(
+        NAME,
+        &source,
         "http-request set-header X-Forwarded-For %[src]",
     );
-    require_contains(NAME, source, "http-request set-header X-Real-IP %[src]");
+    require_contains(NAME, &source, "http-request set-header X-Real-IP %[src]");
 
-    require_occurrences(NAME, source, "stick-table type ipv6", 2);
-    forbid_contains(NAME, source, "stick-table type ip ");
-    require_contains(NAME, source, "backend ores_rl_default");
-    require_contains(NAME, source, "backend ores_rl_auth_login");
-    require_contains(NAME, source, "acl ores_auth_login_path path /v1/auth/login");
-    forbid_contains(NAME, source, "acl ores_auth_login_path path -i");
-    require_contains(NAME, source, "acl ores_auth_login_method method POST");
+    require_occurrences(NAME, &source, "stick-table type ipv6", 2);
+    forbid_contains(NAME, &source, "stick-table type ip ");
     require_contains(
         NAME,
-        source,
+        &source,
+        "acl ores_auth_login_path path /v1/auth/login",
+    );
+    forbid_contains(NAME, &source, "acl ores_auth_login_path path -i");
+    require_contains(NAME, &source, "acl ores_auth_login_method method POST");
+    require_contains(
+        NAME,
+        &source,
         "http-request track-sc1 src table ores_rl_auth_login if ores_auth_login_path ores_auth_login_method",
     );
     require_contains(
         NAME,
-        source,
+        &source,
         "http-request deny deny_status 429 if ores_default_rate_exceeded",
     );
     require_contains(
         NAME,
-        source,
+        &source,
         "http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded",
     );
 
-    require_contains(NAME, source, "timeout http-request 10s");
-    require_contains(NAME, source, "timeout http-keep-alive 10s");
+    require_contains(NAME, &source, "timeout http-request 10s");
+    require_contains(NAME, &source, "timeout http-keep-alive 10s");
+    require_contains(NAME, &source, "http-after-response del-header X-Powered-By");
     require_contains(
         NAME,
-        source,
+        &source,
         "http-after-response set-header X-Content-Type-Options nosniff",
     );
     require_contains(
         NAME,
-        source,
+        &source,
         "http-after-response set-header Referrer-Policy strict-origin-when-cross-origin",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-after-response set-header X-Request-ID %[unique-id]",
     );
 }
 
@@ -248,6 +337,7 @@ fn validate_nginx_native(source: &str) {
             "include /etc/nginx/ores/trusted-proxies.conf;",
             "set_real_ip_from 127.0.0.1;",
         )
+        .replace("include /etc/nginx/ores/allowed-hosts.map;", "localhost 1;")
         .replace(
             "access_log /var/log/nginx/ores-access.log ores_json;",
             "access_log off;",
@@ -272,10 +362,26 @@ fn validate_nginx_native(source: &str) {
         .unwrap_or_else(|error| fail(format!("cannot remove {}: {error}", temp.display())));
 }
 
-fn validate_haproxy_native(root: &Path) {
-    let config = root.join(HAPROXY_REL);
-    let config_arg = config.to_string_lossy().into_owned();
+fn validate_haproxy_native(source: &str) {
+    let temp = unique_temp_dir();
+    fs::create_dir_all(&temp)
+        .unwrap_or_else(|error| fail(format!("cannot create {}: {error}", temp.display())));
+
+    let hosts_path = temp.join("allowed-hosts.lst");
+    fs::write(&hosts_path, "localhost\n")
+        .unwrap_or_else(|error| fail(format!("cannot write {}: {error}", hosts_path.display())));
+    let config = source.replace(
+        "/etc/haproxy/ores-allowed-hosts.lst",
+        &hosts_path.to_string_lossy(),
+    );
+    let config_path = temp.join("haproxy.cfg");
+    fs::write(&config_path, config)
+        .unwrap_or_else(|error| fail(format!("cannot write {}: {error}", config_path.display())));
+
+    let config_arg = config_path.to_string_lossy().into_owned();
     run_checked("haproxy", &["-c", "-f", &config_arg]);
+    fs::remove_dir_all(&temp)
+        .unwrap_or_else(|error| fail(format!("cannot remove {}: {error}", temp.display())));
 }
 
 fn main() {
@@ -297,10 +403,10 @@ fn main() {
         validate_nginx_native(&nginx);
     }
     if haproxy_available {
-        validate_haproxy_native(&root);
+        validate_haproxy_native(&haproxy);
     }
 
     println!(
-        "edge-proxy-adapters: static invariants passed; native nginx={nginx_available}, haproxy={haproxy_available}"
+        "edge-proxy-adapters: active-directive invariants passed; native nginx={nginx_available}, haproxy={haproxy_available}"
     );
 }

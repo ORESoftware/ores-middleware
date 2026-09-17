@@ -24,14 +24,17 @@ ACL. Those remain application middleware.
 | Capability | NGINX | HAProxy | Required ORES behavior |
 | --- | --- | --- | --- |
 | trusted client IP / forwarded headers | `real_ip` + explicit trusted CIDRs | socket peer / explicitly trusted PROXY protocol + header rewrite | strip competing public forwarding metadata; derive one admitted client identity |
-| request ID | `$request_id` | random `%[uuid]` + `%[unique-id]` | replace public request IDs; do not encode raw client identity in the ID |
-| W3C trace propagation | pass `traceparent`/`baggage` | pass `traceparent`/`baggage` | telemetry context is untrusted input; application OTel parsing validates it |
+| Host admission | deployment-owned `map` include | deployment-owned ACL file | fail closed on an unrecognized Host before origin dispatch |
+| request ID | `$request_id` | random `%[uuid]` + `%[unique-id]` | replace public request IDs; return the edge ID on responses |
+| W3C trace propagation | preserve `traceparent`; clear public `tracestate`/`baggage` | preserve `traceparent`; delete public `tracestate`/`baggage` | arbitrary public baggage is not propagated into internal services by default |
+| path safety | `merge_slashes on` for location matching | reject repeated-slash and dot-segment paths | route-specific security policy must not be bypassed by proxy/origin normalization disagreement |
 | route-specific rate limits | `limit_req_zone` + `limit_req` | ACLs + IPv4/IPv6-capable stick tables / maps | preserve named ORES policy identity, route/method scope, key and layer |
 | request-size guard | `client_max_body_size` | limited proxy-side guard; prefer app/parser quota for exact body semantics | fail before expensive parsing when safely expressible |
 | slow-client/timeouts | header/body/proxy/read/send timeouts | request/keepalive/connect/queue/client/server timeouts | consumer owns values and route overrides |
-| coarse auth gate | `auth_request` when explicitly configured | deployment-specific external auth integration | may reject obviously unauthenticated requests; resource auth remains application-side |
-| security headers | `add_header ... always` | `http-after-response set-header` | cover origin and locally generated error/rate-limit responses |
-| retries | disabled by the generic example | consumer-owned retry rules | retry only operations explicitly classified safe/idempotent |
+| generic methods | reject TRACE/CONNECT | reject TRACE/CONNECT | tunneling/reflection requires a dedicated reviewed stack |
+| security headers | hide origin copies, then `add_header ... always` | `http-after-response set-header` | cover origin and locally generated error/rate-limit responses with one canonical value |
+| retries | disabled by the generic example | `retries 0`; no `retry-on`/redispatch | retry only operations explicitly classified safe/idempotent |
+| upgrade/tunnel headers | stripped | stripped | WebSocket/h2c/tunnel routes require a dedicated reviewed transport stack |
 | access telemetry | bounded structured `log_format` | bounded custom `log-format` | omit query strings, credentials, cookies, bodies, and raw client identity |
 
 ## Trust boundary and forwarded headers
@@ -45,12 +48,34 @@ At the admitted boundary:
 2. discard untrusted `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, public
    request-ID claims, and the legacy `Proxy` request header that can become
    `HTTP_PROXY` in CGI-style environments;
-3. write the canonical forwarding/request-ID headers expected by the service;
-4. never interpret tracing headers as authentication or authorization evidence.
+3. require an explicit deployment-owned Host allowlist and reject unknown Host
+   values before origin dispatch;
+4. write the canonical forwarding/request-ID headers expected by the service;
+5. never interpret tracing headers as authentication or authorization evidence.
 
 If NGINX or HAProxy itself sits behind another proxy, that upstream hop must be
 explicitly trusted using a reviewed transport mechanism. A public forwarded
 header alone is never sufficient.
+
+## Public tracing input
+
+`traceparent` may be preserved for distributed correlation, but public
+`tracestate` and `baggage` are cleared by the generic edge examples. They are
+arbitrary client-controlled metadata and can otherwise become a propagation,
+privacy, or cardinality channel across internal services. A consumer may
+re-enable selected baggage/tracestate only at a trusted internal boundary with
+an explicit size/key allowlist and the same OTel validation used by the
+application runtime.
+
+## Route/path canonicalization
+
+Security policy and origin routing must agree on the path class being enforced.
+NGINX location matching merges adjacent slashes in the configured baseline.
+HAProxy deliberately does not normalize request paths by default, so the generic
+HAProxy example rejects repeated slashes and RFC-style `.` / `..` path segments
+instead of relying on experimental rewriting. Consumers that support unusual
+encoded path semantics must prove proxy/application canonicalization parity in
+tests before relaxing these guards.
 
 ## Route-specific rate limiting
 
@@ -119,49 +144,50 @@ become a third schema authority.
 
 1. Require explicit trusted proxy CIDRs before honoring forwarded client IP;
    never generate `0.0.0.0/0` or `::/0` as a trusted proxy set.
-2. Replace or clear public forwarding metadata and the legacy `Proxy` request
-   header at the trusted boundary; do not blindly append attacker-controlled
-   chains.
-3. Use named `limit_req_zone` entries for route/method policy classes, explicitly
+2. Require an explicit Host allowlist and reject unknown Host values before
+   origin dispatch.
+3. Keep invalid-header rejection on, underscore-bearing public headers off, and
+   slash merging on unless a consumer proves different parser semantics safe.
+4. Replace or clear public forwarding metadata, public baggage/tracestate,
+   legacy `Proxy`, and generic upgrade/hop-by-hop headers at the trusted edge.
+5. Use named `limit_req_zone` entries for route/method policy classes, explicitly
    compose every limit that applies to an exact/specific location, and return
    `429` for edge rate-limit rejection.
-4. Keep generic upstream retries off. A consumer may enable them only for an
+6. Keep generic upstream retries off. A consumer may enable them only for an
    operation class that is explicitly safe to retry.
-5. Bound slow-client/header/body occupancy as well as upstream connect/read/send
-   timeouts.
-6. Log `$uri` rather than `$request_uri`/`$args`; do not emit unrestricted
-   headers, cookies, bodies, or raw client identity.
-7. Keep auth subrequests coarse. Resource and tenant authorization stays in the
-   application.
-8. Do not place secrets in generated config, logs, variables, or error pages.
+7. Hide origin copies of edge-owned response policy headers before emitting one
+   canonical edge value, including the edge request ID.
+8. Bound slow-client/header/body occupancy as well as upstream connect/read/send
+   timeouts and keep logs free of query strings/credentials/raw identity.
 
 ## HAProxy rules
 
 1. Derive client identity from the socket peer or an explicitly trusted PROXY
    protocol hop, not an arbitrary inbound forwarded header.
-2. Delete competing forwarded headers and the legacy `Proxy` request header
-   before writing the admitted forwarding values used by the application.
-3. Generate request IDs independently of client IP/port; the example uses a
-   random UUID.
-4. Use a bounded custom log format. The stock HTTP format includes the full URI
-   and therefore may expose query-string data.
-5. Use ACLs to bind rate policies to exact method/path classes and IPv6-capable
-   stick tables to count public client-IP policies.
-6. Use `http-after-response` for headers that must also appear on HAProxy-local
-   responses such as a generated `429`.
-7. Use map files only as generated deployment data; the ORES contract/config is
-   still authoritative.
+2. Require an explicit Host allowlist and reject unknown Host values before
+   origin dispatch.
+3. Reject repeated-slash and dot-segment request paths in the generic adapter so
+   route policy cannot be bypassed by downstream path normalization.
+4. Delete competing forwarded headers, public baggage/tracestate, legacy
+   `Proxy`, and generic upgrade/hop-by-hop headers before origin dispatch.
+5. Generate request IDs independently of client IP/port; return the same ID on
+   the response.
+6. Keep `retries 0`, forbid generic `retry-on`/redispatch, and use explicit
+   `http-reuse safe` unless a reviewed operation-specific policy says otherwise.
+7. Use a bounded custom log format, IPv6-capable rate tables, and
+   `http-after-response` for canonical edge response headers.
 8. Preserve application authorization and strict distributed admission checks.
 
 ## Admission gate
 
-`scripts/check_edge_proxy_adapters.rs` is the durable admission check. It
-verifies the security invariants above without introducing another schema
-authority and invokes native `nginx -t` / `haproxy -c` parsing when those tools
-are available. CI sets `ORES_EDGE_PROXY_REQUIRE_NATIVE=1`, so a missing native
-parser or a syntax error fails the exact candidate revision. `just verify`
-always runs the static gate and additionally runs whichever native parsers are
-installed locally.
+`scripts/check_edge_proxy_adapters.rs` is the durable admission check. Static
+checks operate on active directives only, so comments cannot satisfy a required
+security invariant. Native validation uses temporary trusted-proxy/Host fixtures
+for syntax tests while the checked-in examples remain fail-closed without real
+deployment allowlists. CI sets `ORES_EDGE_PROXY_REQUIRE_NATIVE=1`, so a missing
+native parser or a syntax error fails the exact candidate revision. `just
+verify` always runs the static gate and additionally runs whichever native
+parsers are installed locally.
 
 ## Other targets
 
