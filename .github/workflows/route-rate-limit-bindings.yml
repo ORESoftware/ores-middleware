@@ -9,6 +9,8 @@ on:
       - "src/rust/src/rate_limit_bindings.rs"
       - "src/rust/src/lib.rs"
       - "src/rust/tests/rate_limit_bindings_corpus.rs"
+      - "src/rust/tests/rate_limit_binding_request_hardening.rs"
+      - "src/rust/tests/rate_limit_binding_request_hardening.rs"
       - "src/ts/src/rate-limit-bindings.ts"
       - "src/ts/test/rate-limit-bindings.test.mjs"
       - "src/ts/package.json"
@@ -147,11 +149,13 @@ jobs:
       - name: Format, lint, and execute Rust binding runtime
         run: |
           set -euo pipefail
-          rustfmt --edition 2024 --check src/rust/src/rate_limit_bindings.rs src/rust/tests/rate_limit_bindings_corpus.rs
+          rustfmt --edition 2024 --check src/rust/src/rate_limit_bindings.rs src/rust/tests/rate_limit_bindings_corpus.rs src/rust/tests/rate_limit_binding_request_hardening.rs
           cargo clippy --manifest-path src/rust/Cargo.toml --no-default-features --lib -- -D warnings
           cargo clippy --manifest-path src/rust/Cargo.toml --no-default-features --test rate_limit_bindings_corpus -- -D warnings
+          cargo clippy --manifest-path src/rust/Cargo.toml --no-default-features --test rate_limit_binding_request_hardening -- -D warnings
           cargo test --manifest-path src/rust/Cargo.toml --no-default-features rate_limit_bindings
           cargo test --manifest-path src/rust/Cargo.toml --no-default-features --test rate_limit_bindings_corpus
+          cargo test --manifest-path src/rust/Cargo.toml --no-default-features --test rate_limit_binding_request_hardening
 
       - name: Require source tree unchanged
         run: |

@@ -59,9 +59,19 @@ Selectors accept normalized absolute templates such as `/users/{id}` and `/users
 
 Policy IDs and route-class IDs are bounded stable identifiers. HTTP methods use bounded uppercase ASCII tokens. Operation IDs use the existing bounded ORES ASCII identifier vocabulary.
 
+## Request admission hardening
+
+Resolution is fail-closed even when a caller skips an explicit preflight validation call. Both public runtimes validate the binding table and the request metadata before selecting a policy. Invalid tables produce a table-scoped resolution error; invalid request metadata produces a request-scoped resolution error.
+
+Request methods accept bounded ASCII HTTP tokens case-insensitively at match time. Request paths are bounded to 4096 Unicode scalar values, must be absolute, and reject fragments, CR/LF/NUL, repeated slash separators, and literal `.` / `..` segments. Query strings remain outside route matching and are ignored after the path boundary.
+
+A consumer-supplied `route_template` is treated as trusted router metadata only after it passes the same canonical template grammar as configured selectors **and** describes the concrete request path. Equality between a supplied route template and a configured selector can add specificity, but it can no longer turn an unrelated concrete path into a match. Parameter placeholders also require a non-empty concrete segment.
+
+The request metadata shape is independently authored in both peer authorities as `RouteRateLimitBindingRequest`; TJSV maps the request method/path scalars and model alongside the binding-table declarations. The additional `request-hardening.json` corpus fixes 15 cross-runtime cases covering method/path bounds, canonicalization hazards, route-template spoofing, and empty-parameter behavior.
+
 ## Fifteen-case conformance tranche
 
-The shared corpus fixes these reviewed behaviors:
+The original binding-table corpus fixes these reviewed behaviors:
 
 1. exact route binding;
 2. parameterized route matching with query removal;
@@ -79,7 +89,7 @@ The shared corpus fixes these reviewed behaviors:
 14. duplicate-selector rejection;
 15. dot-segment rejection.
 
-The first twelve have schema/runtime verdicts where the peer authorities can express the rule. Duplicate semantic identities and normalized path semantics are additionally enforced by the runtime validators.
+The first twelve have schema/runtime verdicts where the peer authorities can express the rule. Duplicate semantic identities and normalized path semantics are additionally enforced by the runtime validators. A second exact 15-case request-admission corpus covers the request-side boundary described above; both corpora are consumed by the exact-source CI lane.
 
 ## Public runtimes
 
