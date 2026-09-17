@@ -225,10 +225,13 @@ impl RouteRateLimitTable {
         }
 
         match matches.as_slice() {
-            [] => Ok(self.default_policy.as_ref().map(|policy| ResolvedRouteRateLimitPolicy {
-                policy,
-                source: RouteRateLimitPolicySource::Default,
-            })),
+            [] => Ok(self
+                .default_policy
+                .as_ref()
+                .map(|policy| ResolvedRouteRateLimitPolicy {
+                    policy,
+                    source: RouteRateLimitPolicySource::Default,
+                })),
             [rule] => Ok(Some(ResolvedRouteRateLimitPolicy {
                 policy: &rule.policy,
                 source: RouteRateLimitPolicySource::Route,
@@ -237,7 +240,10 @@ impl RouteRateLimitTable {
                 method: request.method.to_owned(),
                 path: request.path.to_owned(),
                 operation_id: request.operation_id.map(str::to_owned),
-                policy_ids: many.iter().map(|rule| rule.policy.policy_id.clone()).collect(),
+                policy_ids: many
+                    .iter()
+                    .map(|rule| rule.policy.policy_id.clone())
+                    .collect(),
             }),
         }
     }
@@ -282,7 +288,9 @@ fn validate_path_template(template: &str) -> Result<(), &'static str> {
 }
 
 fn path_template_matches(template: &str, request_path: &str) -> bool {
-    let request_path = request_path.split_once('?').map_or(request_path, |(path, _)| path);
+    let request_path = request_path
+        .split_once('?')
+        .map_or(request_path, |(path, _)| path);
     let template_segments = path_segments(template);
     let path_segments = path_segments(request_path);
 
@@ -473,7 +481,12 @@ mod tests {
             }),
             Err(RouteRateLimitResolutionError::Ambiguous { .. })
         ));
-        assert!(table.validate().iter().any(|v| v.code == "duplicate-route-selector"));
+        assert!(
+            table
+                .validate()
+                .iter()
+                .any(|v| v.code == "duplicate-route-selector")
+        );
     }
 
     #[test]
