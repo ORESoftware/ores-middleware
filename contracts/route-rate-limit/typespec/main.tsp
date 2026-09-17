@@ -40,9 +40,10 @@ model HttpMethodSet is Array<HttpMethod>;
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 @TypeSpec.JsonSchema.extension("anyOf", #[
-  #{ `required`: #["path_template"] },
-  #{ `required`: #["operation_id"] },
+  #{ `type`: "object", `required`: #["path_template"] },
+  #{ `type`: "object", `required`: #["operation_id"] },
   #{
+    `type`: "object",
     `properties`: #{ `methods`: #{ `type`: "array", `minItems`: 1 } },
     `required`: #["methods"]
   }
