@@ -37,11 +37,6 @@
       "authored": "OperationId"
     },
     {
-      "typespec": "Ores.Middleware.RouteRateLimit.HttpMethodSet",
-      "generated": "HttpMethodSet",
-      "authored": "HttpMethodSet"
-    },
-    {
       "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBindingSelector",
       "generated": "RouteRateLimitBindingSelector",
       "authored": "RouteRateLimitBindingSelector"
@@ -55,11 +50,6 @@
       "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBinding",
       "generated": "RouteRateLimitBinding",
       "authored": "RouteRateLimitBinding"
-    },
-    {
-      "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBindingList",
-      "generated": "RouteRateLimitBindingList",
-      "authored": "RouteRateLimitBindingList"
     },
     {
       "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBindingTable",
