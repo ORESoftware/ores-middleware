@@ -11,6 +11,8 @@ use tokio::sync::Notify;
 
 pub const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 pub const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
+/// Canonical ORES admission status while an HTTP server is draining.
+pub const SHUTDOWN_HTTP_STATUS: u16 = 429;
 
 const PHASE_RUNNING: u8 = 0;
 const PHASE_DRAINING: u8 = 1;
@@ -47,6 +49,8 @@ pub struct ShutdownRejection {
     pub status: u16,
     pub code: &'static str,
     pub message: &'static str,
+    /// End-to-end response metadata only. Protocol-specific hop-by-hop headers
+    /// such as `Connection` belong to the framework/transport adapter.
     pub headers: BTreeMap<String, String>,
 }
 
@@ -201,13 +205,13 @@ impl ShutdownCoordinator {
             .saturating_add(u64::from(self.inner.retry_after.subsec_nanos() != 0))
             .max(1);
         ShutdownRejection {
-            status: 503,
+            status: SHUTDOWN_HTTP_STATUS,
             code: "service_draining",
             message: "service is draining and is not accepting new requests",
-            headers: BTreeMap::from([
-                ("connection".to_owned(), "close".to_owned()),
-                ("retry-after".to_owned(), retry_after_seconds.to_string()),
-            ]),
+            headers: BTreeMap::from([(
+                "retry-after".to_owned(),
+                retry_after_seconds.to_string(),
+            )]),
         }
     }
 }
@@ -266,16 +270,17 @@ mod tests {
     }
 
     #[test]
-    fn draining_rejects_new_requests_with_retry_metadata() {
+    fn draining_rejects_new_requests_with_retry_metadata_only() {
         let coordinator = ShutdownCoordinator::default();
         let existing = coordinator.begin_request().expect("existing request admitted");
         assert!(coordinator.start_draining());
         assert!(!coordinator.start_draining());
 
         let rejection = coordinator.begin_request().expect_err("new request rejected");
-        assert_eq!(rejection.status, 503);
+        assert_eq!(rejection.status, SHUTDOWN_HTTP_STATUS);
+        assert_eq!(rejection.status, 429);
         assert_eq!(rejection.code, "service_draining");
-        assert_eq!(rejection.headers.get("connection").map(String::as_str), Some("close"));
+        assert!(rejection.headers.get("connection").is_none());
         assert_eq!(rejection.headers.get("retry-after").map(String::as_str), Some("5"));
         assert_eq!(coordinator.active_requests(), 1);
 
