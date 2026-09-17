@@ -59,13 +59,19 @@
           "type": "object",
           "required": [
             "path_template"
-          ]
+          ],
+          "properties": {
+            "path_template": {}
+          }
         },
         {
           "type": "object",
           "required": [
             "operation_id"
-          ]
+          ],
+          "properties": {
+            "operation_id": {}
+          }
         },
         {
           "type": "object",
