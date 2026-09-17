@@ -1,12 +1,14 @@
 export const DEFAULT_DRAIN_TIMEOUT_MS = 5_000;
 export const DEFAULT_RETRY_AFTER_MS = 5_000;
+export const SHUTDOWN_HTTP_STATUS = 429 as const;
 
 export type ShutdownPhase = "running" | "draining" | "forced";
 
 export interface ShutdownRejection {
-  readonly status: 503;
+  readonly status: typeof SHUTDOWN_HTTP_STATUS;
   readonly code: "service_draining";
   readonly message: string;
+  /** End-to-end metadata only; hop-by-hop fields belong to transport adapters. */
   readonly headers: Readonly<Record<string, string>>;
 }
 
@@ -27,7 +29,7 @@ export type RequestAdmission =
  * Framework-neutral request drain coordinator.
  *
  * This module deliberately does not install process signal handlers or inspect
- * stdin/TTY state. Consumers own the first/second shutdown trigger, listener
+ * stdin/TTY state. Consumers own the actual shutdown trigger, listener
  * lifecycle, middleware ordering, telemetry flush, and final process exit.
  */
 export class ShutdownCoordinator {
@@ -134,11 +136,10 @@ export class ShutdownCoordinator {
   rejection(): ShutdownRejection {
     const retryAfterSeconds = Math.max(1, Math.ceil(this.#retryAfterMs / 1_000));
     return {
-      status: 503,
+      status: SHUTDOWN_HTTP_STATUS,
       code: "service_draining",
       message: "service is draining and is not accepting new requests",
       headers: Object.freeze({
-        connection: "close",
         "retry-after": String(retryAfterSeconds)
       })
     };
