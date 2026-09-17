@@ -24,7 +24,8 @@
     "./contract-drift": { "types": "./dist/contract-drift.d.ts", "import": "./dist/contract-drift.js" },
     "./request-contract": { "types": "./dist/request-contract.d.ts", "import": "./dist/request-contract.js" },
     "./otel": { "types": "./dist/otel.d.ts", "import": "./dist/otel.js" },
-    "./rate-limit-routes": { "types": "./dist/rate-limit-routes.d.ts", "import": "./dist/rate-limit-routes.js" }
+    "./rate-limit-routes": { "types": "./dist/rate-limit-routes.d.ts", "import": "./dist/rate-limit-routes.js" },
+    "./shutdown": { "types": "./dist/shutdown.d.ts", "import": "./dist/shutdown.js" }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-docs-serving.mjs",
