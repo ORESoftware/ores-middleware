@@ -49,6 +49,12 @@ erlang:
     mkdir -p target/descriptors
     cd src/erlang && escript escript/contractcheck.escript > ../../target/descriptors/erlang.json
 
-verify: contracts rust ts golang gleam elixir erlang
+edge-proxy-adapters:
+    mkdir -p target/tools
+    rustfmt --edition 2024 --check scripts/check_edge_proxy_adapters.rs
+    rustc --edition=2024 -D warnings scripts/check_edge_proxy_adapters.rs -o target/tools/check-edge-proxy-adapters
+    target/tools/check-edge-proxy-adapters
+
+verify: contracts rust ts golang gleam elixir erlang edge-proxy-adapters
     npm run descriptors:check
     python3 scripts/audit.py --receipt target/audit/receipt.json
