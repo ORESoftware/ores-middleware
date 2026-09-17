@@ -29,6 +29,7 @@ pub mod resilience;
 pub mod runtime_manifest;
 pub mod security;
 pub mod shared_auth;
+pub mod shutdown;
 pub mod stage;
 pub mod validation;
 
@@ -112,6 +113,10 @@ pub use shared_auth::{
     SharedAuthProviderVerifier, SharedAuthReadyStack, SharedAuthRuntimeTopology,
     SharedAuthServerRole, SharedAuthVerifiedPrincipal,
 };
+pub use shutdown::{
+    DEFAULT_DRAIN_TIMEOUT, DEFAULT_RETRY_AFTER, DrainGuard, DrainOutcome, ShutdownCoordinator,
+    ShutdownPhase, ShutdownRejection,
+};
 pub use stage::{
     MiddlewareStageHandler, StageDecision, StageInput, StagePipeline, StageRejection, StageResponse,
 };
@@ -124,6 +129,7 @@ pub const CAPABILITIES: &[&str] = &[
     "rate-limit", "auth", "sync-observer", "json", "headers", "compression",
     "tls-policy", "security-headers", "idempotency", "ip-policy", "cache-etag",
     "content-negotiation", "fault-injection", "test-auth-bypass", "schema-capture",
+    "graceful-shutdown",
 ];
 
 pub fn capabilities() -> &'static [&'static str] { CAPABILITIES }
