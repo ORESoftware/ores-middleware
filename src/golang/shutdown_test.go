@@ -109,11 +109,18 @@ func TestShutdownForceInterruptsDrain(t *testing.T) {
 	lease.Finish()
 }
 
-func TestShutdownRetryAfterRoundsUp(t *testing.T) {
+func TestShutdownRetryAfterRoundsUpAndStaysEndToEndOnly(t *testing.T) {
 	coordinator := NewShutdownCoordinatorWithRetryAfter(5*time.Second, 1501*time.Millisecond)
 	coordinator.StartDraining()
-	if got := coordinator.Rejection().Headers["retry-after"]; got != "2" {
+	rejection := coordinator.Rejection()
+	if rejection.Status != ShutdownHTTPStatus || rejection.Status != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rejection.Status)
+	}
+	if got := rejection.Headers["retry-after"]; got != "2" {
 		t.Fatalf("retry-after = %q, want 2", got)
+	}
+	if _, found := rejection.Headers["connection"]; found {
+		t.Fatal("generic rejection must not carry hop-by-hop Connection metadata")
 	}
 }
 
@@ -130,8 +137,8 @@ func TestShutdownHTTPMiddlewareRejectsHTTP1WithProblemDetails(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", response.Code)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", response.Code)
 	}
 	if got := response.Header().Get("Connection"); got != "close" {
 		t.Fatalf("Connection = %q, want close", got)
@@ -150,7 +157,7 @@ func TestShutdownHTTPMiddlewareRejectsHTTP1WithProblemDetails(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem body: %v", err)
 	}
-	if problem["code"] != "service_draining" || problem["status"] != float64(503) {
+	if problem["code"] != "service_draining" || problem["status"] != float64(429) {
 		t.Fatalf("unexpected problem body: %#v", problem)
 	}
 }
@@ -168,8 +175,8 @@ func TestShutdownHTTPMiddlewareOmitsConnectionForHTTP2(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", response.Code)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", response.Code)
 	}
 	if got := response.Header().Get("Connection"); got != "" {
 		t.Fatalf("Connection must be omitted for HTTP/2, got %q", got)
