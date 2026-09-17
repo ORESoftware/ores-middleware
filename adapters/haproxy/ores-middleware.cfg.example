@@ -53,7 +53,10 @@ frontend ores_http
   # Require an explicit deployment-owned Host allowlist. Entries are exact
   # lower-case Host header values; include port-qualified forms when accepted.
   acl ores_host_allowed req.hdr(host),lower -f /etc/haproxy/ores-allowed-hosts.lst
-  http-request deny deny_status 421 unless ores_host_allowed
+  # Use return rather than deny_status for 421. deny_status is intentionally
+  # constrained by HAProxy's built-in errorfile status set on some supported
+  # versions, while return can emit the protocol-correct Misdirected Request.
+  http-request return status 421 if !ores_host_allowed
 
   # TRACE and CONNECT are not part of the generic HTTP reverse-proxy surface.
   acl ores_forbidden_method method TRACE CONNECT
