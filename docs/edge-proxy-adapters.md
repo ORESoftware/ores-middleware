@@ -42,8 +42,9 @@ header an upstream client happened to send.
 At the admitted boundary:
 
 1. establish the socket peer or trusted proxy chain;
-2. discard untrusted `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, and public
-   request-ID claims that would compete with the admitted identity;
+2. discard untrusted `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, public
+   request-ID claims, and the legacy `Proxy` request header that can become
+   `HTTP_PROXY` in CGI-style environments;
 3. write the canonical forwarding/request-ID headers expected by the service;
 4. never interpret tracing headers as authentication or authorization evidence.
 
@@ -59,9 +60,10 @@ not collapse them into one global rate.
 For NGINX, render one shared-memory zone per distinct named policy/rate class
 and attach the appropriate zone to the generated `location` block. Policies
 that share exactly the same key, rate, burst behavior, method scope, and layer
-may share a zone; otherwise they remain distinct. When a child `location`
-declares its own `limit_req`, do not rely on inherited parent limits: emit every
-policy that must apply at that location explicitly.
+may share a zone; otherwise they remain distinct. A more-specific/exact
+`location` is selected instead of the generic `location /`, so every rate-limit
+policy that must apply to that exact route is emitted explicitly there rather
+than assuming the generic location also executes.
 
 For HAProxy, use route/method ACLs plus stick tables and, where useful, map files
 for threshold selection. Use IPv6-capable tables for public client-IP policies
@@ -117,11 +119,12 @@ become a third schema authority.
 
 1. Require explicit trusted proxy CIDRs before honoring forwarded client IP;
    never generate `0.0.0.0/0` or `::/0` as a trusted proxy set.
-2. Replace or clear public forwarding metadata at the trusted boundary; do not
-   blindly append attacker-controlled chains.
+2. Replace or clear public forwarding metadata and the legacy `Proxy` request
+   header at the trusted boundary; do not blindly append attacker-controlled
+   chains.
 3. Use named `limit_req_zone` entries for route/method policy classes, explicitly
-   compose every limit that applies to a child location, and return `429` for
-   edge rate-limit rejection.
+   compose every limit that applies to an exact/specific location, and return
+   `429` for edge rate-limit rejection.
 4. Keep generic upstream retries off. A consumer may enable them only for an
    operation class that is explicitly safe to retry.
 5. Bound slow-client/header/body occupancy as well as upstream connect/read/send
@@ -136,8 +139,8 @@ become a third schema authority.
 
 1. Derive client identity from the socket peer or an explicitly trusted PROXY
    protocol hop, not an arbitrary inbound forwarded header.
-2. Delete competing forwarded headers before writing the admitted forwarding
-   values used by the application.
+2. Delete competing forwarded headers and the legacy `Proxy` request header
+   before writing the admitted forwarding values used by the application.
 3. Generate request IDs independently of client IP/port; the example uses a
    random UUID.
 4. Use a bounded custom log format. The stock HTTP format includes the full URI
