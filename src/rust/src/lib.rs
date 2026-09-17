@@ -27,6 +27,7 @@ pub mod rate_limit_bindings;
 pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
+pub mod route_class_policy;
 pub mod runtime_manifest;
 pub mod security;
 pub mod shared_auth;
@@ -110,6 +111,12 @@ pub use rate_limit_v2::{
 pub use resilience::{
     Bulkhead, BulkheadRejected, CircuitAdmission, CircuitBreaker, CircuitBreakerConfig,
     CircuitStateSnapshot, ResilienceConfigError,
+};
+pub use route_class_policy::{
+    MAX_ROUTE_CLASS_INHERITANCE_DEPTH, MAX_ROUTE_CLASS_POLICIES, ROUTE_CLASS_POLICY_SCHEMA,
+    ResolvedRouteClassPolicy, RouteClassPolicy, RouteClassPolicyRefs,
+    RouteClassPolicyResolutionError, RouteClassPolicyTable, RouteClassPolicyViolation,
+    SecurityOverrideIntent, SecurityWeakeningException,
 };
 pub use runtime_manifest::{RuntimeManifestError, admit_server_stack};
 pub use security::{CorsPolicy, CorsStage, CsrfPolicy, CsrfStage};
