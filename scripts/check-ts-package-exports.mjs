@@ -106,6 +106,10 @@ for (const runtime of ["bun", "deno"]) {
     fail(`./${runtime} must resolve to ./dist/${runtime}.js, got ${JSON.stringify(target)}`);
   }
 }
+const shutdownTarget = tsPackage.exports["./shutdown"]?.import;
+if (shutdownTarget !== "./dist/shutdown.js") {
+  fail(`./shutdown must resolve to ./dist/shutdown.js, got ${JSON.stringify(shutdownTarget)}`);
+}
 
 if (JSON.stringify(tsPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
   fail(
