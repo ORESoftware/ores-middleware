@@ -46,8 +46,8 @@ scalar OperationId extends string;
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 @TypeSpec.JsonSchema.extension("anyOf", #[
-  #{ `type`: "object", `required`: #["path_template"] },
-  #{ `type`: "object", `required`: #["operation_id"] },
+  #{ `type`: "object", `properties`: #{ `path_template`: #{} }, `required`: #["path_template"] },
+  #{ `type`: "object", `properties`: #{ `operation_id`: #{} }, `required`: #["operation_id"] },
   #{
     `type`: "object",
     `properties`: #{ `methods`: #{ `type`: "array", `minItems`: 1 } },
