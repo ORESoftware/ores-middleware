@@ -20,6 +20,7 @@ const requiredPortableExports = Object.freeze([
   "./deno",
   "./context",
   "./docs-serving",
+  "./rate-limit-bindings",
   "./shutdown",
 ]);
 const requiredFrameworkExports = Object.freeze(["./koa", "./fastify"]);
@@ -134,6 +135,6 @@ for (const runtimeAdapter of ["bun", "deno"]) {
 
 if (!process.exitCode) {
   console.log(
-    `ts-package-exports: ${tsKeys.length} export subpaths aligned; Bun/Deno/shutdown entrypoints, runtime floors, and descriptor claims are consistent`,
+    `ts-package-exports: ${tsKeys.length} export subpaths aligned; route-binding, Bun/Deno/shutdown entrypoints, runtime floors, and descriptor claims are consistent`,
   );
 }
