@@ -264,7 +264,9 @@ func writeShutdownRejection(
 	writer.Header().Set("cache-control", "no-store")
 	writer.Header().Set("retry-after", rejection.Headers["retry-after"])
 	writer.Header().Set("x-ores-error-code", rejection.Code)
-	if request.ProtoMajor <= 1 {
+	// Connection is hop-by-hop metadata and belongs only to HTTP/1.x. Unknown
+	// protocol versions and HTTP/2+ must not inherit an HTTP/1-only field.
+	if request.ProtoMajor == 1 {
 		writer.Header().Set("connection", "close")
 	}
 	writer.WriteHeader(rejection.Status)
