@@ -27,6 +27,7 @@ concurrency:
 
 env:
   ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  ORES_EDGE_PROXY_REQUIRE_NATIVE: "1"
 
 jobs:
   validate:
