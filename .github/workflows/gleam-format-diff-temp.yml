@@ -1,0 +1,23 @@
+name: temporary Gleam formatter diff
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/auth-provider-injection]
+permissions:
+  contents: read
+jobs:
+  diff:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124
+        with:
+          otp-version: "27.3.4.14"
+          gleam-version: "1.18.1"
+          rebar3-version: "3.24.0"
+      - run: |
+          cd src/gleam
+          gleam format src test
+          git diff -- src/gleam
