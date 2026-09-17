@@ -1,0 +1,168 @@
+name: route-class-policy
+
+on:
+  pull_request:
+    paths:
+      - "contracts/route-class-policy/**"
+      - "scripts/validate-route-class-policy.mjs"
+      - "scripts/check-ts-package-exports.mjs"
+      - "src/rust/src/route_class_policy.rs"
+      - "src/rust/src/lib.rs"
+      - "src/rust/tests/route_class_policy_corpus.rs"
+      - "src/ts/src/route-class-policy.ts"
+      - "src/ts/test/route-class-policy.test.mjs"
+      - "src/ts/package.json"
+      - "package.json"
+      - ".github/workflows/route-class-policy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/route-class-policy/**"
+      - "scripts/validate-route-class-policy.mjs"
+      - "scripts/check-ts-package-exports.mjs"
+      - "src/rust/src/route_class_policy.rs"
+      - "src/rust/src/lib.rs"
+      - "src/rust/tests/route_class_policy_corpus.rs"
+      - "src/ts/src/route-class-policy.ts"
+      - "src/ts/test/route-class-policy.test.mjs"
+      - "src/ts/package.json"
+      - "package.json"
+      - ".github/workflows/route-class-policy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: route-class-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  TJSV_REVISION: d60d0d79d83e075077382623ec9e23a401ab601f
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Verify exact source revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+
+      - name: Install locked JavaScript dependencies
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+
+      - name: Build and test TypeScript route class policy
+        run: |
+          set -euo pipefail
+          npm --prefix src/ts run build
+          node --test src/ts/test/route-class-policy.test.mjs
+          node scripts/validate-route-class-policy.mjs
+          node scripts/check-ts-package-exports.mjs
+
+      - name: Compile independent TypeSpec authority
+        run: npx tsp compile contracts/route-class-policy/typespec --output-dir target/route-class-policy/typespec
+
+      - name: Check out exact TJSV source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: ${{ env.TJSV_REVISION }}
+          path: target/tools/tjsv
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install locked TJSV dependencies
+        run: |
+          set -euo pipefail
+          npm ci --prefix target/tools/tjsv --ignore-scripts --no-audit --no-fund
+          npm rebuild --prefix target/tools/tjsv @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+          test -s target/tools/tjsv/node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
+
+      - name: Enforce route class policy peer-authority parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/route-class-policy/generated
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+              --typespec=contracts/route-class-policy/typespec/main.tsp \
+              --schema=contracts/route-class-policy/json-schema/authored.schema.json \
+              --mapping=contracts/route-class-policy/tjsv/mapping.json \
+              --output-dir=target/route-class-policy/generated \
+              --bundle-id=route-class-policy.generated.schema.json \
+              --report=target/route-class-policy/parity-report.json \
+              --contract-ir=target/route-class-policy/contract-ir.json \
+              --quiet
+
+      - name: Prove policy-reference drift fails closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source = JSON.parse(fs.readFileSync('contracts/route-class-policy/json-schema/authored.schema.json', 'utf8'));
+          source.$defs.PolicyId.maxLength = 161;
+          fs.writeFileSync('target/route-class-policy/drifted.schema.json', `${JSON.stringify(source, null, 2)}\n`);
+          NODE
+          set +e
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
+              --schema=target/route-class-policy/drifted.schema.json \
+              --generated-schema=target/route-class-policy/generated/route-class-policy.generated.schema.json \
+              --mapping=contracts/route-class-policy/tjsv/mapping.json \
+              --report=target/route-class-policy/drift-report.json \
+              --quiet
+          rc=$?
+          set -e
+          if [ "$rc" -ne 2 ]; then
+            echo "expected route class policy drift to stop with exit 2, got $rc" >&2
+            exit 1
+          fi
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Format, lint, and execute Rust route class policy
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check src/rust/src/route_class_policy.rs src/rust/tests/route_class_policy_corpus.rs
+          cargo clippy --manifest-path src/rust/Cargo.toml --no-default-features --lib -- -D warnings
+          cargo clippy --manifest-path src/rust/Cargo.toml --no-default-features --test route_class_policy_corpus -- -D warnings
+          cargo test --manifest-path src/rust/Cargo.toml --no-default-features route_class_policy
+          cargo test --manifest-path src/rust/Cargo.toml --no-default-features --test route_class_policy_corpus
+
+      - name: Require source tree unchanged
+        run: |
+          git diff --check
+          git diff --exit-code
+
+      - name: Retain sanitized parity evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: route-class-policy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/route-class-policy/
+          if-no-files-found: warn
+          retention-days: 30
