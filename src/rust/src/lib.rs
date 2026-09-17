@@ -23,6 +23,7 @@ pub mod otel;
 pub mod placement;
 mod pipeline;
 pub mod rate_limit;
+pub mod rate_limit_bindings;
 pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
@@ -89,6 +90,12 @@ pub use rate_limit::{
     RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
     RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer, RateLimitPrincipal,
     RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
+};
+pub use rate_limit_bindings::{
+    MAX_ROUTE_METHODS, MAX_ROUTE_RATE_LIMIT_BINDINGS, ROUTE_RATE_LIMIT_BINDING_SCHEMA,
+    ResolvedRouteRateLimitBinding, RouteRateLimitBinding, RouteRateLimitBindingRequest,
+    RouteRateLimitBindingResolutionError, RouteRateLimitBindingSelector,
+    RouteRateLimitBindingSource, RouteRateLimitBindingTable, RouteRateLimitBindingViolation,
 };
 pub use rate_limit_routes::{
     RateLimitRouteSelector, ResolvedRouteRateLimitPolicy, RouteRateLimitPolicySource,
