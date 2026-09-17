@@ -21,16 +21,16 @@ function sameSet(label, left, right) {
 
 const tspCapabilities = typeSpecEnum("MiddlewareCapability");
 const stackCapabilities = stack.$defs.capability.enum;
-const descriptorCapabilities = descriptor.$defs.capability.enum;
+const descriptorCapabilities = descriptor.$defs.adapterDescriptor.properties.capabilities.items.enum;
 sameSet("capability authority", tspCapabilities, stackCapabilities);
-sameSet("descriptor capability authority", tspCapabilities, descriptorCapabilities);
+sameSet("descriptor capability projection", tspCapabilities, descriptorCapabilities);
 
 const tspOperations = typeSpecEnum("SdkOperation");
 const schemaOperations = descriptor.$defs.sdkOperation.enum;
 sameSet("SDK operation authority", tspOperations, schemaOperations);
 
 const tspRepresentations = typeSpecEnum("ContentRepresentation");
-const schemaRepresentations = stack.$defs.settings.properties.contentRepresentations.items.enum;
+const schemaRepresentations = stack.$defs.contentRepresentation.enum;
 sameSet("content representation authority", tspRepresentations, schemaRepresentations);
 assert(tspRepresentations.includes("text/html"), "SSR web servers require text/html in the peer authorities");
 
