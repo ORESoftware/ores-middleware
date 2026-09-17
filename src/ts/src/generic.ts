@@ -1,9 +1,11 @@
+export type MaybePromise<Value> = Value | Promise<Value>;
+
 export interface Provider<Input, Output> {
   verify(input: Input): Promise<Output>;
 }
 
 export type ProviderFunction<Input, Output> =
-  (input: Input) => Output | Promise<Output>;
+  (input: Input) => MaybePromise<Output>;
 
 /**
  * Wrap a consumer-owned function or SDK call in the portable provider port.
@@ -31,9 +33,7 @@ export interface FallibleProvider<Input, Output, Failure> {
 }
 
 export type FallibleProviderFunction<Input, Output, Failure> =
-  (input: Input) =>
-    ProviderResult<Output, Failure> |
-    Promise<ProviderResult<Output, Failure>>;
+  (input: Input) => MaybePromise<ProviderResult<Output, Failure>>;
 
 export function providerOk<Output>(value: Output): ProviderResult<Output, never> {
   return Object.freeze({ ok: true as const, value });
@@ -66,7 +66,7 @@ export function contextualProviderFrom<Request, Context, Output>(
   verify: (
     request: Request,
     context: Context
-  ) => Output | Promise<Output>
+  ) => MaybePromise<Output>
 ): ContextualProvider<Request, Context, Output> {
   return providerFrom(({ request, context }) => verify(request, context));
 }
@@ -75,19 +75,19 @@ export function contextualFallibleProviderFrom<Request, Context, Output, Failure
   verify: (
     request: Request,
     context: Context
-  ) => ProviderResult<Output, Failure> | Promise<ProviderResult<Output, Failure>>
+  ) => MaybePromise<ProviderResult<Output, Failure>>
 ): ContextualFallibleProvider<Request, Context, Output, Failure> {
   return fallibleProviderFrom(({ request, context }) => verify(request, context));
 }
 
 export type Handler<Request, Response> =
-  (request: Request) => Promise<Response>;
+  (request: Request) => MaybePromise<Response>;
 
 export type Middleware<Request, Response> =
   (next: Handler<Request, Response>) => Handler<Request, Response>;
 
 export type ContextualHandler<Request, Context, Response> =
-  (request: Request, context: Context) => Promise<Response>;
+  (request: Request, context: Context) => MaybePromise<Response>;
 
 export type ContextualMiddleware<Request, Context, Response> =
   (next: ContextualHandler<Request, Context, Response>) =>
