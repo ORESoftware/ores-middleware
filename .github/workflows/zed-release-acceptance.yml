@@ -81,14 +81,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$ZED_PKG_TOKEN"
           if test -s .zpkg.lock && \
              "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
                > "$RUNNER_TEMP/zed-existing-lock.json" 2>/dev/null; then
             printf '%s\n' 'existing .zpkg.lock is structurally valid; checking direct provenance coverage'
           else
             rm -f .zpkg.lock
-            "$ZED_BIN" install --install-mode copy
+            if test -z "$ZED_PKG_TOKEN"; then
+              printf '%s\n' 'ZED_PKG_TOKEN is required only when .zpkg.lock is missing or invalid' >&2
+              exit 2
+            fi
+            attempt=1
+            max_attempts=3
+            until "$ZED_BIN" install --install-mode copy; do
+              if test "$attempt" -ge "$max_attempts"; then
+                printf 'authenticated registry resolution failed after %s attempts\n' "$attempt" >&2
+                exit 1
+              fi
+              delay=$((attempt * 5))
+              printf 'authenticated registry resolution attempt %s failed; retrying in %ss\n' "$attempt" "$delay" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
           fi
           test -s .zpkg.lock
           "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
