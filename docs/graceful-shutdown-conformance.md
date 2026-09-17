@@ -14,9 +14,9 @@ A graceful deadline that expires with requests still active escalates the coordi
 
 `ores-middleware` owns application admission, in-flight accounting, and the canonical application-level rejection. Consumer process/server code owns signal policy, TTY policy, listener/ingress shutdown, protocol/connection drain, telemetry flush, external resource closure, and final process exit. That separation avoids a second lifecycle authority inside middleware and keeps HTTP/2+ stream teardown with the transport that actually owns those streams.
 
-## Fifteen hardening checks
+## Original fifteen hardening checks
 
-This conformance tranche makes the following invariants executable:
+The first conformance tranche makes the following invariants executable:
 
 1. the corpus has a stable version identifier;
 2. phase vocabulary is exactly running/draining/forced;
@@ -32,6 +32,32 @@ This conformance tranche makes the following invariants executable:
 12. HTTP/3 drain rejection forbids connection close;
 13. successful completion before the deadline reports drained without forcing;
 14. deadline, zero-timeout, and explicit-force cases end in forced state as specified;
-15. CI validates the corpus and executes the native shutdown suites for framework-neutral Rust, Axum, TypeScript/Node, and Go from the pull-request merge revision.
+15. CI validates the corpus and executes the native shutdown suites for framework-neutral Rust, Axum, TypeScript/Node, and Go.
+
+## Fifteen additional negative controls
+
+The validator is intentionally fail-closed. A dedicated `node:test` suite mutates the canonical corpus one invariant at a time and requires every mutation to be rejected:
+
+1. unknown top-level contract fields;
+2. unknown constant fields;
+3. phase vocabulary drift;
+4. duplicate retry-delay milliseconds;
+5. incorrect `Retry-After` rounding;
+6. unreviewed lifecycle cases;
+7. lifecycle action drift;
+8. lifecycle remaining-count drift;
+9. rejection metadata attached to the running phase;
+10. non-canonical generic header casing;
+11. hop-by-hop `Connection` in generic metadata;
+12. unknown transport protocols;
+13. duplicate transport names;
+14. overlap between middleware-owned and consumer-owned lifecycle responsibilities;
+15. omission of the consumer-owned `resource-close` boundary.
+
+The strict validator also requires exact key sets, exact reviewed lifecycle/admission/transport case sets, unique ordered retry vectors, unique ownership entries, and the canonical ownership lists. Expanding the versioned corpus therefore requires an explicit validator change rather than silently broadening behavior.
+
+## Exact-source CI provenance
+
+For pull requests, the graceful-shutdown workflow checks out `github.event.pull_request.head.sha`; for pushes it checks out `github.sha`. Checkout credentials are not persisted, fetch depth is one, and CI verifies `git rev-parse HEAD` equals the selected source SHA before running validation or native tests. This keeps the source under test unambiguous instead of relying on GitHub's synthetic pull-request merge ref.
 
 The runtime implementations remain independent. Their native tests exercise each language's real scheduling, timer, cancellation, request-accounting, and HTTP behavior while the versioned corpus fixes the common observable semantics they must preserve.
