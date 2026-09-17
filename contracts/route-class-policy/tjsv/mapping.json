@@ -1,0 +1,55 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.RouteClassId",
+      "generated": "RouteClassId",
+      "authored": "RouteClassId"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.PolicyId",
+      "generated": "PolicyId",
+      "authored": "PolicyId"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.AuditId",
+      "generated": "AuditId",
+      "authored": "AuditId"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.AuditReason",
+      "generated": "AuditReason",
+      "authored": "AuditReason"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.SecurityOverrideIntent",
+      "generated": "SecurityOverrideIntent",
+      "authored": "SecurityOverrideIntent"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.RouteClassPolicyRefs",
+      "generated": "RouteClassPolicyRefs",
+      "authored": "RouteClassPolicyRefs"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.SecurityWeakeningException",
+      "generated": "SecurityWeakeningException",
+      "authored": "SecurityWeakeningException"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.RouteClassPolicy",
+      "generated": "RouteClassPolicy",
+      "authored": "RouteClassPolicy"
+    },
+    {
+      "typespec": "Ores.Middleware.RouteClassPolicy.RouteClassPolicyTable",
+      "generated": "RouteClassPolicyTable",
+      "authored": "RouteClassPolicyTable"
+    }
+  ],
+  "ignore": {
+    "typespec": [],
+    "generated": [],
+    "authored": []
+  }
+}
