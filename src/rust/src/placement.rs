@@ -77,7 +77,8 @@ impl MiddlewareCapabilities {
             });
         }
 
-        if self.requires_authenticated_identity && target == MiddlewareExecutionTarget::CloudflareWorker
+        if self.requires_authenticated_identity
+            && target == MiddlewareExecutionTarget::CloudflareWorker
         {
             violations.push(MiddlewarePlacementViolation {
                 code: "authenticated-identity-at-untrusted-edge",
