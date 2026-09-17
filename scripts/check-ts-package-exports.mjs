@@ -16,6 +16,8 @@ const requiredPortableExports = Object.freeze([
   ".",
   "./generic",
   "./adapters",
+  "./bun",
+  "./deno",
   "./context",
   "./docs-serving",
 ]);
@@ -41,39 +43,21 @@ function validateTargetShape(subpath, condition, value) {
     fail(`${subpath} must expose string ${condition} target`);
     return;
   }
-  if (!value.startsWith("./dist/")) {
-    fail(`${subpath}.${condition} must stay inside ./dist, got ${value}`);
-  }
+  if (!value.startsWith("./dist/")) fail(`${subpath}.${condition} must stay inside ./dist, got ${value}`);
   const expectedSuffix = condition === "types" ? ".d.ts" : ".js";
-  if (!value.endsWith(expectedSuffix)) {
-    fail(`${subpath}.${condition} must end with ${expectedSuffix}, got ${value}`);
-  }
+  if (!value.endsWith(expectedSuffix)) fail(`${subpath}.${condition} must end with ${expectedSuffix}, got ${value}`);
 }
 
-if (rootPackage.name !== tsPackage.name) {
-  fail(`package name drift: root=${JSON.stringify(rootPackage.name)} ts=${JSON.stringify(tsPackage.name)}`);
-}
-if (rootPackage.version !== tsPackage.version) {
-  fail(`package version drift: root=${JSON.stringify(rootPackage.version)} ts=${JSON.stringify(tsPackage.version)}`);
-}
-if (rootPackage.type !== "module" || tsPackage.type !== "module") {
-  fail("both root and src/ts package surfaces must remain ESM modules");
-}
-if (normalizedRootTarget(rootPackage.main ?? "") !== tsPackage.main) {
-  fail(`main entrypoint drift: root=${rootPackage.main} ts=${tsPackage.main}`);
-}
-if (normalizedRootTarget(rootPackage.types ?? "") !== tsPackage.types) {
-  fail(`types entrypoint drift: root=${rootPackage.types} ts=${tsPackage.types}`);
-}
-if (JSON.stringify(rootPackage.engines) !== JSON.stringify(tsPackage.engines)) {
-  fail(`engine metadata drift: root=${JSON.stringify(rootPackage.engines)} ts=${JSON.stringify(tsPackage.engines)}`);
-}
+if (rootPackage.name !== tsPackage.name) fail(`package name drift: root=${JSON.stringify(rootPackage.name)} ts=${JSON.stringify(tsPackage.name)}`);
+if (rootPackage.version !== tsPackage.version) fail(`package version drift: root=${JSON.stringify(rootPackage.version)} ts=${JSON.stringify(tsPackage.version)}`);
+if (rootPackage.type !== "module" || tsPackage.type !== "module") fail("both root and src/ts package surfaces must remain ESM modules");
+if (normalizedRootTarget(rootPackage.main ?? "") !== tsPackage.main) fail(`main entrypoint drift: root=${rootPackage.main} ts=${tsPackage.main}`);
+if (normalizedRootTarget(rootPackage.types ?? "") !== tsPackage.types) fail(`types entrypoint drift: root=${rootPackage.types} ts=${tsPackage.types}`);
+if (JSON.stringify(rootPackage.engines) !== JSON.stringify(tsPackage.engines)) fail(`engine metadata drift: root=${JSON.stringify(rootPackage.engines)} ts=${JSON.stringify(tsPackage.engines)}`);
 
 const rootKeys = Object.keys(rootPackage.exports ?? {}).sort();
 const tsKeys = Object.keys(tsPackage.exports ?? {}).sort();
-if (JSON.stringify(rootKeys) !== JSON.stringify(tsKeys)) {
-  fail(`root/src export keys drift: root=${JSON.stringify(rootKeys)} ts=${JSON.stringify(tsKeys)}`);
-}
+if (JSON.stringify(rootKeys) !== JSON.stringify(tsKeys)) fail(`root/src export keys drift: root=${JSON.stringify(rootKeys)} ts=${JSON.stringify(tsKeys)}`);
 
 for (const subpath of [...requiredPortableExports, ...requiredFrameworkExports]) {
   if (!(subpath in (rootPackage.exports ?? {}))) fail(`root package missing ${subpath}`);
@@ -90,40 +74,24 @@ for (const subpath of tsKeys) {
       fail(`${subpath} must expose string ${condition} targets in both package maps`);
       continue;
     }
-    if (normalizedRootTarget(rootValue) !== tsValue) {
-      fail(`${subpath}.${condition} drift: root=${rootValue} ts=${tsValue}`);
-    }
+    if (normalizedRootTarget(rootValue) !== tsValue) fail(`${subpath}.${condition} drift: root=${rootValue} ts=${tsValue}`);
     validateTargetShape(subpath, condition, tsValue);
   }
 }
 
-if (JSON.stringify(tsPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
-  fail(
-    `src/ts oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`,
-  );
-}
-if (JSON.stringify(rootPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
-  fail(
-    `root oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`,
-  );
+for (const runtime of ["bun", "deno"]) {
+  const target = tsPackage.exports[`./${runtime}`]?.import;
+  if (target !== `./dist/${runtime}.js`) fail(`./${runtime} must resolve to ./dist/${runtime}.js, got ${JSON.stringify(target)}`);
 }
 
-if (adapterManifest.language !== "ts") {
-  fail(`adapter manifest language must be ts, got ${JSON.stringify(adapterManifest.language)}`);
-}
-if (adapterManifest.runtime !== "node-deno-bun") {
-  fail(
-    `adapter manifest runtime must be node-deno-bun, got ${JSON.stringify(adapterManifest.runtime)}`,
-  );
-}
+if (JSON.stringify(tsPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) fail(`src/ts oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`);
+if (JSON.stringify(rootPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) fail(`root oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`);
+if (adapterManifest.language !== "ts") fail(`adapter manifest language must be ts, got ${JSON.stringify(adapterManifest.language)}`);
+if (adapterManifest.runtime !== "node-deno-bun") fail(`adapter manifest runtime must be node-deno-bun, got ${JSON.stringify(adapterManifest.runtime)}`);
 for (const runtimeAdapter of ["bun", "deno"]) {
-  if (!Array.isArray(adapterManifest.frameworkAdapters) || !adapterManifest.frameworkAdapters.includes(runtimeAdapter)) {
-    fail(`adapter manifest must declare ${runtimeAdapter} framework adapter`);
-  }
+  if (!Array.isArray(adapterManifest.frameworkAdapters) || !adapterManifest.frameworkAdapters.includes(runtimeAdapter)) fail(`adapter manifest must declare ${runtimeAdapter} framework adapter`);
 }
 
 if (!process.exitCode) {
-  console.log(
-    `ts-package-exports: ${tsKeys.length} export subpaths aligned; generic/Koa/Fastify roots, entrypoints, engine metadata, Node/Bun/Deno runtime floors, and descriptor claims are consistent`,
-  );
+  console.log(`ts-package-exports: ${tsKeys.length} export subpaths aligned; Bun/Deno entrypoints, runtime floors, and descriptor claims are consistent`);
 }
