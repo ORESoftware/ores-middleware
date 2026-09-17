@@ -62,6 +62,17 @@ func TestShutdownDrainWaitsForExistingRequest(t *testing.T) {
 	}
 }
 
+func TestShutdownDrainWithoutActiveRequestsCompletesImmediately(t *testing.T) {
+	coordinator := DefaultShutdownCoordinator()
+	outcome := coordinator.Drain()
+	if outcome.Kind != DrainCompleted || outcome.ActiveAtStart != 0 {
+		t.Fatalf("unexpected outcome: %#v", outcome)
+	}
+	if coordinator.Phase() != ShutdownDraining {
+		t.Fatalf("phase = %v, want draining", coordinator.Phase())
+	}
+}
+
 func TestShutdownZeroTimeoutForcesInflightRequest(t *testing.T) {
 	coordinator := NewShutdownCoordinator(0)
 	lease, rejection := coordinator.BeginRequest()
@@ -105,6 +116,25 @@ func TestShutdownForceInterruptsDrain(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("forced drain did not complete")
+	}
+	lease.Finish()
+}
+
+func TestShutdownForceFromRunningRejectsNewWork(t *testing.T) {
+	coordinator := NewShutdownCoordinator(time.Minute)
+	lease, rejection := coordinator.BeginRequest()
+	if rejection != nil {
+		t.Fatalf("request rejected: %#v", rejection)
+	}
+	if !coordinator.ForceShutdown() {
+		t.Fatal("force transition should succeed")
+	}
+	if _, rejection = coordinator.BeginRequest(); rejection == nil {
+		t.Fatal("forced coordinator must reject new work")
+	}
+	outcome := coordinator.Drain()
+	if outcome.Kind != DrainForced || outcome.Remaining != 1 {
+		t.Fatalf("unexpected forced outcome: %#v", outcome)
 	}
 	lease.Finish()
 }
@@ -155,12 +185,18 @@ func TestShutdownHTTPMiddlewareRejectsHTTP1WithProblemDetails(t *testing.T) {
 	if got := response.Header().Get("Content-Type"); got != "application/problem+json" {
 		t.Fatalf("Content-Type = %q, want application/problem+json", got)
 	}
+	if got := response.Header().Get("x-ores-error-code"); got != "service_draining" {
+		t.Fatalf("x-ores-error-code = %q, want service_draining", got)
+	}
 
 	var problem map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem body: %v", err)
 	}
-	if problem["code"] != "service_draining" || problem["status"] != float64(429) {
+	if problem["type"] != "about:blank" ||
+		problem["title"] != "Request rejected" ||
+		problem["code"] != "service_draining" ||
+		problem["status"] != float64(429) {
 		t.Fatalf("unexpected problem body: %#v", problem)
 	}
 }
