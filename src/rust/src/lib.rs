@@ -17,8 +17,10 @@ pub mod middleware_order;
 mod net;
 pub mod operation;
 pub mod otel;
+pub mod placement;
 mod pipeline;
 pub mod rate_limit;
+pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
 pub mod runtime_manifest;
@@ -66,12 +68,21 @@ pub use otel::{
     load_server_otel_runtime_from_process_env, run_with_ores_log_context,
     server_otel_runtime_from_resolved, should_sample_trace, to_ores_log_context,
 };
+pub use placement::{
+    MiddlewareCapabilities, MiddlewareExecutionTarget, MiddlewarePlacement,
+    MiddlewarePlacementViolation,
+};
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use rate_limit::{
     DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm, RateLimitDecision,
     RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
     RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer, RateLimitPrincipal,
     RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
+};
+pub use rate_limit_routes::{
+    RateLimitRouteSelector, ResolvedRouteRateLimitPolicy, RouteRateLimitPolicySource,
+    RouteRateLimitRequest, RouteRateLimitResolutionError, RouteRateLimitRule,
+    RouteRateLimitTable, RouteRateLimitViolation,
 };
 pub use rate_limit_v2::{
     RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError, RateLimitPolicyV2,
