@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/v1/runtime-types.schema.json",
+  "title": "ORES Middleware Runtime Types",
+  "description": "Independently authored Draft 2020-12 peer declarations for middleware runtime/result data models that are not configuration or adapter-descriptor roots.",
+  "$ref": "#/$defs/ValidationResult",
+  "$defs": {
+    "StringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "RequestContext": {
+      "type": "object",
+      "required": [
+        "requestId",
+        "traceId",
+        "startedAtUnixMs",
+        "baggage"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        },
+        "spanId": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "locale": {
+          "type": "string"
+        },
+        "startedAtUnixMs": {
+          "type": "integer"
+        },
+        "deadlineUnixMs": {
+          "type": "integer"
+        },
+        "baggage": {
+          "$ref": "#/$defs/StringMap"
+        }
+      }
+    },
+    "ValidationIssue": {
+      "type": "object",
+      "required": [
+        "path",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "ValidationResult": {
+      "type": "object",
+      "required": [
+        "valid",
+        "issues"
+      ],
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          }
+        }
+      }
+    }
+  }
+}
