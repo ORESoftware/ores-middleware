@@ -68,6 +68,10 @@
     "./otel": {
       "types": "./dist/otel.d.ts",
       "import": "./dist/otel.js"
+    },
+    "./rate-limit-routes": {
+      "types": "./dist/rate-limit-routes.d.ts",
+      "import": "./dist/rate-limit-routes.js"
     }
   },
   "scripts": {
