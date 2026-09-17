@@ -6,7 +6,9 @@ import {
   MAX_ROUTE_RATE_LIMIT_BINDINGS,
   ROUTE_RATE_LIMIT_BINDING_SCHEMA,
   RouteRateLimitBindingResolutionError,
+  RouteRateLimitBindingValidationError,
   resolveRouteRateLimitBinding,
+  validateRouteRateLimitBindingRequest,
   validateRouteRateLimitBindingTable
 } from "../dist/rate-limit-bindings.js";
 
@@ -151,5 +153,46 @@ test("schema identifier is versioned and exact", () => {
   assert(
     validateRouteRateLimitBindingTable({ schema: "route-bindings/v0", routes: [] })
       .some((issue) => issue.code === "invalid-binding-schema")
+  );
+});
+
+
+test("resolve fails closed when callers skip table validation", () => {
+  const invalid = { schema: "route-bindings/v0", routes: [] };
+  assert.throws(
+    () => resolveRouteRateLimitBinding(invalid, { method: "GET", path: "/" }),
+    (error) => {
+      assert(error instanceof RouteRateLimitBindingValidationError);
+      assert.equal(error.scope, "table");
+      assert(error.violations.some((issue) => issue.code === "invalid-binding-schema"));
+      return true;
+    }
+  );
+});
+
+test("trusted route template cannot bypass an unrelated concrete path", () => {
+  const config = table([
+    binding("users-read", "users:read", ["GET"], "/users/{id}", "users.read")
+  ], "public:default");
+  const request = {
+    method: "GET",
+    path: "/admin/secret",
+    route_template: "/users/{id}",
+    operation_id: "users.read"
+  };
+  assert(validateRouteRateLimitBindingRequest(request).some((issue) => issue.code === "route-template-path-mismatch"));
+  assert.throws(
+    () => resolveRouteRateLimitBinding(config, request),
+    (error) => error instanceof RouteRateLimitBindingValidationError && error.scope === "request"
+  );
+});
+
+test("empty path segments never satisfy parameter placeholders", () => {
+  const config = table([
+    binding("users-read", "users:read", ["GET"], "/users/{id}", "users.read")
+  ], "public:default");
+  assert.deepEqual(
+    resolveRouteRateLimitBinding(config, { method: "GET", path: "/users/", operation_id: "users.read" }),
+    { policy_id: "public:default", source: "default" }
   );
 });

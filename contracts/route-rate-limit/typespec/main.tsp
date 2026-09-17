@@ -25,6 +25,16 @@ scalar PolicyId extends string;
 scalar HttpMethod extends string;
 
 @minLength(1)
+@maxLength(32)
+@pattern("^[A-Za-z][A-Za-z0-9-]{0,31}$")
+scalar RequestHttpMethod extends string;
+
+@minLength(1)
+@maxLength(4096)
+@pattern("^/[^#\\r\\n\\u0000]{0,4095}$")
+scalar RequestPath extends string;
+
+@minLength(1)
 @maxLength(512)
 @pattern("^/[^?#\\r\\n]{0,511}$")
 scalar PathTemplate extends string;
@@ -51,6 +61,15 @@ model HttpMethodSet is Array<HttpMethod>;
 model RouteRateLimitBindingSelector {
   methods?: HttpMethodSet;
   path_template?: PathTemplate;
+  operation_id?: OperationId;
+}
+
+@jsonSchema
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model RouteRateLimitBindingRequest {
+  method: RequestHttpMethod;
+  path: RequestPath;
+  route_template?: PathTemplate;
   operation_id?: OperationId;
 }
 

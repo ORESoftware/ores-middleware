@@ -1,6 +1,7 @@
 export const ROUTE_RATE_LIMIT_BINDING_SCHEMA = "ores.middleware.route-rate-limit-bindings/v1" as const;
 export const MAX_ROUTE_RATE_LIMIT_BINDINGS = 128;
 export const MAX_ROUTE_METHODS = 8;
+export const MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH = 4096;
 
 export interface RouteRateLimitBindingSelector {
   readonly methods?: readonly string[];
@@ -49,6 +50,16 @@ export class RouteRateLimitBindingResolutionError extends Error {
   ) {
     super(`ambiguous route rate-limit binding for ${request.method} ${request.path}`);
     this.name = "RouteRateLimitBindingResolutionError";
+  }
+}
+
+export class RouteRateLimitBindingValidationError extends Error {
+  constructor(
+    public readonly scope: "table" | "request",
+    public readonly violations: readonly RouteRateLimitBindingViolation[]
+  ) {
+    super(`invalid route rate-limit binding ${scope}: ${violations.map((issue) => `${issue.path}:${issue.code}`).join(", ")}`);
+    this.name = "RouteRateLimitBindingValidationError";
   }
 }
 
@@ -128,10 +139,93 @@ export function validateRouteRateLimitBindingTable(
   return violations;
 }
 
+export function validateRouteRateLimitBindingRequest(
+  request: RouteRateLimitBindingRequest
+): RouteRateLimitBindingViolation[] {
+  const violations: RouteRateLimitBindingViolation[] = [];
+
+  if (!/^[A-Za-z][A-Za-z0-9-]{0,31}$/.test(request.method)) {
+    violations.push({
+      code: "invalid-request-method",
+      path: "method",
+      message: "request method must be a bounded ASCII HTTP token"
+    });
+  }
+
+  const pathLength = [...request.path].length;
+  const basicPathValid =
+    pathLength >= 1
+    && pathLength <= MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH
+    && request.path.startsWith("/")
+    && !/[#\r\n\0]/.test(request.path);
+
+  if (!basicPathValid) {
+    violations.push({
+      code: "invalid-request-path",
+      path: "path",
+      message: "request path must be bounded, absolute, and free of fragments/control separators"
+    });
+  } else {
+    const requestPathWithoutQuery = request.path.split("?", 1)[0] ?? request.path;
+    if (requestPathWithoutQuery.includes("//")) {
+      violations.push({
+        code: "repeated-request-path-separator",
+        path: "path",
+        message: "request path must not contain repeated slash separators"
+      });
+    }
+    if (pathSegments(requestPathWithoutQuery).some((segment) => segment === "." || segment === "..")) {
+      violations.push({
+        code: "dot-request-path-segment",
+        path: "path",
+        message: "request path must not contain literal dot segments"
+      });
+    }
+  }
+
+  if (request.route_template !== undefined) {
+    if (validatePathTemplate(request.route_template) !== undefined) {
+      violations.push({
+        code: "invalid-request-route-template",
+        path: "route_template",
+        message: "request route_template must use the canonical configured-template grammar"
+      });
+    } else if (basicPathValid && !pathTemplateMatches(request.route_template, request.path)) {
+      violations.push({
+        code: "route-template-path-mismatch",
+        path: "route_template",
+        message: "trusted route_template must describe the concrete request path"
+      });
+    }
+  }
+
+  if (
+    request.operation_id !== undefined
+    && !/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}$/.test(request.operation_id)
+  ) {
+    violations.push({
+      code: "invalid-request-operation-id",
+      path: "operation_id",
+      message: "request operation_id must be a bounded stable ASCII identifier"
+    });
+  }
+
+  return violations;
+}
+
 export function resolveRouteRateLimitBinding(
   table: RouteRateLimitBindingTable,
   request: RouteRateLimitBindingRequest
 ): ResolvedRouteRateLimitBinding | undefined {
+  const tableViolations = validateRouteRateLimitBindingTable(table);
+  if (tableViolations.length > 0) {
+    throw new RouteRateLimitBindingValidationError("table", tableViolations);
+  }
+  const requestViolations = validateRouteRateLimitBindingRequest(request);
+  if (requestViolations.length > 0) {
+    throw new RouteRateLimitBindingValidationError("request", requestViolations);
+  }
+
   let bestScore: number | undefined;
   let matches: RouteRateLimitBinding[] = [];
 
@@ -251,10 +345,9 @@ function matchScore(
   let score = methods.length > 0 ? 1 : 0;
   if (selector.operation_id !== undefined) score += 10_000;
   if (selector.path_template !== undefined) {
+    const concretePathMatch = pathTemplateMatches(selector.path_template, request.path);
+    if (!concretePathMatch) return undefined;
     const registeredTemplateMatch = request.route_template === selector.path_template;
-    if (!registeredTemplateMatch && !pathTemplateMatches(selector.path_template, request.path)) {
-      return undefined;
-    }
     score += 100 + staticSegmentCount(selector.path_template) * 10;
     if (registeredTemplateMatch) score += 5;
   }
@@ -312,7 +405,11 @@ function pathTemplateMatches(template: string, requestPath: string): boolean {
     if (templateSegment === "*" && templateIndex === templateSegments.length - 1) return true;
     const requestSegment = requestSegments[pathIndex];
     if (requestSegment === undefined) return false;
-    if (!isParameterSegment(templateSegment) && templateSegment !== requestSegment) return false;
+    if (isParameterSegment(templateSegment)) {
+      if (requestSegment.length === 0) return false;
+    } else if (templateSegment !== requestSegment) {
+      return false;
+    }
     pathIndex += 1;
   }
 

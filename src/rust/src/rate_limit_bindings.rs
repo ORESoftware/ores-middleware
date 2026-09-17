@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const ROUTE_RATE_LIMIT_BINDING_SCHEMA: &str = "ores.middleware.route-rate-limit-bindings/v1";
 pub const MAX_ROUTE_RATE_LIMIT_BINDINGS: usize = 128;
 pub const MAX_ROUTE_METHODS: usize = 8;
+pub const MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH: usize = 4096;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +63,12 @@ pub struct RouteRateLimitBindingViolation {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum RouteRateLimitBindingResolutionError {
+    InvalidTable {
+        violations: Vec<RouteRateLimitBindingViolation>,
+    },
+    InvalidRequest {
+        violations: Vec<RouteRateLimitBindingViolation>,
+    },
     Ambiguous {
         method: String,
         path: String,
@@ -78,6 +85,86 @@ impl Default for RouteRateLimitBindingTable {
             default_policy_id: None,
             routes: Vec::new(),
         }
+    }
+}
+
+impl RouteRateLimitBindingRequest<'_> {
+    #[must_use]
+    pub fn validate(&self) -> Vec<RouteRateLimitBindingViolation> {
+        let mut violations = Vec::new();
+
+        if !valid_request_http_method(self.method) {
+            violations.push(RouteRateLimitBindingViolation {
+                code: "invalid-request-method",
+                path: "method".into(),
+                message: "request method must be a bounded ASCII HTTP token",
+            });
+        }
+
+        let path_len = self.path.chars().count();
+        let basic_path_valid = path_len > 0
+            && path_len <= MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH
+            && self.path.starts_with('/')
+            && !self
+                .path
+                .chars()
+                .any(|ch| matches!(ch, '#' | '\r' | '\n' | '\0'));
+
+        if !basic_path_valid {
+            violations.push(RouteRateLimitBindingViolation {
+                code: "invalid-request-path",
+                path: "path".into(),
+                message: "request path must be bounded, absolute, and free of fragments/control separators",
+            });
+        } else {
+            let request_path = self
+                .path
+                .split_once('?')
+                .map_or(self.path, |(path, _)| path);
+            if request_path.contains("//") {
+                violations.push(RouteRateLimitBindingViolation {
+                    code: "repeated-request-path-separator",
+                    path: "path".into(),
+                    message: "request path must not contain repeated slash separators",
+                });
+            }
+            if path_segments(request_path)
+                .into_iter()
+                .any(|segment| segment == "." || segment == "..")
+            {
+                violations.push(RouteRateLimitBindingViolation {
+                    code: "dot-request-path-segment",
+                    path: "path".into(),
+                    message: "request path must not contain literal dot segments",
+                });
+            }
+        }
+
+        if let Some(route_template) = self.route_template {
+            if validate_path_template(route_template).is_err() {
+                violations.push(RouteRateLimitBindingViolation {
+                    code: "invalid-request-route-template",
+                    path: "route_template".into(),
+                    message: "request route_template must use the canonical configured-template grammar",
+                });
+            } else if basic_path_valid && !path_template_matches(route_template, self.path) {
+                violations.push(RouteRateLimitBindingViolation {
+                    code: "route-template-path-mismatch",
+                    path: "route_template".into(),
+                    message: "trusted route_template must describe the concrete request path",
+                });
+            }
+        }
+
+        if self.operation_id.is_some_and(|value| !valid_operation_id(value)) {
+            violations.push(RouteRateLimitBindingViolation {
+                code: "invalid-request-operation-id",
+                path: "operation_id".into(),
+                message: "request operation_id must be a bounded stable ASCII identifier",
+            });
+        }
+
+        violations
     }
 }
 
@@ -167,10 +254,10 @@ impl RouteRateLimitBindingSelector {
         }
 
         if let Some(template) = self.path_template.as_deref() {
-            let registered_template_match = request.route_template == Some(template);
-            if !registered_template_match && !path_template_matches(template, request.path) {
+            if !path_template_matches(template, request.path) {
                 return None;
             }
+            let registered_template_match = request.route_template == Some(template);
             score += 100;
             score += static_segment_count(template) * 10;
             if registered_template_match {
@@ -264,6 +351,19 @@ impl RouteRateLimitBindingTable {
         &'a self,
         request: &RouteRateLimitBindingRequest<'_>,
     ) -> Result<Option<ResolvedRouteRateLimitBinding<'a>>, RouteRateLimitBindingResolutionError> {
+        let table_violations = self.validate();
+        if !table_violations.is_empty() {
+            return Err(RouteRateLimitBindingResolutionError::InvalidTable {
+                violations: table_violations,
+            });
+        }
+        let request_violations = request.validate();
+        if !request_violations.is_empty() {
+            return Err(RouteRateLimitBindingResolutionError::InvalidRequest {
+                violations: request_violations,
+            });
+        }
+
         let mut best_score = None;
         let mut matches: Vec<&RouteRateLimitBinding> = Vec::new();
 
@@ -366,6 +466,16 @@ fn stable_lower_id(value: &str, max_len: usize, allow_colon: bool) -> bool {
     !previous_separator
 }
 
+fn valid_request_http_method(method: &str) -> bool {
+    let bytes = method.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 32
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1..]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+}
+
 fn valid_http_method(method: &str) -> bool {
     let bytes = method.as_bytes();
     !bytes.is_empty()
@@ -456,7 +566,11 @@ fn path_template_matches(template: &str, request_path: &str) -> bool {
         let Some(path_segment) = request_segments.get(path_index) else {
             return false;
         };
-        if !is_parameter_segment(template_segment) && template_segment != path_segment {
+        if is_parameter_segment(template_segment) {
+            if path_segment.is_empty() {
+                return false;
+            }
+        } else if template_segment != path_segment {
             return false;
         }
         path_index += 1;
