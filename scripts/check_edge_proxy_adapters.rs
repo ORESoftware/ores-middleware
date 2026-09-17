@@ -69,6 +69,7 @@ fn check_nginx(source: &str) {
     require_contains(NAME, source, "proxy_set_header X-Forwarded-Host \"\";");
     require_contains(NAME, source, "proxy_set_header X-Forwarded-Port \"\";");
     require_contains(NAME, source, "proxy_set_header X-Request-ID $request_id;");
+    require_contains(NAME, source, "proxy_set_header Proxy \"\";");
     require_contains(NAME, source, "proxy_set_header Connection \"\";");
     require_contains(NAME, source, "proxy_next_upstream off;");
 
@@ -143,7 +144,7 @@ fn check_haproxy(source: &str) {
     require_contains(
         NAME,
         source,
-        "log-format '{\"request_id\":\"%ID\",\"method\":\"%HM\",\"path\":\"%HP\"",
+        "log-format 'request_id=%ID method=%HM path=%HP status=%ST bytes=%B total_ms=%Ta'",
     );
     forbid_contains(NAME, source, "%HQ");
     forbid_contains(NAME, source, "%HU");
@@ -156,6 +157,7 @@ fn check_haproxy(source: &str) {
     require_contains(NAME, source, "http-request del-header X-Forwarded-Host");
     require_contains(NAME, source, "http-request del-header X-Forwarded-Port");
     require_contains(NAME, source, "http-request del-header X-Real-IP");
+    require_contains(NAME, source, "http-request del-header Proxy");
     require_contains(
         NAME,
         source,
