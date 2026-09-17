@@ -1,0 +1,126 @@
+{
+  "schema": "ores.middleware.graceful-shutdown-conformance/v1",
+  "constants": {
+    "phases": ["running", "draining", "forced"],
+    "defaultDrainTimeoutMs": 5000,
+    "defaultRetryAfterMs": 5000,
+    "httpStatus": 429,
+    "errorCode": "service_draining",
+    "contentType": "application/problem+json",
+    "cacheControl": "no-store"
+  },
+  "retryAfterCases": [
+    { "milliseconds": 1, "delaySeconds": 1 },
+    { "milliseconds": 1000, "delaySeconds": 1 },
+    { "milliseconds": 1001, "delaySeconds": 2 },
+    { "milliseconds": 1501, "delaySeconds": 2 },
+    { "milliseconds": 5000, "delaySeconds": 5 }
+  ],
+  "lifecycleCases": [
+    {
+      "name": "zero-active-drain",
+      "initialActive": 0,
+      "action": "drain",
+      "expectedOutcome": "drained",
+      "expectedPhase": "draining",
+      "expectedRemaining": 0
+    },
+    {
+      "name": "existing-request-completes",
+      "initialActive": 1,
+      "action": "complete-before-deadline",
+      "expectedOutcome": "drained",
+      "expectedPhase": "draining",
+      "expectedRemaining": 0
+    },
+    {
+      "name": "deadline-forces-inflight",
+      "initialActive": 1,
+      "action": "deadline",
+      "expectedOutcome": "timed_out",
+      "expectedPhase": "forced",
+      "expectedRemaining": 1
+    },
+    {
+      "name": "explicit-force",
+      "initialActive": 1,
+      "action": "force",
+      "expectedOutcome": "forced",
+      "expectedPhase": "forced",
+      "expectedRemaining": 1
+    },
+    {
+      "name": "zero-timeout",
+      "initialActive": 1,
+      "action": "zero-timeout-drain",
+      "expectedOutcome": "timed_out",
+      "expectedPhase": "forced",
+      "expectedRemaining": 1
+    }
+  ],
+  "admissionCases": [
+    {
+      "name": "running-admits",
+      "phase": "running",
+      "admitted": true
+    },
+    {
+      "name": "draining-rejects",
+      "phase": "draining",
+      "admitted": false,
+      "status": 429,
+      "errorCode": "service_draining",
+      "genericHeaders": {
+        "retry-after": "5"
+      }
+    },
+    {
+      "name": "forced-rejects",
+      "phase": "forced",
+      "admitted": false,
+      "status": 429,
+      "errorCode": "service_draining",
+      "genericHeaders": {
+        "retry-after": "5"
+      }
+    }
+  ],
+  "transportCases": [
+    {
+      "name": "http-1-0-draining",
+      "protocol": "HTTP/1.0",
+      "connectionClose": true
+    },
+    {
+      "name": "http-1-1-draining",
+      "protocol": "HTTP/1.1",
+      "connectionClose": true
+    },
+    {
+      "name": "http-2-draining",
+      "protocol": "HTTP/2",
+      "connectionClose": false
+    },
+    {
+      "name": "http-3-draining",
+      "protocol": "HTTP/3",
+      "connectionClose": false
+    }
+  ],
+  "ownership": {
+    "middlewareOwns": [
+      "application-admission",
+      "in-flight-accounting",
+      "canonical-rejection"
+    ],
+    "consumerOwns": [
+      "signal-policy",
+      "tty-policy",
+      "listener-shutdown",
+      "transport-drain",
+      "telemetry-flush",
+      "resource-close",
+      "process-exit"
+    ]
+  }
+}
