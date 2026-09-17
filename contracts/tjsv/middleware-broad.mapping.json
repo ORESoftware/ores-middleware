@@ -147,6 +147,11 @@
       "authored": "middlewareStackConfig"
     },
     {
+      "typespec": "Ores.Middleware.SdkOperationSymbols",
+      "generated": "SdkOperationSymbols",
+      "authored": "sdkOperationSymbols"
+    },
+    {
       "typespec": "Ores.Middleware.AdapterDescriptor",
       "generated": "AdapterDescriptor",
       "authored": "adapterDescriptor"
