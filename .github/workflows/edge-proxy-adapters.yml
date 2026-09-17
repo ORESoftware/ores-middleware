@@ -6,7 +6,7 @@ on:
       - "adapters/nginx/**"
       - "adapters/haproxy/**"
       - "docs/edge-proxy-adapters.md"
-      - "scripts/check-edge-proxy-adapters.sh"
+      - "scripts/check_edge_proxy_adapters.rs"
       - ".github/workflows/edge-proxy-adapters.yml"
   push:
     branches: [main, dev]
@@ -14,7 +14,7 @@ on:
       - "adapters/nginx/**"
       - "adapters/haproxy/**"
       - "docs/edge-proxy-adapters.md"
-      - "scripts/check-edge-proxy-adapters.sh"
+      - "scripts/check_edge_proxy_adapters.rs"
       - ".github/workflows/edge-proxy-adapters.yml"
   workflow_dispatch:
 
@@ -54,9 +54,14 @@ jobs:
           nginx -v
           haproxy -vv | head -n 5
 
-      - name: Validate adapter syntax and security invariants
+      - name: Compile and run edge proxy admission
         shell: bash
-        run: bash scripts/check-edge-proxy-adapters.sh
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check scripts/check_edge_proxy_adapters.rs
+          rustc --edition=2024 -D warnings scripts/check_edge_proxy_adapters.rs \
+            -o "${RUNNER_TEMP}/check-edge-proxy-adapters"
+          "${RUNNER_TEMP}/check-edge-proxy-adapters"
 
       - name: Ensure validation did not rewrite tracked sources
         shell: bash
