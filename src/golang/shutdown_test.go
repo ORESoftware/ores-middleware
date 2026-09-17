@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,6 +31,28 @@ func TestShutdownRequestLeaseAccountsExactlyOnce(t *testing.T) {
 	second.Finish()
 	if got := coordinator.ActiveRequests(); got != 0 {
 		t.Fatalf("active requests = %d, want 0", got)
+	}
+}
+
+func TestShutdownConcurrentFinishAccountsExactlyOnce(t *testing.T) {
+	coordinator := DefaultShutdownCoordinator()
+	lease, rejection := coordinator.BeginRequest()
+	if rejection != nil {
+		t.Fatalf("request rejected: %#v", rejection)
+	}
+
+	var wait sync.WaitGroup
+	for range 32 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			lease.Finish()
+		}()
+	}
+	wait.Wait()
+
+	if got := coordinator.ActiveRequests(); got != 0 {
+		t.Fatalf("active requests after concurrent finish = %d, want 0", got)
 	}
 }
 
@@ -70,6 +93,9 @@ func TestShutdownDrainWithoutActiveRequestsCompletesImmediately(t *testing.T) {
 	}
 	if coordinator.Phase() != ShutdownDraining {
 		t.Fatalf("phase = %v, want draining", coordinator.Phase())
+	}
+	if _, rejection := coordinator.BeginRequest(); rejection == nil {
+		t.Fatal("draining coordinator must reject new work")
 	}
 }
 
@@ -139,6 +165,17 @@ func TestShutdownForceFromRunningRejectsNewWork(t *testing.T) {
 	lease.Finish()
 }
 
+func TestShutdownForceBeforeAnyWorkYieldsZeroRemaining(t *testing.T) {
+	coordinator := DefaultShutdownCoordinator()
+	if !coordinator.ForceShutdown() {
+		t.Fatal("force transition should succeed")
+	}
+	outcome := coordinator.Drain()
+	if outcome.Kind != DrainForced || outcome.Remaining != 0 {
+		t.Fatalf("unexpected forced outcome: %#v", outcome)
+	}
+}
+
 func TestShutdownRetryAfterRoundsUpAndStaysEndToEndOnly(t *testing.T) {
 	coordinator := NewShutdownCoordinatorWithRetryAfter(5*time.Second, 1501*time.Millisecond)
 	coordinator.StartDraining()
@@ -154,6 +191,13 @@ func TestShutdownRetryAfterRoundsUpAndStaysEndToEndOnly(t *testing.T) {
 	}
 	if _, found := rejection.Headers["connection"]; found {
 		t.Fatal("generic rejection must not carry hop-by-hop Connection metadata")
+	}
+}
+
+func TestShutdownRetryAfterSubsecondRoundsToOne(t *testing.T) {
+	coordinator := NewShutdownCoordinatorWithRetryAfter(time.Second, time.Nanosecond)
+	if got := coordinator.Rejection().Headers["retry-after"]; got != "1" {
+		t.Fatalf("retry-after = %q, want 1", got)
 	}
 }
 
@@ -201,6 +245,37 @@ func TestShutdownHTTPMiddlewareRejectsHTTP1WithProblemDetails(t *testing.T) {
 	}
 }
 
+func TestShutdownHTTPMiddlewareScopesConnectionHeaderToHTTP1(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		protoMajor int
+		protoMinor int
+		connection string
+	}{
+		{name: "unknown", protoMajor: 0, protoMinor: 0, connection: ""},
+		{name: "http-1-0", protoMajor: 1, protoMinor: 0, connection: "close"},
+		{name: "http-1-1", protoMajor: 1, protoMinor: 1, connection: "close"},
+		{name: "http-2", protoMajor: 2, protoMinor: 0, connection: ""},
+		{name: "http-3", protoMajor: 3, protoMinor: 0, connection: ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			coordinator := DefaultShutdownCoordinator()
+			coordinator.StartDraining()
+			handler := ShutdownHTTPMiddleware(coordinator, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("downstream handler must not run while draining")
+			}))
+			request := httptest.NewRequest(http.MethodGet, "https://example.test/", nil)
+			request.ProtoMajor = testCase.protoMajor
+			request.ProtoMinor = testCase.protoMinor
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if got := response.Header().Get("Connection"); got != testCase.connection {
+				t.Fatalf("Connection = %q, want %q", got, testCase.connection)
+			}
+		})
+	}
+}
+
 func TestShutdownHTTPMiddlewareOmitsConnectionForHTTP2(t *testing.T) {
 	coordinator := DefaultShutdownCoordinator()
 	coordinator.StartDraining()
@@ -225,6 +300,25 @@ func TestShutdownHTTPMiddlewareOmitsConnectionForHTTP2(t *testing.T) {
 	}
 }
 
+func TestShutdownHTTPMiddlewareReleasesLeaseAfterHandlerReturns(t *testing.T) {
+	coordinator := DefaultShutdownCoordinator()
+	handler := ShutdownHTTPMiddleware(coordinator, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		if got := coordinator.ActiveRequests(); got != 1 {
+			t.Fatalf("active requests inside handler = %d, want 1", got)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.test/", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", response.Code)
+	}
+	if got := coordinator.ActiveRequests(); got != 0 {
+		t.Fatalf("active requests after handler = %d, want 0", got)
+	}
+}
+
 func TestShutdownConstructorRejectsInvalidDurations(t *testing.T) {
 	assertPanics := func(name string, fn func()) {
 		t.Helper()
@@ -237,4 +331,5 @@ func TestShutdownConstructorRejectsInvalidDurations(t *testing.T) {
 	}
 	assertPanics("negative drain timeout", func() { NewShutdownCoordinator(-time.Nanosecond) })
 	assertPanics("zero retry-after", func() { NewShutdownCoordinatorWithRetryAfter(time.Second, 0) })
+	assertPanics("negative retry-after", func() { NewShutdownCoordinatorWithRetryAfter(time.Second, -time.Nanosecond) })
 }
