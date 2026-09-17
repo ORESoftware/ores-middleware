@@ -10,10 +10,18 @@ include /etc/nginx/ores/trusted-proxies.conf;
 real_ip_header X-Forwarded-For;
 real_ip_recursive on;
 
+# Method-specific rate policies use an empty key when they do not apply. NGINX
+# does not account requests whose limit_req_zone key evaluates to an empty
+# string, so GET/HEAD/etc. on this path do not consume the POST login budget.
+map $request_method $ores_auth_login_ip_key {
+  default "";
+  POST $binary_remote_addr;
+}
+
 # Distinct route policies get distinct zones unless their complete observable
 # semantics are intentionally identical. Example rates are non-authoritative.
 limit_req_zone $binary_remote_addr zone=ores_edge_default_ip:10m rate=20r/s;
-limit_req_zone $binary_remote_addr zone=ores_auth_login_ip:10m rate=10r/m;
+limit_req_zone $ores_auth_login_ip_key zone=ores_auth_login_ip:10m rate=10r/m;
 
 log_format ores_json escape=json
   '{"request_id":"$request_id",'
@@ -64,9 +72,8 @@ server {
     proxy_pass http://ores_origin;
   }
 
-  # Example of a separate route/method-class policy. NGINX locations match path;
-  # if method-specific differentiation is required, the consumer renderer must
-  # emit an appropriate safe method gate rather than collapsing policies.
+  # Separate route/method-class policy. The location selects the path while the
+  # empty-key map above excludes non-POST methods from this policy budget.
   location = /v1/auth/login {
     limit_req zone=ores_auth_login_ip burst=5 nodelay;
     client_max_body_size 64k;
