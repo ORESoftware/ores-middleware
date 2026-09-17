@@ -70,6 +70,10 @@
       "types": "./src/ts/dist/request-contract.d.ts",
       "import": "./src/ts/dist/request-contract.js"
     },
+    "./rate-limit-routes": {
+      "types": "./src/ts/dist/rate-limit-routes.d.ts",
+      "import": "./src/ts/dist/rate-limit-routes.js"
+    },
     "./otel": {
       "types": "./src/ts/dist/otel.d.ts",
       "import": "./src/ts/dist/otel.js"
