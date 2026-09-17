@@ -16,8 +16,11 @@ const requiredPortableExports = Object.freeze([
   ".",
   "./generic",
   "./adapters",
+  "./bun",
+  "./deno",
   "./context",
   "./docs-serving",
+  "./shutdown",
 ]);
 const requiredFrameworkExports = Object.freeze(["./koa", "./fastify"]);
 
@@ -97,6 +100,13 @@ for (const subpath of tsKeys) {
   }
 }
 
+for (const runtime of ["bun", "deno"]) {
+  const target = tsPackage.exports[`./${runtime}`]?.import;
+  if (target !== `./dist/${runtime}.js`) {
+    fail(`./${runtime} must resolve to ./dist/${runtime}.js, got ${JSON.stringify(target)}`);
+  }
+}
+
 if (JSON.stringify(tsPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
   fail(
     `src/ts oresRuntimeSupport must equal tested floors ${JSON.stringify(expectedRuntimeSupport)}`,
@@ -124,6 +134,6 @@ for (const runtimeAdapter of ["bun", "deno"]) {
 
 if (!process.exitCode) {
   console.log(
-    `ts-package-exports: ${tsKeys.length} export subpaths aligned; generic/Koa/Fastify roots, entrypoints, engine metadata, Node/Bun/Deno runtime floors, and descriptor claims are consistent`,
+    `ts-package-exports: ${tsKeys.length} export subpaths aligned; Bun/Deno/shutdown entrypoints, runtime floors, and descriptor claims are consistent`,
   );
 }
