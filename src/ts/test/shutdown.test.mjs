@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DEFAULT_DRAIN_TIMEOUT_MS,
   DEFAULT_RETRY_AFTER_MS,
+  MAX_TIMER_DELAY_MS,
   SHUTDOWN_HTTP_STATUS,
   ShutdownCoordinator
 } from "../dist/shutdown.js";
@@ -46,8 +47,22 @@ test("draining rejects new work with bounded end-to-end retry metadata", () => {
       "retry-after": "2"
     }
   });
+  assert.equal(Object.isFrozen(rejected.rejection.headers), true);
+  assert.throws(() => {
+    rejected.rejection.headers["retry-after"] = "99";
+  }, TypeError);
   assert.equal(coordinator.activeRequests, 1);
   existing.lease.finish();
+});
+
+test("sub-second retry hints round up to one second", () => {
+  const coordinator = new ShutdownCoordinator(5_000, 1);
+  assert.equal(coordinator.rejection().headers["retry-after"], "1");
+});
+
+test("exact-second retry hints remain exact", () => {
+  const coordinator = new ShutdownCoordinator(5_000, 2_000);
+  assert.equal(coordinator.rejection().headers["retry-after"], "2");
 });
 
 test("drain waits for already-admitted requests", async () => {
@@ -64,6 +79,17 @@ test("drain waits for already-admitted requests", async () => {
   assert.equal(coordinator.activeRequests, 0);
 });
 
+test("drain without active requests completes immediately", async () => {
+  const coordinator = new ShutdownCoordinator();
+  assert.deepEqual(await coordinator.drain(), {
+    kind: "drained",
+    active_at_start: 0
+  });
+  assert.equal(coordinator.phase, "draining");
+  assert.equal(coordinator.isAcceptingRequests, false);
+  assert.equal(coordinator.tryBeginRequest().ok, false);
+});
+
 test("zero timeout forces in-flight work immediately", async () => {
   const coordinator = new ShutdownCoordinator(0);
   const admission = coordinator.tryBeginRequest();
@@ -71,8 +97,10 @@ test("zero timeout forces in-flight work immediately", async () => {
 
   assert.deepEqual(await coordinator.drain(), { kind: "timed_out", remaining: 1 });
   assert.equal(coordinator.phase, "forced");
+  assert.equal(coordinator.isForced, true);
   assert.equal(coordinator.tryBeginRequest().ok, false);
   admission.lease.finish();
+  assert.equal(coordinator.activeRequests, 0);
 });
 
 test("explicit force interrupts a drain", async () => {
@@ -83,13 +111,36 @@ test("explicit force interrupts a drain", async () => {
   const draining = coordinator.drain();
   assert.equal(coordinator.forceShutdown(), true);
   assert.equal(coordinator.forceShutdown(), false);
+  assert.equal(coordinator.isForced, true);
   assert.deepEqual(await draining, { kind: "forced", remaining: 1 });
   admission.lease.finish();
+});
+
+test("force from running rejects new work and remains forced through drain", async () => {
+  const coordinator = new ShutdownCoordinator(60_000);
+  const admission = coordinator.tryBeginRequest();
+  assert.equal(admission.ok, true);
+
+  assert.equal(coordinator.forceShutdown(), true);
+  assert.equal(coordinator.phase, "forced");
+  assert.equal(coordinator.tryBeginRequest().ok, false);
+  assert.deepEqual(await coordinator.drain(), { kind: "forced", remaining: 1 });
+  admission.lease.finish();
+});
+
+test("force before any work yields a zero-remaining forced drain", async () => {
+  const coordinator = new ShutdownCoordinator();
+  assert.equal(coordinator.forceShutdown(), true);
+  assert.deepEqual(await coordinator.drain(), { kind: "forced", remaining: 0 });
+  assert.equal(coordinator.activeRequests, 0);
 });
 
 test("invalid durations fail closed", () => {
   assert.throws(() => new ShutdownCoordinator(-1), RangeError);
   assert.throws(() => new ShutdownCoordinator(Number.NaN), RangeError);
+  assert.throws(() => new ShutdownCoordinator(Number.POSITIVE_INFINITY), RangeError);
+  assert.throws(() => new ShutdownCoordinator(1.5), RangeError);
   assert.throws(() => new ShutdownCoordinator(5_000, 0), RangeError);
+  assert.throws(() => new ShutdownCoordinator(MAX_TIMER_DELAY_MS + 1), RangeError);
   assert.throws(() => new ShutdownCoordinator(Number.MAX_SAFE_INTEGER + 1), RangeError);
 });
