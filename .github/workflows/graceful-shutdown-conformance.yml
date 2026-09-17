@@ -1,0 +1,57 @@
+name: graceful-shutdown-conformance
+
+on:
+  pull_request:
+    paths:
+      - "contracts/graceful-shutdown/**"
+      - "scripts/validate-graceful-shutdown-conformance.mjs"
+      - "src/rust/src/shutdown.rs"
+      - "src/rust/src/frameworks/axum_shutdown.rs"
+      - "src/ts/src/shutdown.ts"
+      - "src/ts/test/shutdown.test.mjs"
+      - "src/golang/shutdown.go"
+      - "src/golang/shutdown_test.go"
+      - ".github/workflows/graceful-shutdown-conformance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/graceful-shutdown/**"
+      - "scripts/validate-graceful-shutdown-conformance.mjs"
+      - "src/rust/src/shutdown.rs"
+      - "src/rust/src/frameworks/axum_shutdown.rs"
+      - "src/ts/src/shutdown.ts"
+      - "src/ts/test/shutdown.test.mjs"
+      - "src/golang/shutdown.go"
+      - "src/golang/shutdown_test.go"
+      - ".github/workflows/graceful-shutdown-conformance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22.23.1"
+          package-manager-cache: false
+
+      - name: Validate versioned shutdown vectors
+        run: node scripts/validate-graceful-shutdown-conformance.mjs
+
+      - name: Install Rust 1.95.0
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+
+      - name: Test framework-neutral shutdown core
+        run: cargo test --manifest-path src/rust/Cargo.toml --no-default-features shutdown
+
+      - name: Test Axum shutdown admission
+        run: cargo test --manifest-path src/rust/Cargo.toml --all-features shutdown
