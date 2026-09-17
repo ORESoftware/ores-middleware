@@ -63,7 +63,11 @@ fn check_nginx(source: &str) {
     const NAME: &str = "NGINX adapter";
     let source = active_source(source);
 
-    require_contains(NAME, &source, "include /etc/nginx/ores/trusted-proxies.conf;");
+    require_contains(
+        NAME,
+        &source,
+        "include /etc/nginx/ores/trusted-proxies.conf;",
+    );
     require_contains(NAME, &source, "include /etc/nginx/ores/allowed-hosts.map;");
     require_contains(NAME, &source, "real_ip_recursive on;");
     require_contains(NAME, &source, "merge_slashes on;");
@@ -77,7 +81,11 @@ fn check_nginx(source: &str) {
     require_contains(NAME, &source, "CONNECT 0;");
 
     require_contains(NAME, &source, "proxy_set_header Forwarded \"\";");
-    require_contains(NAME, &source, "proxy_set_header X-Forwarded-For $remote_addr;");
+    require_contains(
+        NAME,
+        &source,
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+    );
     require_contains(NAME, &source, "proxy_set_header X-Real-IP $remote_addr;");
     require_contains(NAME, &source, "proxy_set_header X-Forwarded-Proto $scheme;");
     require_contains(NAME, &source, "proxy_set_header X-Forwarded-Host \"\";");
@@ -96,13 +104,34 @@ fn check_nginx(source: &str) {
     forbid_contains(NAME, &normalized, "set_real_ip_from 0.0.0.0/0;");
     forbid_contains(NAME, &normalized, "set_real_ip_from ::/0;");
 
-    require_contains(NAME, &source, "map $request_method $ores_auth_login_ip_key {");
+    require_contains(
+        NAME,
+        &source,
+        "map $request_method $ores_auth_login_ip_key {",
+    );
     require_contains(NAME, &source, "POST $binary_remote_addr;");
-    require_contains(NAME, &source, "limit_req_zone $binary_remote_addr zone=ores_edge_default_ip:");
-    require_contains(NAME, &source, "limit_req_zone $ores_auth_login_ip_key zone=ores_auth_login_ip:");
+    require_contains(
+        NAME,
+        &source,
+        "limit_req_zone $binary_remote_addr zone=ores_edge_default_ip:",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "limit_req_zone $ores_auth_login_ip_key zone=ores_auth_login_ip:",
+    );
     require_contains(NAME, &source, "location = /v1/auth/login {");
-    require_occurrences(NAME, &source, "limit_req zone=ores_edge_default_ip burst=40 nodelay;", 2);
-    require_contains(NAME, &source, "limit_req zone=ores_auth_login_ip burst=5 nodelay;");
+    require_occurrences(
+        NAME,
+        &source,
+        "limit_req zone=ores_edge_default_ip burst=40 nodelay;",
+        2,
+    );
+    require_contains(
+        NAME,
+        &source,
+        "limit_req zone=ores_auth_login_ip burst=5 nodelay;",
+    );
     require_contains(NAME, &source, "limit_req_status 429;");
 
     require_contains(NAME, &source, "client_header_timeout 10s;");
@@ -120,8 +149,16 @@ fn check_nginx(source: &str) {
     require_contains(NAME, &source, "proxy_hide_header X-Content-Type-Options;");
     require_contains(NAME, &source, "proxy_hide_header Referrer-Policy;");
     require_contains(NAME, &source, "proxy_hide_header X-Request-ID;");
-    require_contains(NAME, &source, "add_header X-Content-Type-Options \"nosniff\" always;");
-    require_contains(NAME, &source, "add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;");
+    require_contains(
+        NAME,
+        &source,
+        "add_header X-Content-Type-Options \"nosniff\" always;",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;",
+    );
     require_contains(NAME, &source, "add_header X-Request-ID $request_id always;");
 }
 
@@ -130,9 +167,17 @@ fn check_haproxy(source: &str) {
     let source = active_source(source);
 
     require_contains(NAME, &source, "unique-id-format \"%[uuid]\"");
-    require_contains(NAME, &source, "http-request set-header X-Request-ID %[unique-id]");
+    require_contains(
+        NAME,
+        &source,
+        "http-request set-header X-Request-ID %[unique-id]",
+    );
     forbid_contains(NAME, &source, "option httplog");
-    require_contains(NAME, &source, "log-format 'request_id=%ID method=%HM path=%HP status=%ST bytes=%B total_ms=%Ta'");
+    require_contains(
+        NAME,
+        &source,
+        "log-format 'request_id=%ID method=%HM path=%HP status=%ST bytes=%B total_ms=%Ta'",
+    );
     forbid_contains(NAME, &source, "%HQ");
     forbid_contains(NAME, &source, "%HU");
     forbid_contains(NAME, &source, "%ci");
@@ -144,15 +189,43 @@ fn check_haproxy(source: &str) {
     forbid_contains(NAME, &source, "option redispatch");
     forbid_contains(NAME, &source, "http-request set-retries");
 
-    require_contains(NAME, &source, "acl ores_host_allowed req.hdr(host),lower -f /etc/haproxy/ores-allowed-hosts.lst");
-    require_contains(NAME, &source, "http-request return status 421 if !ores_host_allowed");
+    require_contains(
+        NAME,
+        &source,
+        "acl ores_host_allowed req.hdr(host),lower -f /etc/haproxy/ores-allowed-hosts.lst",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request return status 421 if !ores_host_allowed",
+    );
     forbid_contains(NAME, &source, "deny_status 421");
-    require_contains(NAME, &source, "acl ores_forbidden_method method TRACE CONNECT");
-    require_contains(NAME, &source, "http-request deny deny_status 405 if ores_forbidden_method");
+    require_contains(
+        NAME,
+        &source,
+        "acl ores_forbidden_method method TRACE CONNECT",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 405 if ores_forbidden_method",
+    );
     require_contains(NAME, &source, "acl ores_path_double_slash path_reg //");
-    require_contains(NAME, &source, "acl ores_path_dot_segment path_reg (^|/)\\.{1,2}(/|$)");
-    require_contains(NAME, &source, "http-request deny deny_status 400 if ores_path_double_slash");
-    require_contains(NAME, &source, "http-request deny deny_status 400 if ores_path_dot_segment");
+    require_contains(
+        NAME,
+        &source,
+        "acl ores_path_dot_segment path_reg (^|/)\\.{1,2}(/|$)",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 400 if ores_path_double_slash",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 400 if ores_path_dot_segment",
+    );
 
     require_contains(NAME, &source, "http-request del-header Forwarded");
     require_contains(NAME, &source, "http-request del-header X-Forwarded-For");
@@ -166,24 +239,56 @@ fn check_haproxy(source: &str) {
     require_contains(NAME, &source, "http-request del-header Upgrade");
     require_contains(NAME, &source, "http-request del-header TE");
     require_contains(NAME, &source, "http-request del-header Trailer");
-    require_contains(NAME, &source, "http-request set-header X-Forwarded-For %[src]");
+    require_contains(
+        NAME,
+        &source,
+        "http-request set-header X-Forwarded-For %[src]",
+    );
     require_contains(NAME, &source, "http-request set-header X-Real-IP %[src]");
 
     require_occurrences(NAME, &source, "stick-table type ipv6", 2);
     forbid_contains(NAME, &source, "stick-table type ip ");
-    require_contains(NAME, &source, "acl ores_auth_login_path path /v1/auth/login");
+    require_contains(
+        NAME,
+        &source,
+        "acl ores_auth_login_path path /v1/auth/login",
+    );
     forbid_contains(NAME, &source, "acl ores_auth_login_path path -i");
     require_contains(NAME, &source, "acl ores_auth_login_method method POST");
-    require_contains(NAME, &source, "http-request track-sc1 src table ores_rl_auth_login if ores_auth_login_path ores_auth_login_method");
-    require_contains(NAME, &source, "http-request deny deny_status 429 if ores_default_rate_exceeded");
-    require_contains(NAME, &source, "http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded");
+    require_contains(
+        NAME,
+        &source,
+        "http-request track-sc1 src table ores_rl_auth_login if ores_auth_login_path ores_auth_login_method",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 429 if ores_default_rate_exceeded",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded",
+    );
 
     require_contains(NAME, &source, "timeout http-request 10s");
     require_contains(NAME, &source, "timeout http-keep-alive 10s");
     require_contains(NAME, &source, "http-after-response del-header X-Powered-By");
-    require_contains(NAME, &source, "http-after-response set-header X-Content-Type-Options nosniff");
-    require_contains(NAME, &source, "http-after-response set-header Referrer-Policy strict-origin-when-cross-origin");
-    require_contains(NAME, &source, "http-after-response set-header X-Request-ID %[unique-id]");
+    require_contains(
+        NAME,
+        &source,
+        "http-after-response set-header X-Content-Type-Options nosniff",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-after-response set-header Referrer-Policy strict-origin-when-cross-origin",
+    );
+    require_contains(
+        NAME,
+        &source,
+        "http-after-response set-header X-Request-ID %[unique-id]",
+    );
 }
 
 fn unique_temp_dir() -> PathBuf {
@@ -232,10 +337,7 @@ fn validate_nginx_native(source: &str) {
             "include /etc/nginx/ores/trusted-proxies.conf;",
             "set_real_ip_from 127.0.0.1;",
         )
-        .replace(
-            "include /etc/nginx/ores/allowed-hosts.map;",
-            "localhost 1;",
-        )
+        .replace("include /etc/nginx/ores/allowed-hosts.map;", "localhost 1;")
         .replace(
             "access_log /var/log/nginx/ores-access.log ores_json;",
             "access_log off;",
