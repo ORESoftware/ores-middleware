@@ -12,7 +12,7 @@ const REQUIRE_NATIVE_ENV: &str = "ORES_EDGE_PROXY_REQUIRE_NATIVE";
 
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("edge-proxy-adapters: {}", message.as_ref());
-    std::process::exit(1);
+    std::process::exit(1)
 }
 
 fn read_required(root: &Path, relative: &str) -> String {
@@ -145,7 +145,8 @@ fn check_haproxy(source: &str) {
     forbid_contains(NAME, &source, "http-request set-retries");
 
     require_contains(NAME, &source, "acl ores_host_allowed req.hdr(host),lower -f /etc/haproxy/ores-allowed-hosts.lst");
-    require_contains(NAME, &source, "http-request deny deny_status 421 unless ores_host_allowed");
+    require_contains(NAME, &source, "http-request return status 421 if !ores_host_allowed");
+    forbid_contains(NAME, &source, "deny_status 421");
     require_contains(NAME, &source, "acl ores_forbidden_method method TRACE CONNECT");
     require_contains(NAME, &source, "http-request deny deny_status 405 if ores_forbidden_method");
     require_contains(NAME, &source, "acl ores_path_double_slash path_reg //");
