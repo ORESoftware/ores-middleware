@@ -59,6 +59,14 @@ frontend ores_http
   acl ores_forbidden_method method TRACE CONNECT
   http-request deny deny_status 405 if ores_forbidden_method
 
+  # HAProxy intentionally does not normalize request paths by default. Reject
+  # common ambiguous forms here so route-specific middleware cannot be bypassed
+  # when an origin/router would later normalize them differently.
+  acl ores_path_double_slash path_reg //
+  acl ores_path_dot_segment path_reg (^|/)\.{1,2}(/|$)
+  http-request deny deny_status 400 if ores_path_double_slash
+  http-request deny deny_status 400 if ores_path_dot_segment
+
   # Replace public forwarding metadata at this boundary. When HAProxy itself is
   # behind another proxy, use an explicitly trusted PROXY-protocol hop or other
   # reviewed transport mechanism rather than trusting arbitrary X-Forwarded-*.
@@ -105,7 +113,7 @@ frontend ores_http
   http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded
 
   # http-after-response applies to origin and HAProxy-generated responses,
-  # including local 405/421/429 responses. Remove origin banner/policy copies,
+  # including local 400/405/421/429 responses. Remove origin banner/policy copies,
   # then write one canonical edge value.
   http-after-response del-header X-Powered-By
   http-after-response set-header X-Content-Type-Options nosniff
