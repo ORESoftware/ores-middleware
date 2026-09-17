@@ -32,6 +32,6 @@ This conformance tranche makes the following invariants executable:
 12. HTTP/3 drain rejection forbids connection close;
 13. successful completion before the deadline reports drained without forcing;
 14. deadline, zero-timeout, and explicit-force cases end in forced state as specified;
-15. CI validates the corpus and executes the native shutdown suites for framework-neutral Rust, Axum, TypeScript/Node, and Go from the pull-request merge revision.
+15. CI validates the corpus and executes the native shutdown suites for framework-neutral Rust, Axum, TypeScript/Node, and Go from the exact pull-request head (or the exact pushed `main` SHA), with an explicit `git rev-parse HEAD` identity check before execution.
 
 The runtime implementations remain independent. Their native tests exercise each language's real scheduling, timer, cancellation, request-accounting, and HTTP behavior while the versioned corpus fixes the common observable semantics they must preserve.
