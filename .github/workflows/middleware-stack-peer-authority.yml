@@ -100,7 +100,7 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const source = JSON.parse(fs.readFileSync('contracts/json-schema/middleware-stack.schema.json', 'utf8'));
-          const values = source?.$defs?.settings?.properties?.contentRepresentations?.items?.enum;
+          const values = source?.$defs?.contentRepresentation?.enum;
           if (!Array.isArray(values) || values.length === 0 || values.some((value) => typeof value !== 'string')) {
             throw new Error('authored contentRepresentations enum is missing or malformed');
           }
