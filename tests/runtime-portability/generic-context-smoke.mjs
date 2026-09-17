@@ -1,5 +1,17 @@
-import { descriptor } from "../../src/ts/dist/index.js";
-import {
+const runtimeArguments = globalThis.Deno
+  ? globalThis.Deno.args
+  : (globalThis.process?.argv.slice(2) ?? []);
+const distRoot = runtimeArguments[0]
+  ? new URL(runtimeArguments[0])
+  : new URL("../../src/ts/dist/", import.meta.url);
+
+const [{ descriptor }, generic, contextApi] = await Promise.all([
+  import(new URL("index.js", distRoot)),
+  import(new URL("generic.js", distRoot)),
+  import(new URL("context.js", distRoot)),
+]);
+
+const {
   composeContextualMiddleware,
   composeMiddleware,
   composeNamedContextualMiddleware,
@@ -10,14 +22,14 @@ import {
   providerError,
   providerFrom,
   providerOk,
-} from "../../src/ts/dist/generic.js";
-import {
+} = generic;
+const {
   bindContext,
   captureContext,
   currentContext,
   runWithCapturedContext,
   runWithContext,
-} from "../../src/ts/dist/context.js";
+} = contextApi;
 
 function fail(message) {
   throw new Error(message);
@@ -276,4 +288,5 @@ console.log(JSON.stringify({
   runtime: runtimeName(),
   checks,
   concurrentContexts: isolation.length,
+  distRoot: distRoot.href,
 }));
