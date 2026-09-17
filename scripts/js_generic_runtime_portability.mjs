@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 const startedAt = new Date().toISOString();
 const root = path.resolve(process.argv[2] ?? process.cwd());
@@ -12,6 +13,10 @@ const outputRoot = path.resolve(
   process.argv[3] ?? path.join(root, "target", "js-generic-runtime-portability"),
 );
 const smokePath = path.join(root, "tests", "runtime-portability", "generic-context-smoke.mjs");
+const surfaces = [
+  { name: "source", dist: path.join(root, "src", "ts", "dist") },
+  { name: "packaged", dist: path.join(root, "target", "ts", "dist") },
+];
 const runtimes = [
   {
     name: "node",
@@ -76,12 +81,12 @@ async function writeJson(filename, value) {
   await writeFile(filename, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function finding(kind, detail, runtime = null) {
+function finding(kind, detail, cell = null) {
   discrepancies.push({
     kind,
     detail,
-    runtime,
-    fingerprint: sha256(`${kind}\0${runtime ?? ""}\0${detail}`),
+    cell,
+    fingerprint: sha256(`${kind}\0${cell ?? ""}\0${detail}`),
   });
 }
 
@@ -124,12 +129,12 @@ async function runCommand(id, command) {
   return { stdout, stderr };
 }
 
-function parseLastJsonLine(stdout, runtime) {
+function parseLastJsonLine(stdout, cell) {
   const candidates = stdout
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("{") && line.endsWith("}"));
-  if (candidates.length === 0) throw new Error(`${runtime} emitted no JSON result`);
+  if (candidates.length === 0) throw new Error(`${cell} emitted no JSON result`);
   return JSON.parse(candidates.at(-1));
 }
 
@@ -146,7 +151,6 @@ function normalizedWitness(witness) {
 await rm(outputRoot, { recursive: true, force: true });
 await ensureDirectory(outputRoot);
 
-let baseline = null;
 for (const runtime of runtimes) {
   try {
     const version = await runCommand(`versions/${runtime.name}`, runtime.versionCommand);
@@ -155,55 +159,78 @@ for (const runtime of runtimes) {
     runtimeVersions[runtime.name] = null;
     finding("runtime-version-failure", error.message, runtime.name);
   }
+}
 
-  try {
-    const result = await runCommand(
-      `generic-context/${runtime.name}`,
-      [...runtime.command, smokePath],
-    );
-    const witness = parseLastJsonLine(result.stdout, runtime.name);
-    const normalized = normalizedWitness(witness);
-    const before = discrepancies.length;
-
-    if (
-      witness.schema !== "ores.middleware.js-runtime-portability-smoke/v1" ||
-      witness.suite !== "generic-context" ||
-      witness.status !== "passed" ||
-      !Number.isSafeInteger(witness.checks) ||
-      witness.checks < 10 ||
-      witness.concurrentContexts !== 32
-    ) {
-      finding("generic-context-smoke-mismatch", stable(witness), runtime.name);
-    }
-
-    if (runtime.name === "node") {
-      baseline = normalized;
-    } else if (!baseline || stable(normalized) !== stable(baseline)) {
-      finding(
-        "generic-context-runtime-semantic-mismatch",
-        `actual=${stable(normalized)} expected=${stable(baseline)}`,
-        runtime.name,
+let baseline = null;
+for (const surface of surfaces) {
+  const distUrl = pathToFileURL(`${surface.dist}${path.sep}`).href;
+  for (const runtime of runtimes) {
+    const cell = `${surface.name}/${runtime.name}`;
+    try {
+      const result = await runCommand(
+        `generic-context/${surface.name}/${runtime.name}`,
+        [...runtime.command, smokePath, distUrl],
       );
-    }
+      const witness = parseLastJsonLine(result.stdout, cell);
+      const normalized = normalizedWitness(witness);
+      const before = discrepancies.length;
 
-    const resultPath = path.join(outputRoot, "results", `${runtime.name}.json`);
-    await writeJson(resultPath, witness);
-    runtimeWitnesses.push({
-      runtime: runtime.name,
-      state: discrepancies.length === before ? "executed" : "discrepant",
-      result: path.relative(root, resultPath),
-      resultSha256: await sha256File(resultPath),
-    });
-  } catch (error) {
-    finding("generic-context-runtime-failure", error.message, runtime.name);
-    runtimeWitnesses.push({ runtime: runtime.name, state: "failed", error: error.message });
+      if (
+        witness.schema !== "ores.middleware.js-runtime-portability-smoke/v1" ||
+        witness.suite !== "generic-context" ||
+        witness.status !== "passed" ||
+        !Number.isSafeInteger(witness.checks) ||
+        witness.checks < 11 ||
+        witness.concurrentContexts !== 32
+      ) {
+        finding("generic-context-smoke-mismatch", stable(witness), cell);
+      }
+
+      if (surface.name === "source" && runtime.name === "node") {
+        baseline = normalized;
+      } else if (!baseline || stable(normalized) !== stable(baseline)) {
+        finding(
+          "generic-context-runtime-semantic-mismatch",
+          `actual=${stable(normalized)} expected=${stable(baseline)}`,
+          cell,
+        );
+      }
+
+      const resultPath = path.join(outputRoot, "results", surface.name, `${runtime.name}.json`);
+      await writeJson(resultPath, witness);
+      runtimeWitnesses.push({
+        surface: surface.name,
+        runtime: runtime.name,
+        state: discrepancies.length === before ? "executed" : "discrepant",
+        result: path.relative(root, resultPath),
+        resultSha256: await sha256File(resultPath),
+      });
+    } catch (error) {
+      finding("generic-context-runtime-failure", error.message, cell);
+      runtimeWitnesses.push({
+        surface: surface.name,
+        runtime: runtime.name,
+        state: "failed",
+        error: error.message,
+      });
+    }
   }
 }
 
+const expectedWitnessCount = surfaces.length * runtimes.length;
 const passed =
   discrepancies.length === 0 &&
-  runtimeWitnesses.length === runtimes.length &&
+  runtimeWitnesses.length === expectedWitnessCount &&
   runtimeWitnesses.every((item) => item.state === "executed");
+
+const sourceDigests = {
+  [path.relative(root, smokePath)]: await sha256File(smokePath),
+};
+for (const surface of surfaces) {
+  sourceDigests[`${surface.name}/generic.js`] = await sha256File(path.join(surface.dist, "generic.js"));
+  sourceDigests[`${surface.name}/context.js`] = await sha256File(path.join(surface.dist, "context.js"));
+  sourceDigests[`${surface.name}/index.js`] = await sha256File(path.join(surface.dist, "index.js"));
+}
 
 const receipt = {
   schema: "ores.middleware.js-generic-runtime-portability-report/v1",
@@ -212,16 +239,13 @@ const receipt = {
   startedAt,
   endedAt: new Date().toISOString(),
   language: "typescript",
-  surface: ["generic", "context"],
+  surface: ["generic", "context", "descriptor", "packaged-closure"],
   runtimes: runtimes.map((runtime) => ({
     name: runtime.name,
     version: runtimeVersions[runtime.name] ?? null,
   })),
-  sourceDigests: {
-    [path.relative(root, smokePath)]: await sha256File(smokePath),
-    "src/ts/dist/generic.js": await sha256File(path.join(root, "src/ts/dist/generic.js")),
-    "src/ts/dist/context.js": await sha256File(path.join(root, "src/ts/dist/context.js")),
-  },
+  packageSurfaces: surfaces.map((surface) => surface.name),
+  sourceDigests,
   runtimeWitnesses,
   checks,
   discrepancies,
