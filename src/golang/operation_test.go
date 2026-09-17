@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func testOperationContext(slot int) RequestContext {
@@ -72,15 +73,15 @@ func TestOperationBoundaryReporterPanicIsFailOpen(t *testing.T) {
 }
 
 func TestOperationBoundaryClassifiesDeadlineAndCancellation(t *testing.T) {
-	deadlineParent, cancelDeadline := context.WithCancel(context.Background())
-	cancelDeadline()
-	deadlineParent = context.WithValue(deadlineParent, struct{}{}, nil)
+	deadlineParent, cancelDeadline := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancelDeadline()
+	<-deadlineParent.Done()
 	deadline := RunOperationBoundary(
-		context.WithoutCancel(deadlineParent),
+		deadlineParent,
 		testOperationContext(3),
 		OperationDescriptor{Transport: OperationTransportHTTP, Scope: OperationScopeRequest, Name: "orders.read"},
 		func(context.Context, OperationFailure) {},
-		func(context.Context) (int, error) { return 1, context.DeadlineExceeded },
+		func(context.Context) (int, error) { return 1, nil },
 	)
 	if deadline.OK() || deadline.Failure.Kind != OperationFailureDeadlineExceeded {
 		t.Fatalf("expected deadline failure: %#v", deadline)
