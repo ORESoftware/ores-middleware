@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - '.zpkg.toml'
+      - '.zpkg.lock'
       - 'contracts/**'
       - 'src/**'
       - 'scripts/build_targets.py'
@@ -18,6 +19,7 @@ on:
     branches: [main, dev]
     paths:
       - '.zpkg.toml'
+      - '.zpkg.lock'
       - 'contracts/**'
       - 'src/**'
       - 'scripts/build_targets.py'
@@ -38,7 +40,134 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  pack-install-matrix:
+  resolve-release-lock:
+    if: >-
+      github.event_name == 'pull_request' &&
+      startsWith(github.head_ref, 'release/zed-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: zed-pkg
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the same-repository release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install checksum-verified Zed 0.3.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly url='https://github.com/zed-pkg/zed-cli/releases/download/v0.3.0/zed-x86_64-unknown-linux-gnu.tar.gz'
+          readonly expected='f87576bc289e43ed647902527e7be70566445d2f1fd11249f067ab35547d4b8a'
+          mkdir -p "$RUNNER_TEMP/zed-dist"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --retry 5 --retry-all-errors \
+            --output "$RUNNER_TEMP/zed.tar.gz" "$url"
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/zed.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/zed.tar.gz" -C "$RUNNER_TEMP/zed-dist"
+          zed_bin="$(find "$RUNNER_TEMP/zed-dist" -type f -name zed -perm -u+x -print -quit)"
+          test -n "$zed_bin"
+          printf 'ZED_BIN=%s\n' "$zed_bin" >> "$GITHUB_ENV"
+          "$zed_bin" --version
+
+      - name: Reuse a complete lock or resolve it from the registry
+        env:
+          ZED_PKG_TOKEN: ${{ secrets.ZED_PKG_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -s .zpkg.lock && \
+             "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
+               > "$RUNNER_TEMP/zed-existing-lock.json" 2>/dev/null; then
+            printf '%s\n' 'existing .zpkg.lock is structurally valid; checking direct provenance coverage'
+          else
+            rm -f .zpkg.lock
+            if test -z "$ZED_PKG_TOKEN"; then
+              printf '%s\n' 'ZED_PKG_TOKEN is required only when .zpkg.lock is missing or invalid' >&2
+              exit 2
+            fi
+            attempt=1
+            max_attempts=3
+            until "$ZED_BIN" install --install-mode copy; do
+              if test "$attempt" -ge "$max_attempts"; then
+                printf 'authenticated registry resolution failed after %s attempts\n' "$attempt" >&2
+                exit 1
+              fi
+              delay=$((attempt * 5))
+              printf 'authenticated registry resolution attempt %s failed; retrying in %ss\n' "$attempt" "$delay" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+          fi
+          test -s .zpkg.lock
+          "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
+            > "$RUNNER_TEMP/zed-lock-validate.json"
+
+      - name: Verify every direct dependency has immutable provenance
+        id: provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          manifest = tomllib.loads(Path('.zpkg.toml').read_text())
+          lock = tomllib.loads(Path('.zpkg.lock').read_text())
+          locked = {
+              f"{item.get('org')}/{item.get('name')}": item
+              for item in lock.get('packages', [])
+          }
+          required = set(manifest.get('dependencies', {}))
+          missing = sorted(required - set(locked))
+          if missing:
+              raise SystemExit(f'direct dependencies missing from .zpkg.lock: {missing}')
+          for name in sorted(required):
+              item = locked[name]
+              assert item.get('version'), name
+              assert re.fullmatch(r'[0-9a-f]{64}', item.get('sha256', '')), name
+              assert isinstance(item.get('size'), int) and item['size'] > 0, name
+              assert item.get('format'), name
+              assert item.get('source'), name
+              assert item.get('vcs_tag'), name
+              assert re.fullmatch(r'[0-9a-f]{40}', item.get('vcs_commit', '')), name
+          print(f'verified {len(required)} direct dependency lock entries')
+          PY
+
+      - name: Commit only a resolver-produced lock delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- .zpkg.lock
+          staged="$(git diff --cached --name-only)"
+          if test -z "$staged"; then
+            printf '%s\n' 'resolver produced no lock delta'
+            exit 0
+          fi
+          test "$staged" = '.zpkg.lock'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Lock Zed dependency closure for middleware release'
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
+      - name: Upload sanitized resolver evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: zed-lock-resolution-${{ github.run_id }}
+          path: |
+            .zpkg.lock
+            ${{ runner.temp }}/zed-lock-validate.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  reproducibility-matrix:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -120,7 +249,7 @@ jobs:
           cargo clippy --manifest-path tools/zed-archive-audit/Cargo.toml --locked --all-targets -- -D warnings
           cargo test --manifest-path tools/zed-archive-audit/Cargo.toml --locked
 
-      - name: Execute clean isolated pack/install acceptance
+      - name: Execute credential-free reproducibility acceptance
         shell: bash
         env:
           ZED_ACCEPTANCE_RECEIPT_DIR: ${{ runner.temp }}/zed-acceptance
@@ -134,6 +263,7 @@ jobs:
           name: zed-release-acceptance-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/zed-acceptance/receipt.json
+            ${{ runner.temp }}/zed-acceptance/acceptance-scope.json
             ${{ runner.temp }}/zed-acceptance/validate.json
             ${{ runner.temp }}/zed-acceptance/zed-version.txt
             ${{ runner.temp }}/zed-acceptance/expected-archives.txt
@@ -141,6 +271,5 @@ jobs:
             ${{ runner.temp }}/zed-acceptance/package-second-names.txt
             ${{ runner.temp }}/zed-acceptance/package-first-digests.txt
             ${{ runner.temp }}/zed-acceptance/package-second-digests.txt
-            ${{ runner.temp }}/zed-acceptance/r2g-installed-file-digests.txt
           if-no-files-found: error
           retention-days: 90
