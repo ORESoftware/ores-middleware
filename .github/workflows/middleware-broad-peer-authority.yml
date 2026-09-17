@@ -1,0 +1,174 @@
+name: middleware-broad-peer-authority
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/typespec/main.tsp'
+      - 'contracts/json-schema/**'
+      - 'contracts/tjsv/middleware-broad.mapping.json'
+      - 'scripts/compare-authorities.mjs'
+      - 'scripts/validate-contracts.mjs'
+      - '.github/workflows/middleware-broad-peer-authority.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'contracts/typespec/main.tsp'
+      - 'contracts/json-schema/**'
+      - 'contracts/tjsv/middleware-broad.mapping.json'
+      - 'scripts/compare-authorities.mjs'
+      - 'scripts/validate-contracts.mjs'
+      - '.github/workflows/middleware-broad-peer-authority.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: middleware-broad-peer-authority-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  TJSV_REVISION: d60d0d79d83e075077382623ec9e23a401ab601f
+
+jobs:
+  parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
+          persist-credentials: false
+          show-progress: false
+          fetch-depth: 1
+
+      - name: Verify exact candidate revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
+
+      - name: Install Node 22.23.1
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+
+      - name: Install locked middleware dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Preserve existing peer and fixture checks
+        run: |
+          node scripts/compare-authorities.mjs
+          node scripts/validate-contracts.mjs
+          npx tsp compile contracts/typespec --no-emit
+
+      - name: Check out exact TJSV source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: ${{ env.TJSV_REVISION }}
+          path: target/tools/tjsv
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install locked TJSV dependencies
+        run: |
+          set -euo pipefail
+          npm ci --prefix target/tools/tjsv --ignore-scripts --no-audit --no-fund
+          npm rebuild --prefix target/tools/tjsv @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+          test -s target/tools/tjsv/node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
+
+      - name: Enforce complete 32-declaration peer inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/middleware-broad-tjsv/generated
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+              --typespec=contracts/typespec/main.tsp \
+              --schema=contracts/json-schema \
+              --mapping=contracts/tjsv/middleware-broad.mapping.json \
+              --output-dir=target/middleware-broad-tjsv/generated \
+              --bundle-id=middleware-broad.generated.schema.json \
+              --report=target/middleware-broad-tjsv/report.json \
+              --contract-ir=target/middleware-broad-tjsv/contract-ir.json \
+              --probes=true \
+              --max-probes=128 \
+              --int64-strategy=number \
+              --seal-object-schemas=false \
+              --polymorphic-models-strategy=oneOf \
+              --format-assertion=true \
+              --quiet=true
+
+      - name: Require global zero-ignore complete coverage
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const mapping = JSON.parse(fs.readFileSync('contracts/tjsv/middleware-broad.mapping.json', 'utf8'));
+          if (mapping.declarations.length !== 32) throw new Error('expected exactly 32 declaration mappings');
+          for (const lane of ['typespec', 'generated', 'authored']) {
+            if (!Array.isArray(mapping.ignore?.[lane]) || mapping.ignore[lane].length !== 0) {
+              throw new Error(`ignore.${lane} must remain empty`);
+            }
+          }
+          const report = JSON.parse(fs.readFileSync('target/middleware-broad-tjsv/report.json', 'utf8'));
+          for (const field of ['typespecDeclarations', 'generatedDeclarations', 'authoredDeclarations']) {
+            if (report.counts?.[field] !== 32) throw new Error(`${field} must equal 32`);
+          }
+          if ((report.coverage?.outOfScopeTypeSpecDeclarations ?? []).length !== 0) {
+            throw new Error('out-of-scope TypeSpec data declarations are forbidden');
+          }
+          NODE
+
+      - name: Prove capability drift fails closed
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R contracts/json-schema target/middleware-broad-tjsv/drift-schema
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path='target/middleware-broad-tjsv/drift-schema/middleware-stack.schema.json';
+          const schema=JSON.parse(fs.readFileSync(path,'utf8'));
+          schema.$defs.capability.enum=schema.$defs.capability.enum.filter((x)=>x!=='schema-capture');
+          fs.writeFileSync(path,`${JSON.stringify(schema,null,2)}\n`);
+          NODE
+          set +e
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
+              --schema=target/middleware-broad-tjsv/drift-schema \
+              --generated-schema=target/middleware-broad-tjsv/generated/middleware-broad.generated.schema.json \
+              --mapping=contracts/tjsv/middleware-broad.mapping.json \
+              --report=target/middleware-broad-tjsv/drift-report.json \
+              --quiet
+          rc=$?
+          set -e
+          if [ "$rc" -ne 2 ]; then
+            echo "expected capability drift to stop evaluation with exit 2, got $rc" >&2
+            exit 1
+          fi
+
+      - name: Require reviewed sources unchanged
+        if: ${{ !cancelled() }}
+        run: |
+          git diff --check
+          git diff --exit-code HEAD -- \
+            contracts/typespec/main.tsp \
+            contracts/json-schema \
+            contracts/tjsv/middleware-broad.mapping.json \
+            scripts/compare-authorities.mjs \
+            scripts/validate-contracts.mjs \
+            .github/workflows/middleware-broad-peer-authority.yml
+
+      - name: Retain broad parity evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: middleware-broad-tjsv-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/middleware-broad-tjsv/
+          if-no-files-found: warn
+          retention-days: 30
