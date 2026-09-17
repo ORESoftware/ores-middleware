@@ -15,6 +15,8 @@ const files = {
   typescript: [path.join(root, "src/ts/src/generic.ts")],
   go: [path.join(root, "src/golang/generic.go")],
   gleam: [path.join(root, "src/gleam/src/ores_middleware/generic.gleam")],
+  elixir: [path.join(root, "src/elixir/lib/ores_middleware/generic.ex")],
+  erlang: [path.join(root, "src/erlang/src/ores_middleware_generic.erl")],
 };
 
 const required = {
@@ -55,6 +57,24 @@ const required = {
     "pub fn compose(",
     "pub fn compose_named(",
   ],
+  elixir: [
+    "defmodule OresMiddleware.Generic",
+    "def provider_from(",
+    "def contextual_provider_from(",
+    "def compose(",
+    "def compose_named(",
+    "def compose_contextual(",
+    "def compose_named_contextual(",
+  ],
+  erlang: [
+    "-module(ores_middleware_generic).",
+    "provider_from/1",
+    "contextual_provider_from/1",
+    "compose/2",
+    "compose_named/2",
+    "compose_contextual/2",
+    "compose_named_contextual/2",
+  ],
 };
 
 const forbiddenProviderNames = [
@@ -75,6 +95,12 @@ const forbiddenTypeScriptRuntimeBindings = [
   "bun.",
   "deno.",
 ];
+
+const forbiddenFrameworkBindings = {
+  typescript: ["express", "koa", "fastify", "nextjs", "hono"],
+  elixir: ["plug.conn", "phoenix"],
+  erlang: ["cowboy_req", "ranch"],
+};
 
 function fail(message) {
   console.error(`generic-portability: ${message}`);
@@ -118,6 +144,12 @@ for (const [language, filenames] of Object.entries(files)) {
     }
   }
 
+  for (const binding of forbiddenFrameworkBindings[language] ?? []) {
+    if (lower.includes(binding)) {
+      fail(`${language}: generic core is coupled to framework binding ${JSON.stringify(binding)}`);
+    }
+  }
+
   if (language === "typescript") {
     for (const binding of forbiddenTypeScriptRuntimeBindings) {
       if (lower.includes(binding)) {
@@ -129,6 +161,6 @@ for (const [language, filenames] of Object.entries(files)) {
 
 if (!process.exitCode) {
   console.log(
-    "generic-portability: Rust, TypeScript, Go, and Gleam generic cores satisfy the portable contract; shipped generic code is provider-neutral and the TypeScript generic core is Node/Bun/Deno neutral",
+    "generic-portability: Rust, TypeScript, Go, Gleam, Elixir, and Erlang generic cores satisfy the provider/framework-neutral contract; TypeScript generic code is Node/Bun/Deno neutral",
   );
 }
