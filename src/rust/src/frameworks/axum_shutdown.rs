@@ -53,7 +53,7 @@ fn shutdown_response(rejection: ShutdownRejection, version: Version) -> Response
         &rejection.headers,
     );
     let status = StatusCode::from_u16(stage_response.status)
-        .unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
+        .unwrap_or(StatusCode::TOO_MANY_REQUESTS);
     let mut response = (status, Body::from(stage_response.body)).into_response();
 
     for (name, value) in stage_response.headers {
@@ -65,9 +65,9 @@ fn shutdown_response(rejection: ShutdownRejection, version: Version) -> Response
         }
     }
 
-    // Connection-specific fields are valid only for HTTP/1.x. HTTP/2 and
-    // HTTP/3 prohibit `Connection`; the stream itself is enough to carry the
-    // temporary 503 admission result on those protocols.
+    // `Connection` is hop-by-hop metadata, so it is owned by this transport
+    // adapter rather than the generic shutdown rejection. HTTP/2 and HTTP/3
+    // prohibit the field entirely.
     if matches!(version, Version::HTTP_10 | Version::HTTP_11) {
         response
             .headers_mut()
@@ -127,7 +127,7 @@ mod tests {
             )
             .await
             .expect("draining response");
-        assert_eq!(draining.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(draining.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(
             draining.headers().get(CONNECTION).and_then(|value| value.to_str().ok()),
             Some("close")
@@ -149,7 +149,7 @@ mod tests {
             .await
             .expect("bounded problem body");
         let problem: Value = serde_json::from_slice(&body).expect("valid problem json");
-        assert_eq!(problem["status"], 503);
+        assert_eq!(problem["status"], 429);
         assert_eq!(problem["code"], "service_draining");
         assert_eq!(problem["title"], "Request rejected");
     }
@@ -170,7 +170,7 @@ mod tests {
             .await
             .expect("draining response");
 
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
         assert!(response.headers().get(CONNECTION).is_none());
         assert_eq!(
             response.headers().get(RETRY_AFTER).and_then(|value| value.to_str().ok()),
