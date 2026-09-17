@@ -74,6 +74,10 @@
       "types": "./src/ts/dist/rate-limit-routes.d.ts",
       "import": "./src/ts/dist/rate-limit-routes.js"
     },
+    "./shutdown": {
+      "types": "./src/ts/dist/shutdown.d.ts",
+      "import": "./src/ts/dist/shutdown.js"
+    },
     "./otel": {
       "types": "./src/ts/dist/otel.d.ts",
       "import": "./src/ts/dist/otel.js"
