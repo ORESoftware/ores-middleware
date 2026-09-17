@@ -17,6 +17,14 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
     },
+    "./bun": {
+      "types": "./dist/bun.d.ts",
+      "import": "./dist/bun.js"
+    },
+    "./deno": {
+      "types": "./dist/deno.d.ts",
+      "import": "./dist/deno.js"
+    },
     "./fallthrough": {
       "types": "./dist/fallthrough.d.ts",
       "import": "./dist/fallthrough.js"
