@@ -65,6 +65,14 @@ async function validateContracts() {
     schema.$schema === "https://json-schema.org/draft/2020-12/schema",
     "JSON Schema must declare Draft 2020-12",
   );
+  assert(
+    schema.$ref === "#/$defs/RateLimitPolicyV2",
+    "JSON Schema root must resolve through the named RateLimitPolicyV2 declaration",
+  );
+  assert(
+    schema.$defs?.RateLimitPolicyV2?.type === "object",
+    "JSON Schema RateLimitPolicyV2 declaration is missing",
+  );
 
   const enumPairs = [
     ["RateLimitAlgorithmV2", "rateLimitAlgorithmV2"],
@@ -89,7 +97,7 @@ async function validateContracts() {
   }
 
   const typespecProperties = parseTypeSpecModelProperties(typespec, "RateLimitPolicyV2");
-  const schemaPropertyObject = schema.properties;
+  const schemaPropertyObject = schema.$defs?.RateLimitPolicyV2?.properties;
   assert(
     schemaPropertyObject && typeof schemaPropertyObject === "object",
     "JSON Schema RateLimitPolicyV2 properties are missing",
@@ -192,9 +200,14 @@ function parseTypeSpecEnum(source, name) {
 }
 
 function parseTypeSpecModelProperties(source, name) {
-  const match = source.match(new RegExp(`model\\s+${name}\\s*\\{([\\s\\S]*?)\\}`));
-  assert(match, `TypeSpec model ${name} is missing`);
-  return [...match[1].matchAll(/^\s*([A-Za-z][A-Za-z0-9]*)\??\s*:/gm)]
+  const marker = `model ${name} {`;
+  const start = source.indexOf(marker);
+  assert(start >= 0, `TypeSpec model ${name} is missing`);
+  const remainder = source.slice(start + marker.length);
+  const end = remainder.search(/^}/m);
+  assert(end >= 0, `TypeSpec model ${name} is unterminated`);
+  const body = remainder.slice(0, end);
+  return [...body.matchAll(/^\s*([A-Za-z][A-Za-z0-9]*)\??\s*:/gm)]
     .map((entry) => entry[1])
     .sort();
 }
