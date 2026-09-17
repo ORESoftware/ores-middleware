@@ -3,11 +3,12 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const NGINX_REL: &str = "adapters/nginx/ores-middleware.conf.example";
 const HAPROXY_REL: &str = "adapters/haproxy/ores-middleware.cfg.example";
+const REQUIRE_NATIVE_ENV: &str = "ORES_EDGE_PROXY_REQUIRE_NATIVE";
 
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("edge-proxy-adapters: {}", message.as_ref());
@@ -199,7 +200,7 @@ fn unique_temp_dir() -> PathBuf {
     env::temp_dir().join(format!("ores-edge-proxy-{}-{nanos}", std::process::id()))
 }
 
-fn run_checked(program: &str, args: &[&str]) -> Output {
+fn run_checked(program: &str, args: &[&str]) {
     let output = Command::new(program)
         .args(args)
         .output()
@@ -211,7 +212,20 @@ fn run_checked(program: &str, args: &[&str]) -> Output {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    output
+}
+
+fn command_available(program: &str, version_arg: &str) -> bool {
+    Command::new(program)
+        .arg(version_arg)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn native_required() -> bool {
+    env::var(REQUIRE_NATIVE_ENV)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 fn validate_nginx_native(source: &str) {
@@ -263,8 +277,22 @@ fn main() {
 
     check_nginx(&nginx);
     check_haproxy(&haproxy);
-    validate_nginx_native(&nginx);
-    validate_haproxy_native(&root);
 
-    println!("edge-proxy-adapters: static invariants and native syntax validation passed");
+    let nginx_available = command_available("nginx", "-v");
+    let haproxy_available = command_available("haproxy", "-v");
+    if native_required() && (!nginx_available || !haproxy_available) {
+        fail(format!(
+            "native validators required but unavailable: nginx={nginx_available}, haproxy={haproxy_available}"
+        ));
+    }
+    if nginx_available {
+        validate_nginx_native(&nginx);
+    }
+    if haproxy_available {
+        validate_haproxy_native(&root);
+    }
+
+    println!(
+        "edge-proxy-adapters: static invariants passed; native nginx={nginx_available}, haproxy={haproxy_available}"
+    );
 }
