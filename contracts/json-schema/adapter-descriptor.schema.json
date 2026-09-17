@@ -92,47 +92,50 @@
           }
         },
         "operationSymbols": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "descriptor",
-            "defaultConfig",
-            "validateConfig",
-            "createMiddleware",
-            "runWithContext",
-            "currentContext",
-            "capabilities"
-          ],
-          "properties": {
-            "descriptor": {
-              "type": "string",
-              "minLength": 1
-            },
-            "defaultConfig": {
-              "type": "string",
-              "minLength": 1
-            },
-            "validateConfig": {
-              "type": "string",
-              "minLength": 1
-            },
-            "createMiddleware": {
-              "type": "string",
-              "minLength": 1
-            },
-            "runWithContext": {
-              "type": "string",
-              "minLength": 1
-            },
-            "currentContext": {
-              "type": "string",
-              "minLength": 1
-            },
-            "capabilities": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
+          "$ref": "#/$defs/sdkOperationSymbols"
+        }
+      }
+    },
+    "sdkOperationSymbols": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "descriptor",
+        "defaultConfig",
+        "validateConfig",
+        "createMiddleware",
+        "runWithContext",
+        "currentContext",
+        "capabilities"
+      ],
+      "properties": {
+        "descriptor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "defaultConfig": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validateConfig": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createMiddleware": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runWithContext": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currentContext": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilities": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }
