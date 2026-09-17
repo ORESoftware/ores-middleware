@@ -354,7 +354,7 @@ fn stable_lower_id(value: &str, max_len: usize, allow_colon: bool) -> bool {
     }
     let mut previous_separator = false;
     for byte in bytes {
-        let separator = matches!(byte, b'-' | b'_' | b'.') || (allow_colon && *byte == b':');
+        let separator = matches!(*byte, b'-' | b'_' | b'.') || (allow_colon && *byte == b':');
         if byte.is_ascii_lowercase() || byte.is_ascii_digit() {
             previous_separator = false;
         } else if separator && !previous_separator {
@@ -434,7 +434,7 @@ fn validate_path_template(template: &str) -> Result<(), &'static str> {
             }
             continue;
         }
-        if segment.contains(['{', '}', '*']) {
+        if segment.contains('{') || segment.contains('}') || segment.contains('*') {
             return Err("invalid-path-segment");
         }
     }
@@ -539,8 +539,20 @@ mod tests {
     fn operation_id_beats_parameterized_path() {
         let table = RouteRateLimitBindingTable {
             routes: vec![
-                binding("job-path", "jobs:default", &["POST"], Some("/jobs/{job_id}"), None),
-                binding("job-retry", "jobs:retry", &["POST"], None, Some("jobs.retry")),
+                binding(
+                    "job-path",
+                    "jobs:default",
+                    &["POST"],
+                    Some("/jobs/{job_id}"),
+                    None,
+                ),
+                binding(
+                    "job-retry",
+                    "jobs:retry",
+                    &["POST"],
+                    None,
+                    Some("jobs.retry"),
+                ),
             ],
             ..Default::default()
         };
@@ -558,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn parameterized_path_and_query_match() {
+    fn parameterized_route_matches_concrete_path_and_query() {
         let table = RouteRateLimitBindingTable {
             routes: vec![binding(
                 "ledger-entry",
@@ -608,23 +620,37 @@ mod tests {
     #[test]
     fn no_match_without_default_stays_unbound() {
         let table = RouteRateLimitBindingTable::default();
-        assert!(table
-            .resolve(&RouteRateLimitBindingRequest {
-                method: "GET",
-                path: "/unmatched",
-                route_template: None,
-                operation_id: None,
-            })
-            .unwrap()
-            .is_none());
+        assert!(
+            table
+                .resolve(&RouteRateLimitBindingRequest {
+                    method: "GET",
+                    path: "/unmatched",
+                    route_template: None,
+                    operation_id: None,
+                })
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn equal_specificity_fails_closed_with_stable_evidence() {
         let table = RouteRateLimitBindingTable {
             routes: vec![
-                binding("users-b", "users:beta", &["GET"], Some("/users/:id"), None),
-                binding("users-a", "users:alpha", &["GET"], Some("/users/{id}"), None),
+                binding(
+                    "users-b",
+                    "users:beta",
+                    &["GET"],
+                    Some("/users/:id"),
+                    None,
+                ),
+                binding(
+                    "users-a",
+                    "users:alpha",
+                    &["GET"],
+                    Some("/users/{id}"),
+                    None,
+                ),
             ],
             ..Default::default()
         };
@@ -650,53 +676,117 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_route_class_and_selector() {
-        let route = binding("search", "search:read", &["GET"], Some("/search"), None);
+        let route = binding(
+            "search",
+            "search:read",
+            &["GET"],
+            Some("/search"),
+            None,
+        );
         let table = RouteRateLimitBindingTable {
-            routes: vec![route.clone(), RouteRateLimitBinding { policy_id: "search:other".into(), ..route }],
+            routes: vec![
+                route.clone(),
+                RouteRateLimitBinding {
+                    policy_id: "search:other".into(),
+                    ..route
+                },
+            ],
             ..Default::default()
         };
         let violations = table.validate();
-        assert!(violations.iter().any(|issue| issue.code == "duplicate-route-class-id"));
-        assert!(violations.iter().any(|issue| issue.code == "duplicate-route-selector"));
+        assert!(
+            violations
+                .iter()
+                .any(|issue| issue.code == "duplicate-route-class-id")
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|issue| issue.code == "duplicate-route-selector")
+        );
     }
 
     #[test]
     fn rejects_invalid_identifiers_and_method_tokens() {
         let table = RouteRateLimitBindingTable {
             default_policy_id: Some("Bad Policy".into()),
-            routes: vec![binding("BadRoute", "also bad", &["-"], Some("/ok"), None)],
+            routes: vec![binding(
+                "BadRoute",
+                "also bad",
+                &["-"],
+                Some("/ok"),
+                None,
+            )],
             ..Default::default()
         };
         let violations = table.validate();
-        assert!(violations.iter().any(|issue| issue.code == "invalid-route-class-id"));
-        assert!(violations.iter().filter(|issue| issue.code == "invalid-policy-id").count() >= 2);
-        assert!(violations.iter().any(|issue| issue.code == "invalid-http-method"));
+        assert!(
+            violations
+                .iter()
+                .any(|issue| issue.code == "invalid-route-class-id")
+        );
+        assert!(
+            violations
+                .iter()
+                .filter(|issue| issue.code == "invalid-policy-id")
+                .count()
+                >= 2
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|issue| issue.code == "invalid-http-method")
+        );
     }
 
     #[test]
     fn rejects_noncanonical_path_parameters_and_dot_segments() {
         for template in ["/users/{bad-name}", "/users/{id", "/users/..", "/a/*/b"] {
             let table = RouteRateLimitBindingTable {
-                routes: vec![binding("bad-route", "bad:route", &["GET"], Some(template), None)],
+                routes: vec![binding(
+                    "bad-route",
+                    "bad:route",
+                    &["GET"],
+                    Some(template),
+                    None,
+                )],
                 ..Default::default()
             };
-            assert!(table
-                .validate()
-                .iter()
-                .any(|issue| issue.path.ends_with("selector.path_template")));
+            assert!(
+                table
+                    .validate()
+                    .iter()
+                    .any(|issue| issue.path.ends_with("selector.path_template"))
+            );
         }
     }
 
     #[test]
     fn table_and_method_counts_are_bounded() {
-        let route = binding("route", "route:policy", &["GET"], Some("/route"), None);
+        let route = binding(
+            "route",
+            "route:policy",
+            &["GET"],
+            Some("/route"),
+            None,
+        );
         let mut table = RouteRateLimitBindingTable {
             routes: vec![route; MAX_ROUTE_RATE_LIMIT_BINDINGS + 1],
             ..Default::default()
         };
-        assert!(table.validate().iter().any(|issue| issue.code == "too-many-route-bindings"));
+        assert!(
+            table
+                .validate()
+                .iter()
+                .any(|issue| issue.code == "too-many-route-bindings")
+        );
         table.routes.truncate(1);
         table.routes[0].selector.methods = vec!["GET".into(); MAX_ROUTE_METHODS + 1];
-        assert!(table.validate().iter().any(|issue| issue.code == "too-many-http-methods"));
+        assert!(
+            table
+                .validate()
+                .iter()
+                .any(|issue| issue.code == "too-many-http-methods")
+        );
     }
 }
