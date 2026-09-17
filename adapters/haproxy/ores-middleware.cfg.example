@@ -12,40 +12,57 @@ global
 defaults
   mode http
   log global
-  option httplog
+
+  # Do not use the stock httplog format here: it includes the full request URI,
+  # including query strings. Keep access telemetry deliberately bounded.
+  log-format '{"request_id":"%ID","method":"%HM","path":"%HP","status":%ST,"bytes":%B,"total_ms":%Ta}'
+
   timeout connect 3s
+  timeout queue 5s
   timeout client 30s
   timeout server 30s
   timeout http-request 10s
+  timeout http-keep-alive 10s
 
+# Use ipv6 tables: HAProxy accepts both IPv6 and IPv4 source addresses here,
+# unlike type ip, which excludes IPv6 clients.
 # Separate tables preserve separate windows/semantics for route policy classes.
 backend ores_rl_default
-  stick-table type ip size 1m expire 1m store http_req_rate(10s)
+  stick-table type ipv6 size 1m expire 1m store http_req_rate(10s)
 
 backend ores_rl_auth_login
-  stick-table type ip size 1m expire 10m store http_req_rate(1m)
+  stick-table type ipv6 size 1m expire 10m store http_req_rate(1m)
 
 frontend ores_http
   bind :8080
 
-  # Generate an edge request ID. The consumer may use a different reviewed
-  # format; do not accept an arbitrary public request ID as a trust primitive.
-  unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
+  # Generate a random edge request ID that does not encode client IP/ports or
+  # other transport identifiers. Never accept a public request ID as a trust
+  # primitive.
+  unique-id-format "%[uuid]"
   http-request set-header X-Request-ID %[unique-id]
 
   # Replace public forwarding metadata at this boundary. When HAProxy itself is
   # behind another proxy, use an explicitly trusted PROXY-protocol hop or other
   # reviewed transport mechanism rather than trusting arbitrary X-Forwarded-*.
+  http-request del-header Forwarded
   http-request del-header X-Forwarded-For
-  http-request set-header X-Forwarded-For %[src]
   http-request del-header X-Forwarded-Proto
+  http-request del-header X-Forwarded-Host
+  http-request del-header X-Forwarded-Port
+  http-request del-header X-Real-IP
+  http-request set-header X-Forwarded-For %[src]
+  http-request set-header X-Real-IP %[src]
   http-request set-header X-Forwarded-Proto http
   http-request set-header X-Forwarded-Proto https if { ssl_fc }
 
-  # traceparent and baggage pass through unchanged. They are telemetry context,
-  # never identity or authorization evidence.
+  # traceparent and baggage pass through unchanged. They are untrusted telemetry
+  # context, never identity/authorization evidence; application OTel parsing must
+  # reject malformed values.
 
-  acl ores_auth_login_path path -i /v1/auth/login
+  # URL paths are case-sensitive here; do not broaden an exact route policy with
+  # a case-insensitive match.
+  acl ores_auth_login_path path /v1/auth/login
   acl ores_auth_login_method method POST
 
   # Example rates are non-authoritative. sc0 counts the general edge policy;
@@ -59,8 +76,10 @@ frontend ores_http
   http-request deny deny_status 429 if ores_default_rate_exceeded
   http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded
 
-  http-response set-header X-Content-Type-Options nosniff
-  http-response set-header Referrer-Policy strict-origin-when-cross-origin
+  # http-after-response applies to origin and HAProxy-generated responses,
+  # including local 429s, unlike a server-response-only rule.
+  http-after-response set-header X-Content-Type-Options nosniff
+  http-after-response set-header Referrer-Policy strict-origin-when-cross-origin
 
   default_backend ores_origin
 
