@@ -1,0 +1,20 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    { "typespec": "Ores.Middleware.RouteRateLimit.RouteClassId", "generated": "RouteClassId", "authored": "RouteClassId" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.PolicyId", "generated": "PolicyId", "authored": "PolicyId" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.HttpMethod", "generated": "HttpMethod", "authored": "HttpMethod" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.PathTemplate", "generated": "PathTemplate", "authored": "PathTemplate" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.OperationId", "generated": "OperationId", "authored": "OperationId" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.HttpMethodSet", "generated": "HttpMethodSet", "authored": "HttpMethodSet" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBindingSelector", "generated": "RouteRateLimitBindingSelector", "authored": "RouteRateLimitBindingSelector" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBinding", "generated": "RouteRateLimitBinding", "authored": "RouteRateLimitBinding" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBindingList", "generated": "RouteRateLimitBindingList", "authored": "RouteRateLimitBindingList" },
+    { "typespec": "Ores.Middleware.RouteRateLimit.RouteRateLimitBindingTable", "generated": "RouteRateLimitBindingTable", "authored": "RouteRateLimitBindingTable" }
+  ],
+  "ignore": {
+    "typespec": [],
+    "generated": [],
+    "authored": []
+  }
+}
