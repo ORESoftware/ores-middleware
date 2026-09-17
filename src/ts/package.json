@@ -81,6 +81,10 @@
       "types": "./dist/otel.d.ts",
       "import": "./dist/otel.js"
     },
+    "./rate-limit-bindings": {
+      "types": "./dist/rate-limit-bindings.d.ts",
+      "import": "./dist/rate-limit-bindings.js"
+    },
     "./rate-limit-routes": {
       "types": "./dist/rate-limit-routes.d.ts",
       "import": "./dist/rate-limit-routes.js"
