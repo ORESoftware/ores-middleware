@@ -9,10 +9,13 @@ on:
       - "scripts/test-graceful-shutdown-conformance-validator.mjs"
       - "src/rust/src/shutdown.rs"
       - "src/rust/src/frameworks/axum_shutdown.rs"
+      - "src/rust/tests/shutdown_adversarial.rs"
       - "src/ts/src/shutdown.ts"
       - "src/ts/test/shutdown.test.mjs"
+      - "src/ts/test/shutdown.adversarial.test.mjs"
       - "src/golang/shutdown.go"
       - "src/golang/shutdown_test.go"
+      - "src/golang/shutdown_adversarial_test.go"
       - ".github/workflows/graceful-shutdown-conformance.yml"
   push:
     branches: [main]
@@ -23,10 +26,13 @@ on:
       - "scripts/test-graceful-shutdown-conformance-validator.mjs"
       - "src/rust/src/shutdown.rs"
       - "src/rust/src/frameworks/axum_shutdown.rs"
+      - "src/rust/tests/shutdown_adversarial.rs"
       - "src/ts/src/shutdown.ts"
       - "src/ts/test/shutdown.test.mjs"
+      - "src/ts/test/shutdown.adversarial.test.mjs"
       - "src/golang/shutdown.go"
       - "src/golang/shutdown_test.go"
+      - "src/golang/shutdown_adversarial_test.go"
       - ".github/workflows/graceful-shutdown-conformance.yml"
 
 permissions:
@@ -67,7 +73,7 @@ jobs:
         run: |
           npm ci --prefix src/ts --no-audit --no-fund
           npm --prefix src/ts run build
-          node --test src/ts/test/shutdown.test.mjs
+          node --test src/ts/test/shutdown.test.mjs src/ts/test/shutdown.adversarial.test.mjs
 
       - name: Install Go 1.25.0
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
@@ -86,6 +92,9 @@ jobs:
 
       - name: Test framework-neutral Rust shutdown core
         run: cargo test --manifest-path src/rust/Cargo.toml --no-default-features shutdown
+
+      - name: Test adversarial Rust shutdown invariants
+        run: cargo test --manifest-path src/rust/Cargo.toml --no-default-features --test shutdown_adversarial
 
       - name: Test Axum shutdown admission
         run: cargo test --manifest-path src/rust/Cargo.toml --all-features shutdown
