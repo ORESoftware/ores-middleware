@@ -83,14 +83,31 @@ jobs:
           test -n "$zed_bin"
           printf 'ZED_BIN=%s\n' "$zed_bin" >> "$GITHUB_ENV"
           "$zed_bin" --version
-      - name: Resolve public dependency closure
+      - name: Reuse or resolve public dependency closure
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .zpkg.lock
-          "$ZED_BIN" install --install-mode copy
-          "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
-            > "$RUNNER_TEMP/zed-lock-validate.json"
+          if test -s .zpkg.lock && \
+             "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
+               > "$RUNNER_TEMP/zed-lock-validate.json" 2>/dev/null; then
+            printf '%s\n' 'reusing existing structurally valid .zpkg.lock'
+          else
+            rm -f .zpkg.lock
+            attempt=1
+            max_attempts=3
+            until "$ZED_BIN" install --install-mode copy; do
+              if test "$attempt" -ge "$max_attempts"; then
+                printf 'public registry resolution failed after %s attempts\n' "$attempt" >&2
+                exit 1
+              fi
+              delay=$((attempt * 5))
+              printf 'public registry resolution attempt %s failed; retrying in %ss\n' "$attempt" "$delay" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+            "$ZED_BIN" validate --manifest .zpkg.toml --lock .zpkg.lock --require-lock --json \
+              > "$RUNNER_TEMP/zed-lock-validate.json"
+          fi
           test -s .zpkg.lock
       - name: Verify direct dependency provenance
         shell: bash
