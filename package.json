@@ -18,6 +18,14 @@
       "types": "./src/ts/dist/adapters.d.ts",
       "import": "./src/ts/dist/adapters.js"
     },
+    "./bun": {
+      "types": "./src/ts/dist/bun.d.ts",
+      "import": "./src/ts/dist/bun.js"
+    },
+    "./deno": {
+      "types": "./src/ts/dist/deno.d.ts",
+      "import": "./src/ts/dist/deno.js"
+    },
     "./fallthrough": {
       "types": "./src/ts/dist/fallthrough.d.ts",
       "import": "./src/ts/dist/fallthrough.js"
@@ -115,7 +123,7 @@
     "persistence:catalog": "python3 scripts/orm_matrix_gate.py",
     "persistence:data-plane": "python3 scripts/orm_data_plane_gate.py",
     "persistence:check": "npm run persistence:catalog && npm run persistence:data-plane",
-    "descriptors:check": "node scripts/check-descriptors.mjs --require-all",
+    "descriptors:check": "npm run contracts:compare && node scripts/check-descriptors.mjs --require-all",
     "zpkg:check": "python3 scripts/check_zpkg.py",
     "zpkg:check:rust": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin zpkg_contract_check -- --root .",
     "audit": "python3 scripts/audit.py --receipt target/audit/receipt.json",
