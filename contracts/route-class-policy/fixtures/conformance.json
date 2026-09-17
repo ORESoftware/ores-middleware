@@ -1,0 +1,812 @@
+{
+  "schema": "ores.middleware.route-class-policy-conformance/v1",
+  "cases": [
+    {
+      "id": "default-fallback",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "expect": {
+        "valid": true,
+        "route_class_id": null,
+        "resolved": {
+          "route_class_id": "public-read",
+          "lineage": [
+            "public-read"
+          ],
+          "policies": {
+            "rate_limit_policy_id": "public:read",
+            "timeout_policy_id": "timeout:default"
+          }
+        }
+      }
+    },
+    {
+      "id": "child-inherits-and-overrides",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "route_class_id": "auth-login",
+      "expect": {
+        "valid": true,
+        "resolved": {
+          "route_class_id": "auth-login",
+          "lineage": [
+            "public-read",
+            "auth-login"
+          ],
+          "policies": {
+            "auth_policy_id": "auth:login",
+            "rate_limit_policy_id": "auth:login-strict",
+            "timeout_policy_id": "timeout:default"
+          }
+        }
+      }
+    },
+    {
+      "id": "critical-preserve-intent",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          },
+          {
+            "id": "ledger-write",
+            "extends": "public-read",
+            "overrides": {
+              "authorization_policy_id": "authz:ledger-write",
+              "idempotency_policy_id": "idempotency:strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "route_class_id": "ledger-write",
+      "expect": {
+        "valid": true,
+        "resolved": {
+          "route_class_id": "ledger-write",
+          "lineage": [
+            "public-read",
+            "ledger-write"
+          ],
+          "policies": {
+            "authorization_policy_id": "authz:ledger-write",
+            "idempotency_policy_id": "idempotency:strict",
+            "rate_limit_policy_id": "public:read",
+            "timeout_policy_id": "timeout:default"
+          }
+        }
+      }
+    },
+    {
+      "id": "explicit-weakening-with-audit",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          },
+          {
+            "id": "public-webhook",
+            "extends": "public-read",
+            "overrides": {
+              "validation_policy_id": "validation:webhook-relaxed"
+            },
+            "security_override_intent": "weaken",
+            "security_exception": {
+              "exception_id": "SEC-17",
+              "ticket_id": "DEN-162",
+              "reason": "Reviewed compatibility exception for a legacy signed webhook."
+            }
+          }
+        ]
+      },
+      "route_class_id": "public-webhook",
+      "expect": {
+        "valid": true,
+        "resolved": {
+          "route_class_id": "public-webhook",
+          "lineage": [
+            "public-read",
+            "public-webhook"
+          ],
+          "policies": {
+            "validation_policy_id": "validation:webhook-relaxed",
+            "rate_limit_policy_id": "public:read",
+            "timeout_policy_id": "timeout:default"
+          }
+        }
+      }
+    },
+    {
+      "id": "critical-override-missing-intent",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            }
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "security-override-intent-required"
+        ]
+      }
+    },
+    {
+      "id": "weakening-missing-exception",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "weaken"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "security-weakening-exception-required"
+        ]
+      }
+    },
+    {
+      "id": "exception-without-weaken-intent",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen",
+            "security_exception": {
+              "exception_id": "SEC-18",
+              "ticket_id": "DEN-162",
+              "reason": "Should not be accepted without weaken intent."
+            }
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "unexpected-security-exception"
+        ]
+      }
+    },
+    {
+      "id": "missing-parent",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "missing-parent",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "parent-route-class-missing"
+        ]
+      }
+    },
+    {
+      "id": "inheritance-cycle",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            },
+            "extends": "auth-login"
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "route-class-inheritance-cycle"
+        ]
+      }
+    },
+    {
+      "id": "inheritance-depth-bounded",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "depth-0",
+        "classes": [
+          {
+            "id": "depth-0",
+            "overrides": {}
+          },
+          {
+            "id": "depth-1",
+            "extends": "depth-0",
+            "overrides": {}
+          },
+          {
+            "id": "depth-2",
+            "extends": "depth-1",
+            "overrides": {}
+          },
+          {
+            "id": "depth-3",
+            "extends": "depth-2",
+            "overrides": {}
+          },
+          {
+            "id": "depth-4",
+            "extends": "depth-3",
+            "overrides": {}
+          },
+          {
+            "id": "depth-5",
+            "extends": "depth-4",
+            "overrides": {}
+          },
+          {
+            "id": "depth-6",
+            "extends": "depth-5",
+            "overrides": {}
+          },
+          {
+            "id": "depth-7",
+            "extends": "depth-6",
+            "overrides": {}
+          },
+          {
+            "id": "depth-8",
+            "extends": "depth-7",
+            "overrides": {}
+          }
+        ]
+      },
+      "route_class_id": "depth-8",
+      "expect": {
+        "valid": false,
+        "codes": [
+          "route-class-inheritance-too-deep"
+        ]
+      }
+    },
+    {
+      "id": "duplicate-route-class",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          },
+          {
+            "id": "public-read",
+            "overrides": {}
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "duplicate-route-class-id"
+        ]
+      }
+    },
+    {
+      "id": "missing-default-class",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "missing-default",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "default-route-class-missing"
+        ]
+      }
+    },
+    {
+      "id": "invalid-policy-reference",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "Invalid:Policy",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "invalid-policy-id"
+        ]
+      }
+    },
+    {
+      "id": "unknown-requested-class",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "public-read",
+        "classes": [
+          {
+            "id": "public-read",
+            "overrides": {
+              "rate_limit_policy_id": "public:read",
+              "timeout_policy_id": "timeout:default"
+            }
+          },
+          {
+            "id": "auth-login",
+            "extends": "public-read",
+            "overrides": {
+              "auth_policy_id": "auth:login",
+              "rate_limit_policy_id": "auth:login-strict"
+            },
+            "security_override_intent": "preserve-or-strengthen"
+          }
+        ]
+      },
+      "route_class_id": "does-not-exist",
+      "expect": {
+        "valid": true,
+        "resolution_error": "unknown-route-class"
+      }
+    },
+    {
+      "id": "route-class-count-bounded",
+      "table": {
+        "schema": "ores.middleware.route-class-policies/v1",
+        "default_class_id": "class-0",
+        "classes": [
+          {
+            "id": "class-0",
+            "overrides": {}
+          },
+          {
+            "id": "class-1",
+            "overrides": {}
+          },
+          {
+            "id": "class-2",
+            "overrides": {}
+          },
+          {
+            "id": "class-3",
+            "overrides": {}
+          },
+          {
+            "id": "class-4",
+            "overrides": {}
+          },
+          {
+            "id": "class-5",
+            "overrides": {}
+          },
+          {
+            "id": "class-6",
+            "overrides": {}
+          },
+          {
+            "id": "class-7",
+            "overrides": {}
+          },
+          {
+            "id": "class-8",
+            "overrides": {}
+          },
+          {
+            "id": "class-9",
+            "overrides": {}
+          },
+          {
+            "id": "class-10",
+            "overrides": {}
+          },
+          {
+            "id": "class-11",
+            "overrides": {}
+          },
+          {
+            "id": "class-12",
+            "overrides": {}
+          },
+          {
+            "id": "class-13",
+            "overrides": {}
+          },
+          {
+            "id": "class-14",
+            "overrides": {}
+          },
+          {
+            "id": "class-15",
+            "overrides": {}
+          },
+          {
+            "id": "class-16",
+            "overrides": {}
+          },
+          {
+            "id": "class-17",
+            "overrides": {}
+          },
+          {
+            "id": "class-18",
+            "overrides": {}
+          },
+          {
+            "id": "class-19",
+            "overrides": {}
+          },
+          {
+            "id": "class-20",
+            "overrides": {}
+          },
+          {
+            "id": "class-21",
+            "overrides": {}
+          },
+          {
+            "id": "class-22",
+            "overrides": {}
+          },
+          {
+            "id": "class-23",
+            "overrides": {}
+          },
+          {
+            "id": "class-24",
+            "overrides": {}
+          },
+          {
+            "id": "class-25",
+            "overrides": {}
+          },
+          {
+            "id": "class-26",
+            "overrides": {}
+          },
+          {
+            "id": "class-27",
+            "overrides": {}
+          },
+          {
+            "id": "class-28",
+            "overrides": {}
+          },
+          {
+            "id": "class-29",
+            "overrides": {}
+          },
+          {
+            "id": "class-30",
+            "overrides": {}
+          },
+          {
+            "id": "class-31",
+            "overrides": {}
+          },
+          {
+            "id": "class-32",
+            "overrides": {}
+          },
+          {
+            "id": "class-33",
+            "overrides": {}
+          },
+          {
+            "id": "class-34",
+            "overrides": {}
+          },
+          {
+            "id": "class-35",
+            "overrides": {}
+          },
+          {
+            "id": "class-36",
+            "overrides": {}
+          },
+          {
+            "id": "class-37",
+            "overrides": {}
+          },
+          {
+            "id": "class-38",
+            "overrides": {}
+          },
+          {
+            "id": "class-39",
+            "overrides": {}
+          },
+          {
+            "id": "class-40",
+            "overrides": {}
+          },
+          {
+            "id": "class-41",
+            "overrides": {}
+          },
+          {
+            "id": "class-42",
+            "overrides": {}
+          },
+          {
+            "id": "class-43",
+            "overrides": {}
+          },
+          {
+            "id": "class-44",
+            "overrides": {}
+          },
+          {
+            "id": "class-45",
+            "overrides": {}
+          },
+          {
+            "id": "class-46",
+            "overrides": {}
+          },
+          {
+            "id": "class-47",
+            "overrides": {}
+          },
+          {
+            "id": "class-48",
+            "overrides": {}
+          },
+          {
+            "id": "class-49",
+            "overrides": {}
+          },
+          {
+            "id": "class-50",
+            "overrides": {}
+          },
+          {
+            "id": "class-51",
+            "overrides": {}
+          },
+          {
+            "id": "class-52",
+            "overrides": {}
+          },
+          {
+            "id": "class-53",
+            "overrides": {}
+          },
+          {
+            "id": "class-54",
+            "overrides": {}
+          },
+          {
+            "id": "class-55",
+            "overrides": {}
+          },
+          {
+            "id": "class-56",
+            "overrides": {}
+          },
+          {
+            "id": "class-57",
+            "overrides": {}
+          },
+          {
+            "id": "class-58",
+            "overrides": {}
+          },
+          {
+            "id": "class-59",
+            "overrides": {}
+          },
+          {
+            "id": "class-60",
+            "overrides": {}
+          },
+          {
+            "id": "class-61",
+            "overrides": {}
+          },
+          {
+            "id": "class-62",
+            "overrides": {}
+          },
+          {
+            "id": "class-63",
+            "overrides": {}
+          },
+          {
+            "id": "class-64",
+            "overrides": {}
+          }
+        ]
+      },
+      "expect": {
+        "valid": false,
+        "codes": [
+          "too-many-route-class-policies"
+        ]
+      }
+    }
+  ]
+}
