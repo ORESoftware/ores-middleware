@@ -38,7 +38,8 @@
             "timeout_policy_id": "timeout:default"
           }
         }
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "child-inherits-and-overrides",
@@ -79,7 +80,8 @@
             "timeout_policy_id": "timeout:default"
           }
         }
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "critical-preserve-intent",
@@ -130,7 +132,8 @@
             "timeout_policy_id": "timeout:default"
           }
         }
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "explicit-weakening-with-audit",
@@ -184,7 +187,8 @@
             "timeout_policy_id": "timeout:default"
           }
         }
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "critical-override-missing-intent",
@@ -214,7 +218,8 @@
         "codes": [
           "security-override-intent-required"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "weakening-missing-exception",
@@ -245,7 +250,8 @@
         "codes": [
           "security-weakening-exception-required"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "exception-without-weaken-intent",
@@ -281,7 +287,8 @@
         "codes": [
           "unexpected-security-exception"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "missing-parent",
@@ -312,7 +319,8 @@
         "codes": [
           "parent-route-class-missing"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "inheritance-cycle",
@@ -344,7 +352,8 @@
         "codes": [
           "route-class-inheritance-cycle"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "inheritance-depth-bounded",
@@ -404,7 +413,8 @@
         "codes": [
           "route-class-inheritance-too-deep"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "duplicate-route-class",
@@ -439,7 +449,8 @@
         "codes": [
           "duplicate-route-class-id"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "missing-default-class",
@@ -470,7 +481,8 @@
         "codes": [
           "default-route-class-missing"
         ]
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "invalid-policy-reference",
@@ -501,7 +513,8 @@
         "codes": [
           "invalid-policy-id"
         ]
-      }
+      },
+      "schema_valid": false
     },
     {
       "id": "unknown-requested-class",
@@ -531,7 +544,8 @@
       "expect": {
         "valid": true,
         "resolution_error": "unknown-route-class"
-      }
+      },
+      "schema_valid": true
     },
     {
       "id": "route-class-count-bounded",
@@ -806,7 +820,8 @@
         "codes": [
           "too-many-route-class-policies"
         ]
-      }
+      },
+      "schema_valid": false
     }
   ]
 }
