@@ -7,7 +7,14 @@ on:
       - "scripts/validate-rate-limit-v2.mjs"
       - "src/rust/src/middleware_order.rs"
       - "src/rust/src/rate_limit_v2.rs"
+      - "src/rust/src/rate_limit_routes.rs"
+      - "src/rust/src/placement.rs"
       - "src/rust/src/lib.rs"
+      - "src/ts/src/rate-limit-routes.ts"
+      - "src/ts/test/rate-limit-routes.test.mjs"
+      - "src/ts/package.json"
+      - "src/ts/package-lock.json"
+      - "docs/edge-placement-and-route-rate-limits.md"
       - "formal/rate-limit-pipeline/**"
       - "package.json"
       - ".github/workflows/rate-limit-v2-hardening.yml"
@@ -18,7 +25,14 @@ on:
       - "scripts/validate-rate-limit-v2.mjs"
       - "src/rust/src/middleware_order.rs"
       - "src/rust/src/rate_limit_v2.rs"
+      - "src/rust/src/rate_limit_routes.rs"
+      - "src/rust/src/placement.rs"
       - "src/rust/src/lib.rs"
+      - "src/ts/src/rate-limit-routes.ts"
+      - "src/ts/test/rate-limit-routes.test.mjs"
+      - "src/ts/package.json"
+      - "src/ts/package-lock.json"
+      - "docs/edge-placement-and-route-rate-limits.md"
       - "formal/rate-limit-pipeline/**"
       - "package.json"
       - ".github/workflows/rate-limit-v2-hardening.yml"
@@ -31,17 +45,25 @@ concurrency:
   group: rate-limit-v2-hardening-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ORES_WORKFLOW_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
-  contracts-rust-and-formal:
+  contracts-rust-typescript-and-formal:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.ORES_WORKFLOW_SOURCE_SHA }}
           persist-credentials: false
           show-progress: false
           fetch-depth: 1
+
+      - name: Verify exact candidate revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$ORES_WORKFLOW_SOURCE_SHA"
 
       - name: Install Node 22.23.1
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -58,6 +80,15 @@ jobs:
       - name: Validate JSON Schema, fixtures, and peer parity
         run: node scripts/validate-rate-limit-v2.mjs
 
+      - name: Build and test TypeScript route policy resolver
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix src/ts --no-audit --no-fund
+          npm --prefix src/ts run build
+          node --test src/ts/test/rate-limit-routes.test.mjs
+          git diff --exit-code -- src/ts/package.json src/ts/package-lock.json
+
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
@@ -65,7 +96,12 @@ jobs:
           components: rustfmt, clippy
 
       - name: Format Rate Limit V2 Rust modules
-        run: rustfmt --edition 2024 --check src/rust/src/middleware_order.rs src/rust/src/rate_limit_v2.rs
+        run: |
+          rustfmt --edition 2024 --check \
+            src/rust/src/middleware_order.rs \
+            src/rust/src/rate_limit_v2.rs \
+            src/rust/src/rate_limit_routes.rs \
+            src/rust/src/placement.rs
 
       - name: Lint Rust middleware
         run: cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
@@ -93,6 +129,12 @@ jobs:
           java -XX:+UseParallelGC -cp /tmp/tla2tools.jar tlc2.TLC \
             -config formal/rate-limit-pipeline/RateLimitPipeline.cfg \
             formal/rate-limit-pipeline/RateLimitPipeline.tla
+
+      - name: Ensure validation did not rewrite tracked source
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --exit-code
 
       - name: Retain sanitized contract receipt
         if: ${{ always() }}
