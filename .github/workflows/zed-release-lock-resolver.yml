@@ -1,4 +1,5 @@
 name: zed-release-lock-resolver
+# This workflow intentionally runs only on same-repository release branches.
 
 on:
   push:
