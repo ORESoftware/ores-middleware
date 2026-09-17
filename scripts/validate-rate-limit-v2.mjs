@@ -200,9 +200,14 @@ function parseTypeSpecEnum(source, name) {
 }
 
 function parseTypeSpecModelProperties(source, name) {
-  const match = source.match(new RegExp(`model\\s+${name}\\s*\\{([\\s\\S]*?)\\}`));
-  assert(match, `TypeSpec model ${name} is missing`);
-  return [...match[1].matchAll(/^\s*([A-Za-z][A-Za-z0-9]*)\??\s*:/gm)]
+  const marker = `model ${name} {`;
+  const start = source.indexOf(marker);
+  assert(start >= 0, `TypeSpec model ${name} is missing`);
+  const remainder = source.slice(start + marker.length);
+  const end = remainder.search(/^}/m);
+  assert(end >= 0, `TypeSpec model ${name} is unterminated`);
+  const body = remainder.slice(0, end);
+  return [...body.matchAll(/^\s*([A-Za-z][A-Za-z0-9]*)\??\s*:/gm)]
     .map((entry) => entry[1])
     .sort();
 }
