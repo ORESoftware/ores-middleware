@@ -23,6 +23,7 @@ const expectedRuntimeByLanguage = Object.freeze({
   elixir: "beam-otp",
   erlang: "erlang-otp",
 });
+const expectedCapabilities = [...schema.$defs.capability.enum].sort();
 
 const seen = new Set();
 for (const file of files) {
@@ -35,6 +36,11 @@ for (const file of files) {
     descriptor.runtime,
     expectedRuntime,
     `${file}: runtime drift for ${descriptor.language}; expected ${expectedRuntime}`,
+  );
+  assert.deepEqual(
+    [...descriptor.capabilities].sort(),
+    expectedCapabilities,
+    `${file}: ${descriptor.language} must implement the complete portable capability set`,
   );
   if (descriptor.language === "ts") {
     assert(
