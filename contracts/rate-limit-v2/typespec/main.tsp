@@ -61,29 +61,29 @@ enum OperationClass {
 @TypeSpec.JsonSchema.extension("allOf", #[
   #{
     `if`: #{
-      properties: #{
-        algorithm: #{
-          const: "token-bucket"
+      `properties`: #{
+        `algorithm`: #{
+          `const`: "token-bucket"
         }
       },
-      required: #[
+      `required`: #[
         "algorithm"
       ]
     },
     `then`: #{
-      properties: #{
-        refillTokens: #{},
-        refillIntervalMs: #{}
+      `properties`: #{
+        `refillTokens`: #{},
+        `refillIntervalMs`: #{}
       },
-      required: #[
+      `required`: #[
         "refillTokens",
         "refillIntervalMs"
       ],
       `not`: #{
-        properties: #{
-          windowMs: #{}
+        `properties`: #{
+          `windowMs`: #{}
         },
-        required: #[
+        `required`: #[
           "windowMs"
         ]
       }
@@ -91,41 +91,41 @@ enum OperationClass {
   },
   #{
     `if`: #{
-      properties: #{
-        algorithm: #{
-          enum: #[
+      `properties`: #{
+        `algorithm`: #{
+          `enum`: #[
             "sliding-window-counter",
             "fixed-window",
             "gcra"
           ]
         }
       },
-      required: #[
+      `required`: #[
         "algorithm"
       ]
     },
     `then`: #{
-      properties: #{
-        windowMs: #{}
+      `properties`: #{
+        `windowMs`: #{}
       },
-      required: #[
+      `required`: #[
         "windowMs"
       ],
       `not`: #{
-        anyOf: #[
+        `anyOf`: #[
           #{
-            properties: #{
-              refillTokens: #{}
+            `properties`: #{
+              `refillTokens`: #{}
             },
-            required: #[
+            `required`: #[
               "refillTokens"
             ]
           },
           #{
-            properties: #{
-              refillIntervalMs: #{}
+            `properties`: #{
+              `refillIntervalMs`: #{}
             },
-            required: #[
+            `required`: #[
               "refillIntervalMs"
             ]
           }
@@ -135,39 +135,39 @@ enum OperationClass {
   },
   #{
     `if`: #{
-      properties: #{
-        algorithm: #{
-          const: "concurrency"
+      `properties`: #{
+        `algorithm`: #{
+          `const`: "concurrency"
         }
       },
-      required: #[
+      `required`: #[
         "algorithm"
       ]
     },
     `then`: #{
       `not`: #{
-        anyOf: #[
+        `anyOf`: #[
           #{
-            properties: #{
-              windowMs: #{}
+            `properties`: #{
+              `windowMs`: #{}
             },
-            required: #[
+            `required`: #[
               "windowMs"
             ]
           },
           #{
-            properties: #{
-              refillTokens: #{}
+            `properties`: #{
+              `refillTokens`: #{}
             },
-            required: #[
+            `required`: #[
               "refillTokens"
             ]
           },
           #{
-            properties: #{
-              refillIntervalMs: #{}
+            `properties`: #{
+              `refillIntervalMs`: #{}
             },
-            required: #[
+            `required`: #[
               "refillIntervalMs"
             ]
           }
@@ -177,83 +177,83 @@ enum OperationClass {
   },
   #{
     `if`: #{
-      properties: #{
-        consistency: #{
-          const: "strict"
+      `properties`: #{
+        `consistency`: #{
+          `const`: "strict"
         }
       },
-      required: #[
+      `required`: #[
         "consistency"
       ]
     },
     `then`: #{
-      properties: #{
-        failureMode: #{
-          const: "fail-closed"
+      `properties`: #{
+        `failureMode`: #{
+          `const`: "fail-closed"
         },
-        coordinatorRequired: #{
-          const: true
+        `coordinatorRequired`: #{
+          `const`: true
         },
-        maximumOvershoot: #{
-          const: 0
+        `maximumOvershoot`: #{
+          `const`: 0
         }
       }
     }
   },
   #{
     `if`: #{
-      properties: #{
-        consistency: #{
-          const: "bounded"
+      `properties`: #{
+        `consistency`: #{
+          `const`: "bounded"
         }
       },
-      required: #[
+      `required`: #[
         "consistency"
       ]
     },
     `then`: #{
-      properties: #{
-        maximumOvershoot: #{
-          type: "integer",
-          minimum: 1
+      `properties`: #{
+        `maximumOvershoot`: #{
+          `type`: "integer",
+          `minimum`: 1
         },
-        localDenyCacheEntries: #{
-          type: "integer",
-          minimum: 1
+        `localDenyCacheEntries`: #{
+          `type`: "integer",
+          `minimum`: 1
         }
       }
     }
   },
   #{
     `if`: #{
-      properties: #{
-        consistency: #{
-          const: "advisory"
+      `properties`: #{
+        `consistency`: #{
+          `const`: "advisory"
         }
       },
-      required: #[
+      `required`: #[
         "consistency"
       ]
     },
     `then`: #{
-      properties: #{
-        failureMode: #{
-          enum: #[
+      `properties`: #{
+        `failureMode`: #{
+          `enum`: #[
             "fail-open",
             "local-only"
           ]
         },
-        coordinatorRequired: #{
-          const: false
+        `coordinatorRequired`: #{
+          `const`: false
         }
       }
     }
   },
   #{
     `if`: #{
-      properties: #{
-        operationClass: #{
-          enum: #[
+      `properties`: #{
+        `operationClass`: #{
+          `enum`: #[
             "auth-attempt",
             "auth-recovery",
             "mutation",
@@ -262,82 +262,82 @@ enum OperationClass {
           ]
         }
       },
-      required: #[
+      `required`: #[
         "operationClass"
       ]
     },
     `then`: #{
-      properties: #{
-        consistency: #{
-          const: "strict"
+      `properties`: #{
+        `consistency`: #{
+          `const`: "strict"
         },
-        failureMode: #{
-          const: "fail-closed"
+        `failureMode`: #{
+          `const`: "fail-closed"
         },
-        coordinatorRequired: #{
-          const: true
+        `coordinatorRequired`: #{
+          `const`: true
         },
-        maximumOvershoot: #{
-          const: 0
+        `maximumOvershoot`: #{
+          `const`: 0
         }
       }
     }
   },
   #{
     `if`: #{
-      properties: #{
-        layer: #{
-          const: "authorization"
+      `properties`: #{
+        `layer`: #{
+          `const`: "authorization"
         }
       },
-      required: #[
+      `required`: #[
         "layer"
       ]
     },
     `then`: #{
-      properties: #{
-        consistency: #{
-          const: "strict"
+      `properties`: #{
+        `consistency`: #{
+          `const`: "strict"
         },
-        failureMode: #{
-          const: "fail-closed"
+        `failureMode`: #{
+          `const`: "fail-closed"
         },
-        coordinatorRequired: #{
-          const: true
+        `coordinatorRequired`: #{
+          `const`: true
         },
-        maximumOvershoot: #{
-          const: 0
+        `maximumOvershoot`: #{
+          `const`: 0
         }
       }
     }
   },
   #{
     `if`: #{
-      allOf: #[
+      `allOf`: #[
         #{
-          properties: #{
-            layer: #{
-              const: "cloudflare-edge"
+          `properties`: #{
+            `layer`: #{
+              `const`: "cloudflare-edge"
             }
           },
-          required: #[
+          `required`: #[
             "layer"
           ]
         },
         #{
-          properties: #{
-            enforcementMode: #{
-              const: "enforce"
+          `properties`: #{
+            `enforcementMode`: #{
+              `const`: "enforce"
             }
           },
-          required: #[
+          `required`: #[
             "enforcementMode"
           ]
         },
         #{
-          properties: #{
-            operationClass: #{
-              enum: #[
+          `properties`: #{
+            `operationClass`: #{
+              `enum`: #[
                 "auth-recovery",
                 "mutation",
                 "payment-or-ledger-write",
@@ -345,7 +345,7 @@ enum OperationClass {
               ]
             }
           },
-          required: #[
+          `required`: #[
             "operationClass"
           ]
         }
