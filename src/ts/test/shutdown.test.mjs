@@ -4,12 +4,14 @@ import test from "node:test";
 import {
   DEFAULT_DRAIN_TIMEOUT_MS,
   DEFAULT_RETRY_AFTER_MS,
+  SHUTDOWN_HTTP_STATUS,
   ShutdownCoordinator
 } from "../dist/shutdown.js";
 
 test("defaults match the canonical five-second drain policy", () => {
   assert.equal(DEFAULT_DRAIN_TIMEOUT_MS, 5_000);
   assert.equal(DEFAULT_RETRY_AFTER_MS, 5_000);
+  assert.equal(SHUTDOWN_HTTP_STATUS, 429);
 });
 
 test("request leases account exactly once", () => {
@@ -27,7 +29,7 @@ test("request leases account exactly once", () => {
   assert.equal(coordinator.activeRequests, 0);
 });
 
-test("draining rejects new work with bounded retry metadata", () => {
+test("draining rejects new work with bounded end-to-end retry metadata", () => {
   const coordinator = new ShutdownCoordinator(5_000, 1_501);
   const existing = coordinator.tryBeginRequest();
   assert.equal(existing.ok, true);
@@ -37,11 +39,10 @@ test("draining rejects new work with bounded retry metadata", () => {
   const rejected = coordinator.tryBeginRequest();
   assert.equal(rejected.ok, false);
   assert.deepEqual(rejected.rejection, {
-    status: 503,
+    status: 429,
     code: "service_draining",
     message: "service is draining and is not accepting new requests",
     headers: {
-      connection: "close",
       "retry-after": "2"
     }
   });
