@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/route-class-policies/v1/authored.schema.json",
+  "title": "ORES route class policy inheritance",
+  "$ref": "#/$defs/RouteClassPolicyTable",
+  "$defs": {
+    "RouteClassId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$"
+    },
+    "PolicyId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_.:][a-z0-9]+)*$"
+    },
+    "AuditId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$"
+    },
+    "AuditReason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "SecurityOverrideIntent": {
+      "type": "string",
+      "enum": [
+        "preserve-or-strengthen",
+        "weaken"
+      ]
+    },
+    "RouteClassPolicyRefs": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "properties": {
+        "auth_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "authorization_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "rate_limit_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "cache_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "timeout_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "cors_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "csrf_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "validation_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "resilience_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        },
+        "idempotency_policy_id": {
+          "$ref": "#/$defs/PolicyId"
+        }
+      }
+    },
+    "SecurityWeakeningException": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": [
+        "exception_id",
+        "ticket_id",
+        "reason"
+      ],
+      "properties": {
+        "exception_id": {
+          "$ref": "#/$defs/AuditId"
+        },
+        "ticket_id": {
+          "$ref": "#/$defs/AuditId"
+        },
+        "reason": {
+          "$ref": "#/$defs/AuditReason"
+        }
+      }
+    },
+    "RouteClassPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": [
+        "id",
+        "overrides"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RouteClassId"
+        },
+        "extends": {
+          "$ref": "#/$defs/RouteClassId"
+        },
+        "overrides": {
+          "$ref": "#/$defs/RouteClassPolicyRefs"
+        },
+        "security_override_intent": {
+          "$ref": "#/$defs/SecurityOverrideIntent"
+        },
+        "security_exception": {
+          "$ref": "#/$defs/SecurityWeakeningException"
+        }
+      }
+    },
+    "RouteClassPolicyTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": [
+        "schema",
+        "default_class_id",
+        "classes"
+      ],
+      "properties": {
+        "schema": {
+          "type": "string",
+          "const": "ores.middleware.route-class-policies/v1"
+        },
+        "default_class_id": {
+          "$ref": "#/$defs/RouteClassId"
+        },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/RouteClassPolicy"
+          }
+        }
+      }
+    }
+  }
+}
