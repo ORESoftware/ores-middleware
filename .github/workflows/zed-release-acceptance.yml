@@ -16,7 +16,7 @@ on:
       - 'tools/zed-archive-audit/**'
       - '.github/workflows/zed-release-acceptance.yml'
   push:
-    branches: [main, dev]
+    branches: [main, dev, 'release/zed-*']
     paths:
       - '.zpkg.toml'
       - '.zpkg.lock'
@@ -42,9 +42,11 @@ concurrency:
 jobs:
   resolve-release-lock:
     if: >-
-      github.event_name == 'pull_request' &&
-      startsWith(github.head_ref, 'release/zed-') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event_name == 'pull_request' &&
+       startsWith(github.head_ref, 'release/zed-') &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' &&
+       startsWith(github.ref, 'refs/heads/release/zed-'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: zed-pkg
@@ -54,7 +56,7 @@ jobs:
       - name: Check out the same-repository release branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -154,7 +156,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Lock Zed dependency closure for middleware release'
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          git push origin "HEAD:${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}"
 
       - name: Upload sanitized resolver evidence
         if: ${{ always() }}
