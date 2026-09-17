@@ -113,8 +113,11 @@ func TestShutdownRetryAfterRoundsUpAndStaysEndToEndOnly(t *testing.T) {
 	coordinator := NewShutdownCoordinatorWithRetryAfter(5*time.Second, 1501*time.Millisecond)
 	coordinator.StartDraining()
 	rejection := coordinator.Rejection()
-	if rejection.Status != ShutdownHTTPStatus || rejection.Status != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", rejection.Status)
+	if rejection.Status != ShutdownHTTPStatus {
+		t.Fatalf("status = %d, want shutdown status %d", rejection.Status, ShutdownHTTPStatus)
+	}
+	if ShutdownHTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("shutdown status = %d, want HTTP 429", ShutdownHTTPStatus)
 	}
 	if got := rejection.Headers["retry-after"]; got != "2" {
 		t.Fatalf("retry-after = %q, want 2", got)
