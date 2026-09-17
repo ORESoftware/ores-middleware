@@ -24,6 +24,14 @@ defaults
   timeout http-request 10s
   timeout http-keep-alive 10s
 
+  # Generic middleware does not replay requests. Consumers may opt into retry
+  # behavior only for operation classes explicitly classified safe/idempotent.
+  retries 0
+
+  # Make the recommended backend connection-reuse policy explicit instead of
+  # inheriting an environment-specific override.
+  http-reuse safe
+
 # Use ipv6 tables: HAProxy accepts both IPv6 and IPv4 source addresses here,
 # unlike type ip, which excludes IPv6 clients.
 # Separate tables preserve separate windows/semantics for route policy classes.
@@ -42,6 +50,15 @@ frontend ores_http
   unique-id-format "%[uuid]"
   http-request set-header X-Request-ID %[unique-id]
 
+  # Require an explicit deployment-owned Host allowlist. Entries are exact
+  # lower-case Host header values; include port-qualified forms when accepted.
+  acl ores_host_allowed req.hdr(host),lower -f /etc/haproxy/ores-allowed-hosts.lst
+  http-request deny deny_status 421 unless ores_host_allowed
+
+  # TRACE and CONNECT are not part of the generic HTTP reverse-proxy surface.
+  acl ores_forbidden_method method TRACE CONNECT
+  http-request deny deny_status 405 if ores_forbidden_method
+
   # Replace public forwarding metadata at this boundary. When HAProxy itself is
   # behind another proxy, use an explicitly trusted PROXY-protocol hop or other
   # reviewed transport mechanism rather than trusting arbitrary X-Forwarded-*.
@@ -57,9 +74,19 @@ frontend ores_http
   http-request set-header X-Forwarded-Proto http
   http-request set-header X-Forwarded-Proto https if { ssl_fc }
 
-  # traceparent and baggage pass through unchanged. They are untrusted telemetry
-  # context, never identity/authorization evidence; application OTel parsing must
-  # reject malformed values.
+  # Preserve traceparent for distributed trace correlation, but do not forward
+  # arbitrary public tracestate/baggage into internal services. Consumers may
+  # re-enable a bounded, reviewed allowlist at a trusted internal boundary.
+  http-request del-header tracestate
+  http-request del-header baggage
+
+  # Keep the generic proxy non-upgrade. WebSocket/h2c/tunnel routes need a
+  # dedicated reviewed transport stack rather than broad hop-by-hop forwarding.
+  http-request del-header Keep-Alive
+  http-request del-header Proxy-Connection
+  http-request del-header Upgrade
+  http-request del-header TE
+  http-request del-header Trailer
 
   # URL paths are case-sensitive here; do not broaden an exact route policy with
   # a case-insensitive match.
@@ -78,9 +105,12 @@ frontend ores_http
   http-request deny deny_status 429 if ores_auth_login_path ores_auth_login_method ores_auth_login_rate_exceeded
 
   # http-after-response applies to origin and HAProxy-generated responses,
-  # including local 429s, unlike a server-response-only rule.
+  # including local 405/421/429 responses. Remove origin banner/policy copies,
+  # then write one canonical edge value.
+  http-after-response del-header X-Powered-By
   http-after-response set-header X-Content-Type-Options nosniff
   http-after-response set-header Referrer-Policy strict-origin-when-cross-origin
+  http-after-response set-header X-Request-ID %[unique-id]
 
   default_backend ores_origin
 
