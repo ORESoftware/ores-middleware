@@ -51,6 +51,27 @@ pub fn run(handler: Handler(request, response), request: request) -> response {
   run(request)
 }
 
+/// Contextual handler keeps consumer metadata explicit instead of storing it in
+/// process dictionaries, framework locals, or package-global state.
+pub type ContextualHandler(request, context, response) {
+  ContextualHandler(run: fn(request, context) -> response)
+}
+
+pub fn contextual_handler(
+  run: fn(request, context) -> response,
+) -> ContextualHandler(request, context, response) {
+  ContextualHandler(run:)
+}
+
+pub fn run_contextual(
+  handler: ContextualHandler(request, context, response),
+  request: request,
+  context: context,
+) -> response {
+  let ContextualHandler(run:) = handler
+  run(request, context)
+}
+
 /// Middleware transforms one generic handler into another. No stage names,
 /// framework types, or ordering constraints are built into the abstraction.
 pub type Middleware(request, response) {
@@ -71,10 +92,48 @@ pub fn wrap(
   wrap(next)
 }
 
+/// Contextual middleware preserves independently typed request/context/response
+/// values and imposes no HTTP/router semantics.
+pub type ContextualMiddleware(request, context, response) {
+  ContextualMiddleware(
+    wrap: fn(ContextualHandler(request, context, response)) -> ContextualHandler(
+      request,
+      context,
+      response,
+    ),
+  )
+}
+
+pub fn contextual_middleware(
+  wrap: fn(ContextualHandler(request, context, response)) -> ContextualHandler(
+    request,
+    context,
+    response,
+  ),
+) -> ContextualMiddleware(request, context, response) {
+  ContextualMiddleware(wrap:)
+}
+
+pub fn wrap_contextual(
+  middleware: ContextualMiddleware(request, context, response),
+  next: ContextualHandler(request, context, response),
+) -> ContextualHandler(request, context, response) {
+  let ContextualMiddleware(wrap:) = middleware
+  wrap(next)
+}
+
 /// Consumer-owned metadata for middleware stages. ORES preserves the name but
 /// assigns it no semantics and never uses it to reorder the stack.
 pub type NamedMiddleware(request, response) {
   NamedMiddleware(name: String, middleware: Middleware(request, response))
+}
+
+/// Named contextual middleware carries opaque consumer-owned stage metadata.
+pub type NamedContextualMiddleware(request, context, response) {
+  NamedContextualMiddleware(
+    name: String,
+    middleware: ContextualMiddleware(request, context, response),
+  )
 }
 
 /// Compose middleware in consumer declaration order. The first middleware is
@@ -98,5 +157,27 @@ pub fn compose_named(
     [] -> handler
     [NamedMiddleware(middleware: stage, ..), ..rest] ->
       wrap(stage, compose_named(handler, rest))
+  }
+}
+
+pub fn compose_contextual(
+  handler: ContextualHandler(request, context, response),
+  middleware: List(ContextualMiddleware(request, context, response)),
+) -> ContextualHandler(request, context, response) {
+  case middleware {
+    [] -> handler
+    [stage, ..rest] ->
+      wrap_contextual(stage, compose_contextual(handler, rest))
+  }
+}
+
+pub fn compose_named_contextual(
+  handler: ContextualHandler(request, context, response),
+  stages: List(NamedContextualMiddleware(request, context, response)),
+) -> ContextualHandler(request, context, response) {
+  case stages {
+    [] -> handler
+    [NamedContextualMiddleware(middleware: stage, ..), ..rest] ->
+      wrap_contextual(stage, compose_named_contextual(handler, rest))
   }
 }
