@@ -1,16 +1,15 @@
 use axum::{
-    Json,
+    body::Body,
     extract::{Request, State},
     http::{
-        HeaderValue, StatusCode,
-        header::{CONNECTION, RETRY_AFTER},
+        HeaderName, HeaderValue, StatusCode, Version,
+        header::CONNECTION,
     },
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use serde_json::json;
 
-use crate::{ShutdownCoordinator, ShutdownRejection};
+use crate::{ShutdownCoordinator, ShutdownRejection, hardening::sanitized_problem_response};
 
 #[derive(Clone, Debug)]
 pub struct ShutdownLayerState {
@@ -37,38 +36,44 @@ pub async fn admit_during_shutdown(
     request: Request,
     next: Next,
 ) -> Response {
+    let version = request.version();
     let _guard = match state.coordinator.begin_request() {
         Ok(guard) => guard,
-        Err(rejection) => return shutdown_response(rejection),
+        Err(rejection) => return shutdown_response(rejection, version),
     };
 
     next.run(request).await
 }
 
-fn shutdown_response(rejection: ShutdownRejection) -> Response {
-    let mut response = (
-        StatusCode::SERVICE_UNAVAILABLE,
-        Json(json!({
-            "error": {
-                "code": rejection.code,
-                "message": rejection.message,
-            }
-        })),
-    )
-        .into_response();
-
-    response
-        .headers_mut()
-        .insert(CONNECTION, HeaderValue::from_static("close"));
-    if let Some(value) = rejection.headers.get("retry-after")
-        && let Ok(value) = HeaderValue::from_str(value)
-    {
-        response.headers_mut().insert(RETRY_AFTER, value);
-    }
-    response.headers_mut().insert(
-        "x-ores-error-code",
-        HeaderValue::from_static("service_draining"),
+fn shutdown_response(rejection: ShutdownRejection, version: Version) -> Response {
+    let stage_response = sanitized_problem_response(
+        rejection.status,
+        rejection.code,
+        None,
+        &rejection.headers,
     );
+    let status = StatusCode::from_u16(stage_response.status)
+        .unwrap_or(StatusCode::SERVICE_UNAVAILABLE);
+    let mut response = (status, Body::from(stage_response.body)).into_response();
+
+    for (name, value) in stage_response.headers {
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(&value),
+        ) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+
+    // Connection-specific fields are valid only for HTTP/1.x. HTTP/2 and
+    // HTTP/3 prohibit `Connection`; the stream itself is enough to carry the
+    // temporary 503 admission result on those protocols.
+    if matches!(version, Version::HTTP_10 | Version::HTTP_11) {
+        response
+            .headers_mut()
+            .insert(CONNECTION, HeaderValue::from_static("close"));
+    }
+
     response
 }
 
@@ -76,22 +81,27 @@ fn shutdown_response(rejection: ShutdownRejection) -> Response {
 mod tests {
     use axum::{
         Router,
-        body::Body,
-        http::Request,
+        body::{Body, to_bytes},
+        http::{Request, Version, header::{CACHE_CONTROL, CONNECTION, CONTENT_TYPE, RETRY_AFTER}},
         middleware,
         routing::get,
     };
+    use serde_json::Value;
     use tower::ServiceExt;
 
     use super::*;
 
+    fn app(coordinator: &ShutdownCoordinator) -> Router {
+        let state = ShutdownLayerState::new(coordinator.clone());
+        Router::new()
+            .route("/", get(|| async { "ok" }))
+            .route_layer(middleware::from_fn_with_state(state, admit_during_shutdown))
+    }
+
     #[tokio::test]
     async fn axum_layer_tracks_existing_requests_and_rejects_after_drain() {
         let coordinator = ShutdownCoordinator::default();
-        let state = ShutdownLayerState::new(coordinator.clone());
-        let app = Router::new()
-            .route("/", get(|| async { "ok" }))
-            .route_layer(middleware::from_fn_with_state(state, admit_during_shutdown));
+        let app = app(&coordinator);
 
         let running = app
             .clone()
@@ -111,20 +121,60 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/")
+                    .version(Version::HTTP_11)
                     .body(Body::empty())
                     .expect("valid request"),
             )
             .await
             .expect("draining response");
         assert_eq!(draining.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(draining.headers().get(CONNECTION).and_then(|v| v.to_str().ok()), Some("close"));
-        assert_eq!(draining.headers().get(RETRY_AFTER).and_then(|v| v.to_str().ok()), Some("5"));
         assert_eq!(
-            draining
-                .headers()
-                .get("x-ores-error-code")
-                .and_then(|v| v.to_str().ok()),
-            Some("service_draining")
+            draining.headers().get(CONNECTION).and_then(|value| value.to_str().ok()),
+            Some("close")
+        );
+        assert_eq!(
+            draining.headers().get(RETRY_AFTER).and_then(|value| value.to_str().ok()),
+            Some("5")
+        );
+        assert_eq!(
+            draining.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+            Some("application/problem+json")
+        );
+        assert_eq!(
+            draining.headers().get(CACHE_CONTROL).and_then(|value| value.to_str().ok()),
+            Some("no-store")
+        );
+
+        let body = to_bytes(draining.into_body(), 4096)
+            .await
+            .expect("bounded problem body");
+        let problem: Value = serde_json::from_slice(&body).expect("valid problem json");
+        assert_eq!(problem["status"], 503);
+        assert_eq!(problem["code"], "service_draining");
+        assert_eq!(problem["title"], "Request rejected");
+    }
+
+    #[tokio::test]
+    async fn http2_shutdown_rejection_omits_connection_specific_header() {
+        let coordinator = ShutdownCoordinator::default();
+        coordinator.start_draining();
+
+        let response = app(&coordinator)
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .version(Version::HTTP_2)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("draining response");
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.headers().get(CONNECTION).is_none());
+        assert_eq!(
+            response.headers().get(RETRY_AFTER).and_then(|value| value.to_str().ok()),
+            Some("5")
         );
     }
 }
