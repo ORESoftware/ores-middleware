@@ -18,15 +18,17 @@ defmodule OresMiddleware.GenericTest do
   end
 
   test "contextual provider is generic over request and context" do
-    provider = Generic.contextual_provider_from(fn request, context ->
-      {context.tenant, request.token}
-    end)
+    provider =
+      Generic.contextual_provider_from(fn request, context ->
+        {context.tenant, request.token}
+      end)
 
     assert provider.(%{request: %{token: "abc"}, context: %{tenant: "t-1"}}) == {"t-1", "abc"}
   end
 
   test "middleware order and duplicate named stages are preserved" do
     parent = self()
+
     stage = fn name ->
       fn next ->
         fn request ->
@@ -43,11 +45,12 @@ defmodule OresMiddleware.GenericTest do
       request <> ":ok"
     end
 
-    composed = Generic.compose_named(handler, [
-      %{name: "auth", middleware: stage.("auth")},
-      %{name: "auth", middleware: stage.("auth")},
-      %{name: "audit", middleware: stage.("audit")}
-    ])
+    composed =
+      Generic.compose_named(handler, [
+        %{name: "auth", middleware: stage.("auth")},
+        %{name: "auth", middleware: stage.("auth")},
+        %{name: "audit", middleware: stage.("audit")}
+      ])
 
     assert composed.("request") == "request:ok"
     assert_receive {:before, "auth"}
@@ -69,7 +72,10 @@ defmodule OresMiddleware.GenericTest do
   end
 
   test "contextual middleware preserves caller-owned context" do
-    stage = fn next -> fn request, context -> next.(request, Map.put(context, :seen, true)) end end
+    stage = fn next ->
+      fn request, context -> next.(request, Map.put(context, :seen, true)) end
+    end
+
     handler = fn request, context -> {request, context} end
     composed = Generic.compose_contextual(handler, [stage])
     assert composed.("request", %{tenant: "t-2"}) == {"request", %{tenant: "t-2", seen: true}}
