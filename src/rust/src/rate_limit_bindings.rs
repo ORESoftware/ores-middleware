@@ -105,7 +105,10 @@ impl RouteRateLimitBindingRequest<'_> {
         let basic_path_valid = path_len > 0
             && path_len <= MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH
             && self.path.starts_with('/')
-            && !self.path.contains(['#', '\r', '\n', '\0']);
+            && !self
+                .path
+                .chars()
+                .any(|ch| matches!(ch, '#' | '\r' | '\n' | '\0'));
 
         if !basic_path_valid {
             violations.push(RouteRateLimitBindingViolation {
