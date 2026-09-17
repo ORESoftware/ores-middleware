@@ -175,7 +175,9 @@ export class ShutdownCoordinator {
       this.#waiters.add(onChange);
       // Re-check after registering so a request finishing immediately before
       // waiter registration cannot leave drain() asleep until the timeout.
-      if (this.#activeRequests === 0 || this.#phase === "forced") {
+      // Use the accessor here too so TypeScript does not incorrectly preserve
+      // an earlier control-flow narrowing of the private phase field.
+      if (this.#activeRequests === 0 || this.isForced) {
         onChange();
         return;
       }
