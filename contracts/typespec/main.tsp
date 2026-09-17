@@ -206,6 +206,11 @@ model RateLimitPolicy {
   refillPerSecond: float64;
   @minItems(1)
   @TypeSpec.JsonSchema.uniqueItems
+  @TypeSpec.JsonSchema.extension("contains", #{ `enum`: #[
+    "ip", "ip-prefix", "user", "subject", "email", "tenant",
+    "organization", "session", "device", "api-key"
+  ] })
+  @TypeSpec.JsonSchema.extension("minContains", 1)
   keyBy: RateLimitKey[];
   @minLength(1)
   policyId?: string;
@@ -268,6 +273,7 @@ model TlsPolicy {
   mode: "disabled" | "in-process" | "trusted-proxy";
   requireHttps: boolean;
   strictForwardedHeaders: boolean;
+  @TypeSpec.JsonSchema.extension("items", #{ `type`: "string", `minLength`: 1 })
   trustedProxyCidrs: string[];
 }
 
@@ -309,6 +315,7 @@ model TestAuthBypassPolicy {
   enabled: boolean;
   @minLength(1)
   headerName: string;
+  @TypeSpec.JsonSchema.extension("items", #{ `type`: "string", `minLength`: 1 })
   allowedCidrs: string[];
 }
 
@@ -443,6 +450,24 @@ model MiddlewareStackConfig {
 }
 
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
+model SdkOperationSymbols {
+  @minLength(1)
+  descriptor: string;
+  @minLength(1)
+  defaultConfig: string;
+  @minLength(1)
+  validateConfig: string;
+  @minLength(1)
+  createMiddleware: string;
+  @minLength(1)
+  runWithContext: string;
+  @minLength(1)
+  currentContext: string;
+  @minLength(1)
+  capabilities: string;
+}
+
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
 model AdapterDescriptor {
   contractVersion: "1.0.0";
   language: "rust" | "ts" | "gleam" | "golang" | "elixir" | "erlang";
@@ -452,11 +477,12 @@ model AdapterDescriptor {
   packageName: string;
   @minItems(1)
   @TypeSpec.JsonSchema.uniqueItems
+  @TypeSpec.JsonSchema.extension("items", #{ `type`: "string", `minLength`: 1 })
   frameworkAdapters: string[];
   @minItems(1)
   @TypeSpec.JsonSchema.uniqueItems
   capabilities: MiddlewareCapability[];
-  operationSymbols: StringMap;
+  operationSymbols: SdkOperationSymbols;
 }
 
 model ValidationIssue {
