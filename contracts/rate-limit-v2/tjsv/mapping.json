@@ -1,0 +1,45 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.RateLimitAlgorithmV2",
+      "generated": "RateLimitAlgorithmV2",
+      "authored": "rateLimitAlgorithmV2"
+    },
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.RateLimitConsistency",
+      "generated": "RateLimitConsistency",
+      "authored": "rateLimitConsistency"
+    },
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.RateLimitEnforcementMode",
+      "generated": "RateLimitEnforcementMode",
+      "authored": "rateLimitEnforcementMode"
+    },
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.RateLimitFailureMode",
+      "generated": "RateLimitFailureMode",
+      "authored": "rateLimitFailureMode"
+    },
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.RateLimitLayer",
+      "generated": "RateLimitLayer",
+      "authored": "rateLimitLayer"
+    },
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.OperationClass",
+      "generated": "OperationClass",
+      "authored": "operationClass"
+    },
+    {
+      "typespec": "Ores.Middleware.RateLimitV2.RateLimitPolicyV2",
+      "generated": "RateLimitPolicyV2",
+      "authored": "RateLimitPolicyV2"
+    }
+  ],
+  "ignore": {
+    "typespec": [],
+    "generated": [],
+    "authored": []
+  }
+}
