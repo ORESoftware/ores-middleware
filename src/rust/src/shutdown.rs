@@ -75,6 +75,10 @@ impl ShutdownCoordinator {
 
     #[must_use]
     pub fn with_retry_after(drain_timeout: Duration, retry_after: Duration) -> Self {
+        assert!(
+            !retry_after.is_zero(),
+            "ores-middleware: retry-after must be positive"
+        );
         Self {
             inner: Arc::new(ShutdownInner {
                 phase: AtomicU8::new(PHASE_RUNNING),
@@ -310,6 +314,12 @@ mod tests {
             subsecond.rejection().headers.get("retry-after").map(String::as_str),
             Some("1")
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "retry-after must be positive")]
+    fn zero_retry_after_is_rejected_to_match_portable_runtimes() {
+        let _ = ShutdownCoordinator::with_retry_after(Duration::from_secs(5), Duration::ZERO);
     }
 
     #[tokio::test]
