@@ -260,17 +260,18 @@ func writeShutdownRejection(
 	request *http.Request,
 	rejection ShutdownRejection,
 ) {
-	writer.Header().Set("Content-Type", "application/problem+json")
-	writer.Header().Set("Cache-Control", "no-store")
-	writer.Header().Set("Retry-After", rejection.Headers["retry-after"])
-	writer.Header().Set("X-Ores-Error-Code", rejection.Code)
+	writer.Header().Set("content-type", "application/problem+json")
+	writer.Header().Set("cache-control", "no-store")
+	writer.Header().Set("retry-after", rejection.Headers["retry-after"])
+	writer.Header().Set("x-ores-error-code", rejection.Code)
 	if request.ProtoMajor <= 1 {
-		writer.Header().Set("Connection", "close")
+		writer.Header().Set("connection", "close")
 	}
 	writer.WriteHeader(rejection.Status)
 	_ = json.NewEncoder(writer).Encode(map[string]any{
+		"type":   "about:blank",
+		"title":  "Request rejected",
 		"status": rejection.Status,
 		"code":   rejection.Code,
-		"title":  "Request rejected",
 	})
 }
