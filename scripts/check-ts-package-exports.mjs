@@ -20,6 +20,7 @@ const requiredPortableExports = Object.freeze([
   "./deno",
   "./context",
   "./docs-serving",
+  "./rate-limit-bindings",
   "./shutdown",
 ]);
 const requiredFrameworkExports = Object.freeze(["./koa", "./fastify"]);
@@ -106,6 +107,10 @@ for (const runtime of ["bun", "deno"]) {
     fail(`./${runtime} must resolve to ./dist/${runtime}.js, got ${JSON.stringify(target)}`);
   }
 }
+const shutdownTarget = tsPackage.exports["./shutdown"]?.import;
+if (shutdownTarget !== "./dist/shutdown.js") {
+  fail(`./shutdown must resolve to ./dist/shutdown.js, got ${JSON.stringify(shutdownTarget)}`);
+}
 
 if (JSON.stringify(tsPackage.oresRuntimeSupport) !== JSON.stringify(expectedRuntimeSupport)) {
   fail(
@@ -134,6 +139,6 @@ for (const runtimeAdapter of ["bun", "deno"]) {
 
 if (!process.exitCode) {
   console.log(
-    `ts-package-exports: ${tsKeys.length} export subpaths aligned; Bun/Deno/shutdown entrypoints, runtime floors, and descriptor claims are consistent`,
+    `ts-package-exports: ${tsKeys.length} export subpaths aligned; route-binding, Bun/Deno/shutdown entrypoints, runtime floors, and descriptor claims are consistent`,
   );
 }
