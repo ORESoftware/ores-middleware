@@ -85,6 +85,10 @@
       "types": "./dist/rate-limit-bindings.d.ts",
       "import": "./dist/rate-limit-bindings.js"
     },
+    "./route-class-policy": {
+      "types": "./dist/route-class-policy.d.ts",
+      "import": "./dist/route-class-policy.js"
+    },
     "./rate-limit-routes": {
       "types": "./dist/rate-limit-routes.d.ts",
       "import": "./dist/rate-limit-routes.js"
