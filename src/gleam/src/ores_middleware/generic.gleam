@@ -96,20 +96,14 @@ pub fn wrap(
 /// values and imposes no HTTP/router semantics.
 pub type ContextualMiddleware(request, context, response) {
   ContextualMiddleware(
-    wrap: fn(ContextualHandler(request, context, response)) -> ContextualHandler(
-      request,
-      context,
-      response,
-    ),
+    wrap: fn(ContextualHandler(request, context, response)) ->
+      ContextualHandler(request, context, response),
   )
 }
 
 pub fn contextual_middleware(
-  wrap: fn(ContextualHandler(request, context, response)) -> ContextualHandler(
-    request,
-    context,
-    response,
-  ),
+  wrap: fn(ContextualHandler(request, context, response)) ->
+    ContextualHandler(request, context, response),
 ) -> ContextualMiddleware(request, context, response) {
   ContextualMiddleware(wrap:)
 }
@@ -166,8 +160,7 @@ pub fn compose_contextual(
 ) -> ContextualHandler(request, context, response) {
   case middleware {
     [] -> handler
-    [stage, ..rest] ->
-      wrap_contextual(stage, compose_contextual(handler, rest))
+    [stage, ..rest] -> wrap_contextual(stage, compose_contextual(handler, rest))
   }
 }
 

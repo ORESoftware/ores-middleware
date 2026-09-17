@@ -36,11 +36,11 @@ pub fn named_contextual_middleware_keeps_opaque_duplicate_names_test() {
       name: name,
       middleware: generic.contextual_middleware(fn(next) {
         generic.contextual_handler(fn(request, context) {
-          name <> ":" <> context <> ">" <> generic.run_contextual(
-            next,
-            request,
-            context,
-          )
+          name
+          <> ":"
+          <> context
+          <> ">"
+          <> generic.run_contextual(next, request, context)
         })
       }),
     )
