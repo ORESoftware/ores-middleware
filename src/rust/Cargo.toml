@@ -19,10 +19,12 @@ axum = { version = "0.8", optional = true }
 futures-util = "0.3"
 hmac = "0.12"
 http = "1"
-# Keep the logger/context/config loader and ores-otel-web on one reviewed source
-# identity. 080cc8cd includes the canonical strict Rust `.ores-otel.toml`
-# loader plus the shared lookup/parity fixes used by TypeScript and Dart.
-next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log", rev = "080cc8cd09ef6493aa2a2790bcd06793012d8766" }
+# Keep the logger, strict `.ores-otel.toml` loader, typed request-context carrier,
+# and ores-otel-web on one reviewed source identity. This revision is a clean
+# descendant of the previous 080cc8cd pin and includes both sdk/rust-context and
+# sdk/rust-request-context without rolling back the DEN-390 loader semantics.
+next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log", rev = "47cfa716ea453a85a17e5f7c2015edc404550afb" }
+next-loggers-request-context = { package = "oresoftware-next-loggers-request-context", git = "https://github.com/ores-otel/ores.otel.log", rev = "47cfa716ea453a85a17e5f7c2015edc404550afb" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -38,7 +40,7 @@ serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "080cc8cd09ef6493aa2a2790bcd06793012d8766", default-features = false, features = ["axum"] }
+ores-otel-web = { git = "https://github.com/ores-otel/ores.otel.log", rev = "47cfa716ea453a85a17e5f7c2015edc404550afb", default-features = false, features = ["axum"] }
 
 # These suites import the optional HTTP adapter; they still run in the default
 # and all-feature gates. Portable core tests also run with no default features.
