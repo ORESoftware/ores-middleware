@@ -39,7 +39,8 @@
       "Ores.Middleware.AdapterDescriptor",
       "Ores.Middleware.ValidationIssue",
       "Ores.Middleware.ValidationResult",
-      "Ores.Middleware.SdkOperation"
+      "Ores.Middleware.SdkOperation",
+      "Ores.Middleware.SdkOperationSymbols"
     ],
     "generated": [
       "StringMap",
@@ -72,7 +73,8 @@
       "AdapterDescriptor",
       "ValidationIssue",
       "ValidationResult",
-      "SdkOperation"
+      "SdkOperation",
+      "SdkOperationSymbols"
     ],
     "authored": []
   }

@@ -2,60 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.oresoftware.com/middleware/v1/middleware-stack.schema.json",
   "title": "ORES Middleware Stack Configuration",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["contractVersion", "environment", "requiredCapabilities", "settings", "integrations"],
-  "properties": {
-    "contractVersion": { "const": "1.0.0" },
-    "environment": { "enum": ["development", "test", "staging", "production"] },
-    "requiredCapabilities": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": { "$ref": "#/$defs/capability" }
-    },
-    "settings": { "$ref": "#/$defs/settings" },
-    "integrations": { "$ref": "#/$defs/integrations" }
-  },
-  "allOf": [
-    {
-      "if": {
-        "type": "object",
-        "properties": {
-          "environment": { "const": "production" },
-          "settings": {
-            "type": "object",
-            "properties": {
-              "rateLimit": {
-                "type": "object",
-                "properties": { "enabled": { "const": true } },
-                "required": ["enabled"]
-              }
-            },
-            "required": ["rateLimit"]
-          }
-        },
-        "required": ["environment", "settings"]
-      },
-      "then": {
-        "type": "object",
-        "properties": {
-          "settings": {
-            "type": "object",
-            "properties": {
-              "rateLimit": {
-                "type": "object",
-                "properties": {
-                  "keyDerivation": { "const": "external-hmac-sha256" }
-                },
-                "required": ["keyDerivation"]
-              }
-            }
-          }
-        }
-      }
-    }
-  ],
   "$defs": {
     "capability": {
       "type": "string",
@@ -104,23 +50,46 @@
     },
     "rateLimitAlgorithm": {
       "type": "string",
-      "enum": ["token-bucket", "sliding-window-counter", "fixed-window", "concurrency"]
+      "enum": [
+        "token-bucket",
+        "sliding-window-counter",
+        "fixed-window",
+        "concurrency"
+      ]
     },
     "rateLimitLayer": {
       "type": "string",
-      "enum": ["cloudflare-edge", "kubernetes-ingress", "service-mesh", "application", "authorization"]
+      "enum": [
+        "cloudflare-edge",
+        "kubernetes-ingress",
+        "service-mesh",
+        "application",
+        "authorization"
+      ]
     },
     "rateLimitFailureMode": {
       "type": "string",
-      "enum": ["fail-open", "fail-closed", "local-only"]
+      "enum": [
+        "fail-open",
+        "fail-closed",
+        "local-only"
+      ]
     },
     "rateLimitKeyDerivationMode": {
       "type": "string",
-      "enum": ["ephemeral-hmac-sha256", "external-hmac-sha256"]
+      "enum": [
+        "ephemeral-hmac-sha256",
+        "external-hmac-sha256"
+      ]
     },
     "rateLimitDecisionKind": {
       "type": "string",
-      "enum": ["allowed", "denied", "degraded-allowed", "degraded-denied"]
+      "enum": [
+        "allowed",
+        "denied",
+        "degraded-allowed",
+        "degraded-denied"
+      ]
     },
     "rateLimitDecisionSource": {
       "type": "string",
@@ -137,16 +106,32 @@
     "rateLimit": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "capacity", "refillPerSecond", "keyBy"],
+      "required": [
+        "enabled",
+        "capacity",
+        "refillPerSecond",
+        "keyBy"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "capacity": { "type": "integer", "minimum": 1 },
-        "refillPerSecond": { "type": "number", "exclusiveMinimum": 0 },
+        "enabled": {
+          "type": "boolean"
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "refillPerSecond": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "keyBy": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/rateLimitSignal" },
+          "items": {
+            "$ref": "#/$defs/rateLimitSignal"
+          },
           "contains": {
             "enum": [
               "ip",
@@ -163,31 +148,76 @@
           },
           "minContains": 1
         },
-        "policyId": { "type": "string", "minLength": 1 },
-        "algorithm": { "$ref": "#/$defs/rateLimitAlgorithm" },
-        "layer": { "$ref": "#/$defs/rateLimitLayer" },
-        "failureMode": { "$ref": "#/$defs/rateLimitFailureMode" },
-        "windowMs": { "type": "integer", "minimum": 1 },
-        "localCacheMaxEntries": { "type": "integer", "minimum": 1, "maximum": 10000 },
-        "localCacheTtlMs": { "type": "integer", "minimum": 1 },
-        "keyNamespace": { "type": "string", "minLength": 1 },
-        "keyVersion": { "type": "string", "minLength": 1 },
-        "keyDerivation": { "$ref": "#/$defs/rateLimitKeyDerivationMode" }
+        "policyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "algorithm": {
+          "$ref": "#/$defs/rateLimitAlgorithm"
+        },
+        "layer": {
+          "$ref": "#/$defs/rateLimitLayer"
+        },
+        "failureMode": {
+          "$ref": "#/$defs/rateLimitFailureMode"
+        },
+        "windowMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "localCacheMaxEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "localCacheTtlMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "keyNamespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keyVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keyDerivation": {
+          "$ref": "#/$defs/rateLimitKeyDerivationMode"
+        }
       },
       "allOf": [
         {
           "if": {
             "type": "object",
-            "properties": { "layer": { "const": "cloudflare-edge" } },
-            "required": ["layer"]
+            "properties": {
+              "layer": {
+                "const": "cloudflare-edge"
+              }
+            },
+            "required": [
+              "layer"
+            ]
           },
           "then": {
             "type": "object",
             "properties": {
               "keyBy": {
                 "type": "array",
-                "items": { "enum": ["ip", "ip-prefix", "route", "method"] },
-                "contains": { "enum": ["ip", "ip-prefix"] },
+                "items": {
+                  "enum": [
+                    "ip",
+                    "ip-prefix",
+                    "route",
+                    "method"
+                  ]
+                },
+                "contains": {
+                  "enum": [
+                    "ip",
+                    "ip-prefix"
+                  ]
+                },
                 "minContains": 1
               }
             }
@@ -197,10 +227,17 @@
           "not": {
             "type": "object",
             "properties": {
-              "layer": { "const": "authorization" },
-              "failureMode": { "const": "fail-open" }
+              "layer": {
+                "const": "authorization"
+              },
+              "failureMode": {
+                "const": "fail-open"
+              }
             },
-            "required": ["layer", "failureMode"]
+            "required": [
+              "layer",
+              "failureMode"
+            ]
           }
         }
       ]
@@ -208,95 +245,291 @@
     "rateLimitPrincipal": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["digest", "keyVersion"],
+      "required": [
+        "digest",
+        "keyVersion"
+      ],
       "properties": {
-        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "keyVersion": { "type": "string", "minLength": 1 }
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "keyVersion": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "rateLimitDecision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "source", "policyId", "layer", "algorithm", "limit", "remaining"],
+      "required": [
+        "kind",
+        "source",
+        "policyId",
+        "layer",
+        "algorithm",
+        "limit",
+        "remaining"
+      ],
       "properties": {
-        "kind": { "$ref": "#/$defs/rateLimitDecisionKind" },
-        "source": { "$ref": "#/$defs/rateLimitDecisionSource" },
-        "policyId": { "type": "string", "minLength": 1 },
-        "layer": { "$ref": "#/$defs/rateLimitLayer" },
-        "algorithm": { "$ref": "#/$defs/rateLimitAlgorithm" },
-        "limit": { "type": "integer", "minimum": 1 },
-        "remaining": { "type": "integer", "minimum": 0 },
-        "retryAfterMs": { "type": "integer", "minimum": 0 },
-        "resetAfterMs": { "type": "integer", "minimum": 0 },
-        "reasonCode": { "type": "string", "minLength": 1 }
+        "kind": {
+          "$ref": "#/$defs/rateLimitDecisionKind"
+        },
+        "source": {
+          "$ref": "#/$defs/rateLimitDecisionSource"
+        },
+        "policyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "layer": {
+          "$ref": "#/$defs/rateLimitLayer"
+        },
+        "algorithm": {
+          "$ref": "#/$defs/rateLimitAlgorithm"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "retryAfterMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resetAfterMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasonCode": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "compression": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "minimumBytes", "algorithms"],
+      "required": [
+        "enabled",
+        "minimumBytes",
+        "algorithms"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "minimumBytes": { "type": "integer", "minimum": 0 },
+        "enabled": {
+          "type": "boolean"
+        },
+        "minimumBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
         "algorithms": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["br", "gzip", "deflate", "zstd"] }
+          "items": {
+            "anyOf": [
+              {
+                "const": "br",
+                "type": "string"
+              },
+              {
+                "const": "deflate",
+                "type": "string"
+              },
+              {
+                "const": "gzip",
+                "type": "string"
+              },
+              {
+                "const": "zstd",
+                "type": "string"
+              }
+            ]
+          }
         }
       }
     },
     "tls": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "requireHttps", "strictForwardedHeaders", "trustedProxyCidrs"],
+      "required": [
+        "mode",
+        "requireHttps",
+        "strictForwardedHeaders",
+        "trustedProxyCidrs"
+      ],
       "properties": {
-        "mode": { "enum": ["disabled", "in-process", "trusted-proxy"] },
-        "requireHttps": { "type": "boolean" },
-        "strictForwardedHeaders": { "type": "boolean" },
-        "trustedProxyCidrs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        "mode": {
+          "anyOf": [
+            {
+              "const": "disabled",
+              "type": "string"
+            },
+            {
+              "const": "in-process",
+              "type": "string"
+            },
+            {
+              "const": "trusted-proxy",
+              "type": "string"
+            }
+          ]
+        },
+        "requireHttps": {
+          "type": "boolean"
+        },
+        "strictForwardedHeaders": {
+          "type": "boolean"
+        },
+        "trustedProxyCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
     },
     "securityHeaders": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "hstsMaxAgeSeconds", "frameOptions"],
+      "required": [
+        "enabled",
+        "hstsMaxAgeSeconds",
+        "frameOptions"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "hstsMaxAgeSeconds": { "type": "integer", "minimum": 0 },
-        "contentSecurityPolicy": { "type": "string" },
-        "frameOptions": { "enum": ["DENY", "SAMEORIGIN"] }
+        "enabled": {
+          "type": "boolean"
+        },
+        "hstsMaxAgeSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contentSecurityPolicy": {
+          "type": "string"
+        },
+        "frameOptions": {
+          "anyOf": [
+            {
+              "const": "DENY",
+              "type": "string"
+            },
+            {
+              "const": "SAMEORIGIN",
+              "type": "string"
+            }
+          ]
+        }
       }
     },
     "idempotency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "headerName", "ttlSeconds", "requiredMethods"],
+      "required": [
+        "enabled",
+        "headerName",
+        "ttlSeconds",
+        "requiredMethods"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "headerName": { "type": "string", "minLength": 1 },
-        "ttlSeconds": { "type": "integer", "minimum": 1 },
-        "requiredMethods": { "type": "array", "uniqueItems": true, "items": { "enum": ["POST", "PUT", "PATCH", "DELETE"] } }
+        "enabled": {
+          "type": "boolean"
+        },
+        "headerName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "requiredMethods": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "anyOf": [
+              {
+                "const": "POST",
+                "type": "string"
+              },
+              {
+                "const": "PUT",
+                "type": "string"
+              },
+              {
+                "const": "PATCH",
+                "type": "string"
+              },
+              {
+                "const": "DELETE",
+                "type": "string"
+              }
+            ]
+          }
+        }
       }
     },
     "faultInjection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "latencyMs", "errorRate", "dropRate"],
+      "required": [
+        "enabled",
+        "latencyMs",
+        "errorRate",
+        "dropRate"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "latencyMs": { "type": "integer", "minimum": 0 },
-        "errorRate": { "type": "number", "minimum": 0, "maximum": 1 },
-        "dropRate": { "type": "number", "minimum": 0, "maximum": 1 }
+        "enabled": {
+          "type": "boolean"
+        },
+        "latencyMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "errorRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dropRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
     "testAuthBypass": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "headerName", "allowedCidrs"],
+      "required": [
+        "enabled",
+        "headerName",
+        "allowedCidrs"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "headerName": { "type": "string", "minLength": 1 },
-        "allowedCidrs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        "enabled": {
+          "type": "boolean"
+        },
+        "headerName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowedCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
     },
     "settings": {
@@ -319,72 +552,301 @@
         "contentRepresentations"
       ],
       "properties": {
-        "requestIdHeader": { "type": "string", "minLength": 1 },
-        "traceHeader": { "type": "string", "minLength": 1 },
-        "timeoutMs": { "type": "integer", "minimum": 1 },
-        "maxBodyBytes": { "type": "integer", "minimum": 1 },
-        "contextRegistryMaxEntries": { "type": "integer", "minimum": 0 },
-        "contextRegistryTtlMs": { "type": "integer", "minimum": 1 },
-        "rateLimit": { "$ref": "#/$defs/rateLimit" },
-        "compression": { "$ref": "#/$defs/compression" },
-        "tls": { "$ref": "#/$defs/tls" },
-        "securityHeaders": { "$ref": "#/$defs/securityHeaders" },
-        "idempotency": { "$ref": "#/$defs/idempotency" },
-        "faultInjection": { "$ref": "#/$defs/faultInjection" },
-        "testAuthBypass": { "$ref": "#/$defs/testAuthBypass" },
+        "requestIdHeader": {
+          "type": "string",
+          "minLength": 1
+        },
+        "traceHeader": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxBodyBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "contextRegistryMaxEntries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "contextRegistryTtlMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rateLimit": {
+          "$ref": "#/$defs/rateLimit"
+        },
+        "compression": {
+          "$ref": "#/$defs/compression"
+        },
+        "tls": {
+          "$ref": "#/$defs/tls"
+        },
+        "securityHeaders": {
+          "$ref": "#/$defs/securityHeaders"
+        },
+        "idempotency": {
+          "$ref": "#/$defs/idempotency"
+        },
+        "faultInjection": {
+          "$ref": "#/$defs/faultInjection"
+        },
+        "testAuthBypass": {
+          "$ref": "#/$defs/testAuthBypass"
+        },
         "contentRepresentations": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["text/html", "application/json", "application/problem+json", "application/msgpack", "application/xml"] }
+          "items": {
+            "$ref": "#/$defs/contentRepresentation"
+          }
         }
       }
     },
-    "integrationMode": { "enum": ["disabled", "http", "embedded"] },
+    "integrationMode": {
+      "enum": [
+        "disabled",
+        "http",
+        "embedded"
+      ],
+      "type": "string"
+    },
     "sharedAuth": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "failOpen"],
+      "required": [
+        "mode",
+        "failOpen"
+      ],
       "properties": {
-        "mode": { "$ref": "#/$defs/integrationMode" },
-        "issuer": { "type": "string", "format": "uri" },
-        "audience": { "type": "string" },
-        "jwksUri": { "type": "string", "format": "uri" },
-        "introspectionUrl": { "type": "string", "format": "uri" },
-        "failOpen": { "const": false }
+        "mode": {
+          "$ref": "#/$defs/integrationMode"
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri"
+        },
+        "audience": {
+          "type": "string"
+        },
+        "jwksUri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "introspectionUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "failOpen": {
+          "const": false,
+          "type": "boolean"
+        }
       }
     },
     "optoSync": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "failOpen"],
+      "required": [
+        "mode",
+        "failOpen"
+      ],
       "properties": {
-        "mode": { "$ref": "#/$defs/integrationMode" },
-        "endpoint": { "type": "string", "format": "uri" },
-        "outboxTopic": { "type": "string" },
-        "failOpen": { "type": "boolean" }
+        "mode": {
+          "$ref": "#/$defs/integrationMode"
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri"
+        },
+        "outboxTopic": {
+          "type": "string"
+        },
+        "failOpen": {
+          "type": "boolean"
+        }
       }
     },
     "oresOtel": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "serviceName", "propagators"],
+      "required": [
+        "enabled",
+        "serviceName",
+        "propagators"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "serviceName": { "type": "string", "minLength": 1 },
-        "exporterEndpoint": { "type": "string", "format": "uri" },
-        "propagators": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["tracecontext", "baggage", "b3", "jaeger"] } }
+        "enabled": {
+          "type": "boolean"
+        },
+        "serviceName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exporterEndpoint": {
+          "type": "string",
+          "format": "uri"
+        },
+        "propagators": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "anyOf": [
+              {
+                "const": "tracecontext",
+                "type": "string"
+              },
+              {
+                "const": "baggage",
+                "type": "string"
+              },
+              {
+                "const": "b3",
+                "type": "string"
+              },
+              {
+                "const": "jaeger",
+                "type": "string"
+              }
+            ]
+          }
+        }
       }
     },
     "integrations": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sharedAuth", "optoSync", "oresOtel"],
+      "required": [
+        "sharedAuth",
+        "optoSync",
+        "oresOtel"
+      ],
       "properties": {
-        "sharedAuth": { "$ref": "#/$defs/sharedAuth" },
-        "optoSync": { "$ref": "#/$defs/optoSync" },
-        "oresOtel": { "$ref": "#/$defs/oresOtel" }
+        "sharedAuth": {
+          "$ref": "#/$defs/sharedAuth"
+        },
+        "optoSync": {
+          "$ref": "#/$defs/optoSync"
+        },
+        "oresOtel": {
+          "$ref": "#/$defs/oresOtel"
+        }
       }
+    },
+    "runtimeEnvironment": {
+      "type": "string",
+      "enum": [
+        "development",
+        "test",
+        "staging",
+        "production"
+      ]
+    },
+    "contentRepresentation": {
+      "type": "string",
+      "enum": [
+        "text/html",
+        "application/json",
+        "application/problem+json",
+        "application/msgpack",
+        "application/xml"
+      ]
+    },
+    "middlewareStackConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "environment",
+        "requiredCapabilities",
+        "settings",
+        "integrations"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": "1.0.0",
+          "type": "string"
+        },
+        "environment": {
+          "$ref": "#/$defs/runtimeEnvironment"
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        },
+        "integrations": {
+          "$ref": "#/$defs/integrations"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "environment": {
+                "const": "production"
+              },
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "rateLimit": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "enabled"
+                    ]
+                  }
+                },
+                "required": [
+                  "rateLimit"
+                ]
+              }
+            },
+            "required": [
+              "environment",
+              "settings"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "settings": {
+                "type": "object",
+                "properties": {
+                  "rateLimit": {
+                    "type": "object",
+                    "properties": {
+                      "keyDerivation": {
+                        "const": "external-hmac-sha256"
+                      }
+                    },
+                    "required": [
+                      "keyDerivation"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     }
-  }
+  },
+  "$ref": "#/$defs/middlewareStackConfig"
 }

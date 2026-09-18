@@ -57,21 +57,38 @@ fn schema_enum(schema: &Value, definition: &str) -> BTreeSet<String> {
 
 fn typespec_model_signature(source: &str, name: &str) -> BTreeMap<String, bool> {
     let body = extract_block(source, "model", name);
-    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*[^;]+;$")
+    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\\?)?\\s*:\\s*[^;]+;$")
         .expect("valid property expression");
-    body.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with('*'))
-        .filter(|line| !line.starts_with('@'))
-        .map(|line| {
-            let captures = property
-                .captures(line)
-                .unwrap_or_else(|| panic!("unsupported TypeSpec property in {name}: {line}"));
-            (captures[1].to_owned(), captures.get(2).is_none())
-        })
-        .collect()
-}
+    let mut signature = BTreeMap::new();
+    let mut decorator_paren_depth = 0_i32;
 
+    for raw_line in body.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with("//") || line.starts_with('*') {
+            continue;
+        }
+
+        if decorator_paren_depth > 0 || line.starts_with('@') {
+            decorator_paren_depth += line.matches('(').count() as i32;
+            decorator_paren_depth -= line.matches(')').count() as i32;
+            if decorator_paren_depth < 0 {
+                panic!("unbalanced TypeSpec decorator while parsing model {name}: {line}");
+            }
+            continue;
+        }
+
+        let captures = property
+            .captures(line)
+            .unwrap_or_else(|| panic!("unsupported TypeSpec property in {name}: {line}"));
+        signature.insert(captures[1].to_owned(), captures.get(2).is_none());
+    }
+
+    assert_eq!(
+        decorator_paren_depth, 0,
+        "unterminated TypeSpec decorator while parsing model {name}"
+    );
+    signature
+}
 fn schema_model_signature(schema: &Value, definition: &str) -> BTreeMap<String, bool> {
     let model = schema
         .pointer(&format!("/$defs/{definition}"))
