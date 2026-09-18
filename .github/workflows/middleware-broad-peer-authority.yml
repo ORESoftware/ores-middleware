@@ -8,6 +8,8 @@ on:
       - 'contracts/tjsv/middleware-broad.mapping.json'
       - 'scripts/compare-authorities.mjs'
       - 'scripts/validate-contracts.mjs'
+      - 'scripts/mutate-middleware-broad-peer-authority.mjs'
+      - 'scripts/mutate-middleware-broad-peer-authority.mjs'
       - '.github/workflows/middleware-broad-peer-authority.yml'
   push:
     branches: [main, dev]
@@ -135,43 +137,72 @@ jobs:
           if (report.zeroUnexplainedFindings !== true) throw new Error('broad peer report must have zero unexplained findings');
           NODE
 
-      - name: Prove capability drift fails closed
+      - name: Execute 15 broad peer negative controls
         if: ${{ success() }}
         shell: bash
         run: |
           set -euo pipefail
-          cp -R contracts/json-schema target/middleware-broad-tjsv/drift-schema
-          node --input-type=module <<'NODE'
+          cases=(
+            capability-missing-schema-capture
+            runtime-environment-missing-production
+            content-representation-missing-html
+            rate-limit-capacity-max-drift
+            rate-limit-principal-pattern-drift
+            adapter-language-missing-erlang
+            adapter-operation-symbols-optional
+            shared-auth-fail-open-drift
+            string-map-value-type-drift
+            request-context-started-type-drift
+            validation-issue-message-optional
+            validation-result-issues-ref-drift
+            stack-contract-version-drift
+            idempotency-method-set-drift
+            tls-mode-set-drift
+          )
+
+          for case_id in "${cases[@]}"; do
+            case_root="target/middleware-broad-tjsv/negative/${case_id}"
+            schema_dir="${case_root}/schema"
+            generated_dir="${case_root}/generated"
+            mkdir -p "${generated_dir}"
+            node scripts/mutate-middleware-broad-peer-authority.mjs "${case_id}" "${schema_dir}"
+
+            set +e
+            NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+              node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+                --typespec=contracts/typespec/main.tsp \
+                --schema="${schema_dir}" \
+                --mapping=contracts/tjsv/middleware-broad.mapping.json \
+                --output-dir="${generated_dir}" \
+                --bundle-id="middleware-broad.${case_id}.generated.schema.json" \
+                --report="${case_root}/report.json" \
+                --contract-ir="${case_root}/contract-ir.json" \
+                --probes=true \
+                --max-probes=128 \
+                --int64-strategy=number \
+                --seal-object-schemas=false \
+                --polymorphic-models-strategy=oneOf \
+                --format-assertion=true \
+                --quiet=true
+            rc=$?
+            set -e
+
+            if [ "$rc" -ne 2 ]; then
+              echo "expected broad peer negative control ${case_id} to stop evaluation with exit 2, got $rc" >&2
+              exit 1
+            fi
+
+            CASE_ROOT="${case_root}" CASE_ID="${case_id}" node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const path='target/middleware-broad-tjsv/drift-schema/middleware-stack.schema.json';
-          const schema=JSON.parse(fs.readFileSync(path,'utf8'));
-          schema.$defs.capability.enum=schema.$defs.capability.enum.filter((x)=>x!=='schema-capture');
-          fs.writeFileSync(path,`${JSON.stringify(schema,null,2)}\n`);
+          const report = JSON.parse(fs.readFileSync(`${process.env.CASE_ROOT}/report.json`, 'utf8'));
+          if (report.status !== 'stopped_for_evaluation') {
+            throw new Error(`${process.env.CASE_ID}: expected stopped_for_evaluation, got ${report.status}`);
+          }
+          if (!Number.isInteger(report.counts?.findings) || report.counts.findings < 1) {
+            throw new Error(`${process.env.CASE_ID}: expected at least one finding`);
+          }
           NODE
-          set +e
-          mkdir -p target/middleware-broad-tjsv/drift-generated
-          NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
-            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
-              --typespec=contracts/typespec/main.tsp \
-              --schema=target/middleware-broad-tjsv/drift-schema \
-              --mapping=contracts/tjsv/middleware-broad.mapping.json \
-              --output-dir=target/middleware-broad-tjsv/drift-generated \
-              --bundle-id=middleware-broad.drift.generated.schema.json \
-              --report=target/middleware-broad-tjsv/drift-report.json \
-              --contract-ir=target/middleware-broad-tjsv/drift-contract-ir.json \
-              --probes=true \
-              --max-probes=128 \
-              --int64-strategy=number \
-              --seal-object-schemas=false \
-              --polymorphic-models-strategy=oneOf \
-              --format-assertion=true \
-              --quiet=true
-          rc=$?
-          set -e
-          if [ "$rc" -ne 2 ]; then
-            echo "expected capability drift to stop evaluation with exit 2, got $rc" >&2
-            exit 1
-          fi
+          done
 
       - name: Require reviewed sources unchanged
         if: ${{ !cancelled() }}
@@ -183,6 +214,7 @@ jobs:
             contracts/tjsv/middleware-broad.mapping.json \
             scripts/compare-authorities.mjs \
             scripts/validate-contracts.mjs \
+            scripts/mutate-middleware-broad-peer-authority.mjs \
             .github/workflows/middleware-broad-peer-authority.yml
 
       - name: Retain broad parity evidence
