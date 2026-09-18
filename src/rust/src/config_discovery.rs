@@ -40,7 +40,8 @@ pub enum DiscoveryError {
     },
     /// A path was named explicitly but could not be read.
     Unreadable { path: PathBuf },
-    /// The file exceeds `MAX_CONFIG_BYTES`, or is not valid UTF-8, or contains NUL.
+    /// The file exceeds `MAX_CONFIG_BYTES`, is a symlink, is not valid UTF-8,
+    /// or contains NUL.
     InvalidDocument { path: PathBuf },
     /// The working directory could not be determined and no start was given.
     NoStartingDirectory,
@@ -75,7 +76,7 @@ impl fmt::Display for DiscoveryError {
             }
             Self::InvalidDocument { path } => write!(
                 formatter,
-                "{}: {} is not a readable UTF-8 document within {MAX_CONFIG_BYTES} bytes",
+                "{}: {} is not a regular UTF-8 document within {MAX_CONFIG_BYTES} bytes",
                 self.code(),
                 path.display()
             ),
@@ -94,18 +95,18 @@ pub struct Discovered {
     pub path: PathBuf,
     pub source: String,
     /// Whether the directory holding the file is a repository root, judged by an
-    /// adjacent `.git`. A configuration that governs a repository is expected to
-    /// sit at its root; anywhere else it may be a stray file that silently
-    /// governs more, or less, than its author intended.
+    /// adjacent `.git` directory. A configuration that governs a repository is
+    /// expected to sit at its root; anywhere else it may be a stray file that
+    /// silently governs more, or less, than its author intended.
     pub at_repo_root: bool,
 }
 
-/// A directory is a repository root when it holds a `.git`. That is a directory
-/// in a normal clone and a file in a worktree or submodule, so existence — not
-/// directory-ness — is the right test.
+/// A directory is a repository root only when it holds an adjacent `.git`
+/// directory. Worktree/submodule `.git` files do not satisfy the fleet placement
+/// contract and therefore still produce the non-root warning.
 #[must_use]
 pub fn is_repo_root(directory: &Path) -> bool {
-    directory.join(".git").exists()
+    directory.join(".git").is_dir()
 }
 
 /// Where the search should begin. Separating this from the walk keeps the
@@ -176,10 +177,13 @@ pub fn resolve_start(origin: &Origin) -> Result<Start, DiscoveryError> {
 }
 
 fn read_checked(path: &Path) -> Result<String, DiscoveryError> {
-    let metadata = fs::metadata(path).map_err(|_| DiscoveryError::Unreadable {
+    let metadata = fs::symlink_metadata(path).map_err(|_| DiscoveryError::Unreadable {
         path: path.to_path_buf(),
     })?;
-    if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_CONFIG_BYTES
+    {
         return Err(DiscoveryError::InvalidDocument {
             path: path.to_path_buf(),
         });
@@ -252,12 +256,14 @@ pub fn warn_if_not_repo_root(found: &Discovered) {
     if found.at_repo_root {
         return;
     }
-    let _ = discovery_logger().warn(vec![next_loggers::json!({
-        "event": "ores.config.not_at_repo_root",
-        "config_path": found.path.display().to_string(),
-        "detail": "configuration was found outside a repository root (no adjacent .git); \
+    let _ = discovery_logger()
+        .warn(vec![next_loggers::json!({
+            "event": "ores.config.not_at_repo_root",
+            "config_path": found.path.display().to_string(),
+            "detail": "configuration was found outside a repository root (no adjacent .git directory); \
     confirm this file is meant to govern the running service",
-    })]);
+        })])
+        .send();
 }
 
 /// One process-wide logger for discovery warnings. Discovery runs before the
@@ -471,23 +477,41 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn a_file_beside_dot_git_is_reported_as_repo_root() {
+    fn symlinked_config_files_are_refused() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_root("symlink-config");
+        let actual = root.join("actual.toml");
+        fs::write(&actual, "schema_version = 1\n").expect("write actual");
+        symlink(&actual, root.join(".ores-mw.toml")).expect("symlink");
+
+        let error = discover(".ores-mw.toml", &origin_dir(&root)).expect_err("symlink rejected");
+        assert_eq!(error.code(), "config_invalid_document");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_beside_dot_git_directory_is_reported_as_repo_root() {
         let root = temp_root("repo-root");
         fs::create_dir_all(root.join(".git")).expect("git dir");
         fs::write(root.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
 
         let found = discover(".ores-mw.toml", &origin_dir(&root)).expect("discovers");
-        assert!(found.at_repo_root, "a file beside .git is at the repo root");
+        assert!(
+            found.at_repo_root,
+            "a file beside a .git directory is at the repo root"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn a_file_without_an_adjacent_git_is_flagged_for_warning() {
+    fn a_file_without_an_adjacent_git_directory_is_flagged_for_warning() {
         let root = temp_root("no-git");
         let nested = root.join("services/api");
         fs::create_dir_all(&nested).expect("dirs");
-        // The config sits in a subdirectory with no .git beside it.
+        // The config sits in a subdirectory with no .git directory beside it.
         fs::write(nested.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
 
         let found = discover(".ores-mw.toml", &origin_dir(&nested)).expect("discovers");
@@ -499,14 +523,16 @@ mod tests {
     }
 
     #[test]
-    fn a_git_file_counts_as_a_repo_root_for_worktrees_and_submodules() {
+    fn a_git_file_does_not_count_as_the_fleet_repo_root_marker() {
         let root = temp_root("git-file");
-        // Worktrees and submodules use a .git FILE, not a directory.
         fs::write(root.join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").expect("git file");
         fs::write(root.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
 
         let found = discover(".ores-mw.toml", &origin_dir(&root)).expect("discovers");
-        assert!(found.at_repo_root, "a .git file is still a repository root");
+        assert!(
+            !found.at_repo_root,
+            "a .git file is not the adjacent .git directory required by fleet policy"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
