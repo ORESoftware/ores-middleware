@@ -57,8 +57,7 @@ fn schema_enum(schema: &Value, definition: &str) -> BTreeSet<String> {
 
 fn typespec_model_signature(source: &str, name: &str) -> BTreeMap<String, bool> {
     let body = extract_block(source, "model", name);
-    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*[^;]+;$")
-        .expect("valid property expression");
+    let identifier = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("valid identifier expression");
     let mut signature = BTreeMap::new();
     let mut decorator_paren_depth = 0_i32;
 
@@ -77,10 +76,26 @@ fn typespec_model_signature(source: &str, name: &str) -> BTreeMap<String, bool> 
             continue;
         }
 
-        let captures = property
-            .captures(line)
+        let property = line
+            .strip_suffix(';')
             .unwrap_or_else(|| panic!("unsupported TypeSpec property in {name}: {line}"));
-        signature.insert(captures[1].to_owned(), captures.get(2).is_none());
+        let (raw_name, property_type) = property
+            .split_once(':')
+            .unwrap_or_else(|| panic!("unsupported TypeSpec property in {name}: {line}"));
+        if property_type.trim().is_empty() {
+            panic!("missing TypeSpec property type in {name}: {line}");
+        }
+
+        let raw_name = raw_name.trim();
+        let (property_name, required) = raw_name
+            .strip_suffix('?')
+            .map_or((raw_name, true), |property_name| (property_name.trim_end(), false));
+        if !identifier.is_match(property_name) {
+            panic!("unsupported TypeSpec property name in {name}: {line}");
+        }
+        if signature.insert(property_name.to_owned(), required).is_some() {
+            panic!("duplicate TypeSpec property in {name}: {property_name}");
+        }
     }
 
     assert_eq!(
@@ -89,6 +104,7 @@ fn typespec_model_signature(source: &str, name: &str) -> BTreeMap<String, bool> 
     );
     signature
 }
+
 fn schema_model_signature(schema: &Value, definition: &str) -> BTreeMap<String, bool> {
     let model = schema
         .pointer(&format!("/$defs/{definition}"))
