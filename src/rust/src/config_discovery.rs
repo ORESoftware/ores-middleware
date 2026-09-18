@@ -93,6 +93,19 @@ impl std::error::Error for DiscoveryError {}
 pub struct Discovered {
     pub path: PathBuf,
     pub source: String,
+    /// Whether the directory holding the file is a repository root, judged by an
+    /// adjacent `.git`. A configuration that governs a repository is expected to
+    /// sit at its root; anywhere else it may be a stray file that silently
+    /// governs more, or less, than its author intended.
+    pub at_repo_root: bool,
+}
+
+/// A directory is a repository root when it holds a `.git`. That is a directory
+/// in a normal clone and a file in a worktree or submodule, so existence — not
+/// directory-ness — is the right test.
+#[must_use]
+pub fn is_repo_root(directory: &Path) -> bool {
+    directory.join(".git").exists()
 }
 
 /// Where the search should begin. Separating this from the walk keeps the
@@ -197,6 +210,7 @@ pub fn walk_up(directory: &Path, file_name: &str) -> Result<Discovered, Discover
             return Ok(Discovered {
                 source: read_checked(&candidate)?,
                 path: candidate,
+                at_repo_root: is_repo_root(ancestor),
             });
         }
     }
@@ -211,13 +225,52 @@ pub fn walk_up(directory: &Path, file_name: &str) -> Result<Discovered, Discover
 /// # Errors
 /// Propagates resolution, walk and read failures.
 pub fn discover(file_name: &str, origin: &Origin) -> Result<Discovered, DiscoveryError> {
-    match resolve_start(origin)? {
-        Start::File(path) => Ok(Discovered {
-            source: read_checked(&path)?,
-            path,
-        }),
-        Start::Directory(directory) => walk_up(&directory, file_name),
+    let found = match resolve_start(origin)? {
+        Start::File(path) => {
+            let at_repo_root = path.parent().is_some_and(is_repo_root);
+            Discovered {
+                source: read_checked(&path)?,
+                path,
+                at_repo_root,
+            }
+        }
+        Start::Directory(directory) => walk_up(&directory, file_name)?,
+    };
+    warn_if_not_repo_root(&found);
+    Ok(found)
+}
+
+/// Emits an ORES telemetry warning when a configuration file governs a tree from
+/// somewhere other than a repository root.
+///
+/// This is a warning, not an error: a nested file is legitimate in a workspace
+/// member, and refusing to start would be worse than saying so. But it is worth
+/// saying, because the two ways this goes wrong are both quiet — a file left
+/// behind in a subdirectory that shadows the real one, or a walk that escaped the
+/// repository entirely and picked up an unrelated configuration.
+pub fn warn_if_not_repo_root(found: &Discovered) {
+    if found.at_repo_root {
+        return;
     }
+    let _ = discovery_logger().warn(vec![next_loggers::json!({
+        "event": "ores.config.not_at_repo_root",
+        "config_path": found.path.display().to_string(),
+        "detail": "configuration was found outside a repository root (no adjacent .git); \
+    confirm this file is meant to govern the running service",
+    })]);
+}
+
+/// One process-wide logger for discovery warnings. Discovery runs before the
+/// application has built its own telemetry, so this must not depend on it.
+fn discovery_logger() -> &'static next_loggers::Logger {
+    static LOGGER: std::sync::OnceLock<next_loggers::Logger> = std::sync::OnceLock::new();
+    LOGGER.get_or_init(|| {
+        next_loggers::Logger::new(next_loggers::Options {
+            app_name: "ores-middleware".into(),
+            name: Some("config-discovery".into()),
+            ..next_loggers::Options::default()
+        })
+    })
 }
 
 /// Builds an `Origin` from the process environment.
@@ -415,6 +468,63 @@ mod tests {
         fs::write(root.join(".ores-mw.toml"), big).expect("write");
         let error = discover(".ores-mw.toml", &origin_dir(&root)).expect_err("too large");
         assert_eq!(error.code(), "config_invalid_document");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_beside_dot_git_is_reported_as_repo_root() {
+        let root = temp_root("repo-root");
+        fs::create_dir_all(root.join(".git")).expect("git dir");
+        fs::write(root.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
+
+        let found = discover(".ores-mw.toml", &origin_dir(&root)).expect("discovers");
+        assert!(found.at_repo_root, "a file beside .git is at the repo root");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_file_without_an_adjacent_git_is_flagged_for_warning() {
+        let root = temp_root("no-git");
+        let nested = root.join("services/api");
+        fs::create_dir_all(&nested).expect("dirs");
+        // The config sits in a subdirectory with no .git beside it.
+        fs::write(nested.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
+
+        let found = discover(".ores-mw.toml", &origin_dir(&nested)).expect("discovers");
+        assert!(
+            !found.at_repo_root,
+            "a config outside a repo root must be flagged so the warning fires"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_git_file_counts_as_a_repo_root_for_worktrees_and_submodules() {
+        let root = temp_root("git-file");
+        // Worktrees and submodules use a .git FILE, not a directory.
+        fs::write(root.join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").expect("git file");
+        fs::write(root.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
+
+        let found = discover(".ores-mw.toml", &origin_dir(&root)).expect("discovers");
+        assert!(found.at_repo_root, "a .git file is still a repository root");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn warning_emission_is_safe_to_call_in_both_states() {
+        // The warning path must never panic or abort discovery.
+        let root = temp_root("warn-safe");
+        fs::create_dir_all(&root).expect("dirs");
+        warn_if_not_repo_root(&Discovered {
+            path: root.join(".ores-mw.toml"),
+            source: String::new(),
+            at_repo_root: false,
+        });
+        warn_if_not_repo_root(&Discovered {
+            path: root.join(".ores-mw.toml"),
+            source: String::new(),
+            at_repo_root: true,
+        });
         let _ = fs::remove_dir_all(&root);
     }
 }
