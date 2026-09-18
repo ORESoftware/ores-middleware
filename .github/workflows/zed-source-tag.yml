@@ -67,7 +67,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
       - name: Install checksum-verified Zed 0.3.0
         shell: bash
         run: |
@@ -136,6 +136,8 @@ jobs:
           print(f'verified {len(required)} direct dependencies')
           PY
       - name: Commit only resolver-produced lockfile
+        env:
+          GH_PUSH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -149,4 +151,8 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Lock Zed dependency closure for middleware release'
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          auth="$(printf 'x-access-token:%s' "$GH_PUSH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          unset auth
