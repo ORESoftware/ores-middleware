@@ -17,6 +17,8 @@ enum IdempotencyStatus {
 // State the existing flat closed wire shape and SQL policy in compiler-visible form.
 // Both closure keywords are explicit peer-source policy for this non-composed model;
 // they are not a general rewrite rule for inherited/composed schemas.
+// Neither these annotations nor TJSV comparison output is generated from the
+// peer authority: TypeSpec and JSON Schema stay independent authored sources.
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 @TypeSpec.JsonSchema.extension("unevaluatedProperties", false)
 @TypeSpec.JsonSchema.extension("x-ores-sql", #{
