@@ -57,7 +57,7 @@ fn schema_enum(schema: &Value, definition: &str) -> BTreeSet<String> {
 
 fn typespec_model_signature(source: &str, name: &str) -> BTreeMap<String, bool> {
     let body = extract_block(source, "model", name);
-    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\\?)?\\s*:\\s*[^;]+;$")
+    let property = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)(\?)?\s*:\s*[^;]+;$")
         .expect("valid property expression");
     let mut signature = BTreeMap::new();
     let mut decorator_paren_depth = 0_i32;
@@ -108,6 +108,21 @@ fn schema_model_signature(schema: &Value, definition: &str) -> BTreeMap<String, 
         .keys()
         .map(|name| (name.clone(), required.contains(name.as_str())))
         .collect()
+}
+
+#[test]
+fn typespec_model_signature_parses_required_and_optional_properties() {
+    let source = r#"
+model Fixture {
+  enabled: boolean;
+  note?: string;
+}
+"#;
+
+    assert_eq!(
+        typespec_model_signature(source, "Fixture"),
+        BTreeMap::from([("enabled".to_owned(), true), ("note".to_owned(), false)])
+    );
 }
 
 #[test]
