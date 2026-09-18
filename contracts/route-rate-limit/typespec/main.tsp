@@ -44,14 +44,10 @@ scalar PathTemplate extends string;
 @pattern("^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}$")
 scalar OperationId extends string;
 
-@maxItems(8)
-@TypeSpec.JsonSchema.uniqueItems
-model HttpMethodSet is Array<HttpMethod>;
-
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 @TypeSpec.JsonSchema.extension("anyOf", #[
-  #{ `type`: "object", `required`: #["path_template"] },
-  #{ `type`: "object", `required`: #["operation_id"] },
+  #{ `type`: "object", `properties`: #{ `path_template`: #{} }, `required`: #["path_template"] },
+  #{ `type`: "object", `properties`: #{ `operation_id`: #{} }, `required`: #["operation_id"] },
   #{
     `type`: "object",
     `properties`: #{ `methods`: #{ `type`: "array", `minItems`: 1 } },
@@ -59,7 +55,9 @@ model HttpMethodSet is Array<HttpMethod>;
   }
 ])
 model RouteRateLimitBindingSelector {
-  methods?: HttpMethodSet;
+  @maxItems(8)
+  @TypeSpec.JsonSchema.uniqueItems
+  methods?: HttpMethod[];
   path_template?: PathTemplate;
   operation_id?: OperationId;
 }
@@ -80,13 +78,12 @@ model RouteRateLimitBinding {
   selector: RouteRateLimitBindingSelector;
 }
 
-@maxItems(128)
-model RouteRateLimitBindingList is Array<RouteRateLimitBinding>;
-
 @jsonSchema
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
 model RouteRateLimitBindingTable {
   schema: "ores.middleware.route-rate-limit-bindings/v1";
   default_policy_id?: PolicyId;
-  routes: RouteRateLimitBindingList;
+
+  @maxItems(128)
+  routes: RouteRateLimitBinding[];
 }

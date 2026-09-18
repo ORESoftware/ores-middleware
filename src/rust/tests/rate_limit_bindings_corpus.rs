@@ -69,23 +69,27 @@ fn shared_route_binding_corpus_matches_rust_runtime() {
 
         if kind == "ambiguous" {
             let error = case.config.resolve(&request).expect_err("expected ambiguity");
-            let RouteRateLimitBindingResolutionError::Ambiguous {
-                route_class_ids,
-                policy_ids,
-                ..
-            } = error;
-            assert_eq!(
-                route_class_ids,
-                string_array(expect.get("route_class_ids").expect("route_class_ids")),
-                "{} route-class ambiguity drift",
-                case.id
-            );
-            assert_eq!(
-                policy_ids,
-                string_array(expect.get("policy_ids").expect("policy_ids")),
-                "{} policy ambiguity drift",
-                case.id
-            );
+            match error {
+                RouteRateLimitBindingResolutionError::Ambiguous {
+                    route_class_ids,
+                    policy_ids,
+                    ..
+                } => {
+                    assert_eq!(
+                        route_class_ids,
+                        string_array(expect.get("route_class_ids").expect("route_class_ids")),
+                        "{} route-class ambiguity drift",
+                        case.id
+                    );
+                    assert_eq!(
+                        policy_ids,
+                        string_array(expect.get("policy_ids").expect("policy_ids")),
+                        "{} policy ambiguity drift",
+                        case.id
+                    );
+                }
+                other => panic!("{} expected ambiguity, got {other:?}", case.id),
+            }
             continue;
         }
 
