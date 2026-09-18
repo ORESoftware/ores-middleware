@@ -66,7 +66,8 @@ jobs:
           PY
 
       - name: Enforce both authored authorities with TJSV
-        uses: ORESoftware/typespec-json-schema-validator@4a5d049218adc2740d4cf78f612caf7f38f6f64c
+        # bd50346 upgrades TypeSpec to 1.16.0 and has no npm-audit exceptions.
+        uses: ORESoftware/typespec-json-schema-validator@bd503465dab8c5148fee722b443ed04ff126c9bf
         with:
           typespec: validation/evidence/ores-otel-config-v1/main.tsp
           schema: validation/evidence/ores-otel-config-v1/authored.schema.json
