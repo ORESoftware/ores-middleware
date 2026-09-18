@@ -10,6 +10,7 @@ mod bootstrap;
 mod compat;
 pub mod composition;
 mod config;
+pub mod config_discovery;
 mod context;
 pub mod docs_serving;
 pub mod fallthrough;
@@ -111,7 +112,11 @@ pub use resilience::{
     Bulkhead, BulkheadRejected, CircuitAdmission, CircuitBreaker, CircuitBreakerConfig,
     CircuitStateSnapshot, ResilienceConfigError,
 };
-pub use runtime_manifest::{RuntimeManifestError, admit_server_stack};
+pub use config_discovery::{Discovered, DiscoveryError, Origin, Start};
+pub use runtime_manifest::{
+    MANIFEST_ENV_PREFIX, MANIFEST_FILE_NAME, ManifestLoadError, RuntimeManifestError,
+    admit_server_stack, admit_server_stack_from, admit_server_stack_from_env,
+};
 pub use security::{CorsPolicy, CorsStage, CsrfPolicy, CsrfStage};
 pub use shared_auth::{
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,

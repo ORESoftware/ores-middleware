@@ -364,6 +364,75 @@ pub fn admit_server_stack(
         .admit_stack(expected_stack_config)
 }
 
+/// The dotfile this crate governs.
+pub const MANIFEST_FILE_NAME: &str = ".ores-mw.toml";
+
+/// Environment prefix for `ORES_MW_CONFIG_FILE` / `ORES_MW_CONFIG_DIR`.
+pub const MANIFEST_ENV_PREFIX: &str = "ORES_MW";
+
+/// Finds `.ores-mw.toml` by walking up from the process working directory and
+/// admits the server stack it selects.
+///
+/// This is the entry point a server should use. The caller no longer has to know
+/// where the manifest lives or embed its contents: the crate that owns the
+/// contract also owns finding it.
+///
+/// # Errors
+/// Returns [`ManifestLoadError::Discovery`] when no `.ores-mw.toml` exists in the
+/// working directory or any ancestor, and [`ManifestLoadError::Manifest`] when the
+/// document is present but does not admit the expected stack target.
+pub fn admit_server_stack_from_env(
+    target_name: Option<&str>,
+    expected_stack_config: &str,
+) -> Result<std::path::PathBuf, ManifestLoadError> {
+    let origin = crate::config_discovery::origin_from_env(MANIFEST_ENV_PREFIX);
+    admit_server_stack_from(&origin, target_name, expected_stack_config)
+}
+
+/// Same as [`admit_server_stack_from_env`] with an explicitly supplied origin.
+///
+/// # Errors
+/// See [`admit_server_stack_from_env`].
+pub fn admit_server_stack_from(
+    origin: &crate::config_discovery::Origin,
+    target_name: Option<&str>,
+    expected_stack_config: &str,
+) -> Result<std::path::PathBuf, ManifestLoadError> {
+    let found = crate::config_discovery::discover(MANIFEST_FILE_NAME, origin)
+        .map_err(ManifestLoadError::Discovery)?;
+    admit_server_stack(&found.source, target_name, expected_stack_config)
+        .map_err(ManifestLoadError::Manifest)?;
+    Ok(found.path)
+}
+
+/// Failure from locating or admitting a manifest on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestLoadError {
+    Discovery(crate::config_discovery::DiscoveryError),
+    Manifest(RuntimeManifestError),
+}
+
+impl ManifestLoadError {
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Discovery(error) => error.code(),
+            Self::Manifest(error) => error.code(),
+        }
+    }
+}
+
+impl fmt::Display for ManifestLoadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Discovery(error) => error.fmt(formatter),
+            Self::Manifest(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for ManifestLoadError {}
+
 /// Value-in/value-out "assign exactly once": returns the filled slot or a document
 /// error if it was already filled.
 fn set_once<T>(slot: Option<T>, value: T) -> Result<Option<T>, RuntimeManifestError> {
