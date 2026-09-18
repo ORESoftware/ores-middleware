@@ -126,12 +126,16 @@ jobs:
           fs.writeFileSync('target/route-rate-limit/drifted.schema.json', `${JSON.stringify(source, null, 2)}\n`);
           NODE
           set +e
+          mkdir -p target/route-rate-limit/drift-generated
           NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
-            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+              --typespec=contracts/route-rate-limit/typespec/main.tsp \
               --schema=target/route-rate-limit/drifted.schema.json \
-              --generated-schema=target/route-rate-limit/generated/route-rate-limit.generated.schema.json \
               --mapping=contracts/route-rate-limit/tjsv/mapping.json \
+              --output-dir=target/route-rate-limit/drift-generated \
+              --bundle-id=route-rate-limit.drift.generated.schema.json \
               --report=target/route-rate-limit/drift-report.json \
+              --contract-ir=target/route-rate-limit/drift-contract-ir.json \
               --quiet
           rc=$?
           set -e
