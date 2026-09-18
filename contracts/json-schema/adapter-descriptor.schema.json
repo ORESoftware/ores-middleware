@@ -29,16 +29,35 @@
       ],
       "properties": {
         "contractVersion": {
-          "const": "1.0.0"
+          "const": "1.0.0",
+          "type": "string"
         },
         "language": {
-          "enum": [
-            "rust",
-            "ts",
-            "gleam",
-            "golang",
-            "elixir",
-            "erlang"
+          "anyOf": [
+            {
+              "const": "rust",
+              "type": "string"
+            },
+            {
+              "const": "ts",
+              "type": "string"
+            },
+            {
+              "const": "gleam",
+              "type": "string"
+            },
+            {
+              "const": "golang",
+              "type": "string"
+            },
+            {
+              "const": "elixir",
+              "type": "string"
+            },
+            {
+              "const": "erlang",
+              "type": "string"
+            }
           ]
         },
         "runtime": {
@@ -63,32 +82,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {
-            "type": "string",
-            "enum": [
-              "request-context",
-              "panic-recovery",
-              "request-id",
-              "trace-context",
-              "structured-logging",
-              "metrics-red",
-              "deadline-timeout",
-              "payload-limit",
-              "rate-limit",
-              "auth",
-              "sync-observer",
-              "json",
-              "headers",
-              "compression",
-              "tls-policy",
-              "security-headers",
-              "idempotency",
-              "ip-policy",
-              "cache-etag",
-              "content-negotiation",
-              "fault-injection",
-              "test-auth-bypass",
-              "schema-capture"
-            ]
+            "$ref": "https://schemas.oresoftware.com/middleware/v1/middleware-stack.schema.json#/$defs/capability"
           }
         },
         "operationSymbols": {
