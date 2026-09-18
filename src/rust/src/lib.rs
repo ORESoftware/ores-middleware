@@ -28,6 +28,7 @@ pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
 pub mod runtime_manifest;
+pub mod runtime_manifest_discovery;
 pub mod security;
 pub mod shared_auth;
 pub mod shutdown;
@@ -112,6 +113,11 @@ pub use resilience::{
     CircuitStateSnapshot, ResilienceConfigError,
 };
 pub use runtime_manifest::{RuntimeManifestError, admit_server_stack};
+pub use runtime_manifest_discovery::{
+    DiscoveredMiddlewareManifest, MiddlewareManifestDiscoveryError, ORES_MW_CONFIG_FILENAME,
+    admit_nearest_server_stack, admit_nearest_server_stack_from_cwd,
+    discover_middleware_manifest, discover_middleware_manifest_from_cwd,
+};
 pub use security::{CorsPolicy, CorsStage, CsrfPolicy, CsrfStage};
 pub use shared_auth::{
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
