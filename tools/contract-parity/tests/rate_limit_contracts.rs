@@ -89,11 +89,16 @@ fn typespec_model_signature(source: &str, name: &str) -> BTreeMap<String, bool> 
         let raw_name = raw_name.trim();
         let (property_name, required) = raw_name
             .strip_suffix('?')
-            .map_or((raw_name, true), |property_name| (property_name.trim_end(), false));
+            .map_or((raw_name, true), |property_name| {
+                (property_name.trim_end(), false)
+            });
         if !identifier.is_match(property_name) {
             panic!("unsupported TypeSpec property name in {name}: {line}");
         }
-        if signature.insert(property_name.to_owned(), required).is_some() {
+        if signature
+            .insert(property_name.to_owned(), required)
+            .is_some()
+        {
             panic!("duplicate TypeSpec property in {name}: {property_name}");
         }
     }
