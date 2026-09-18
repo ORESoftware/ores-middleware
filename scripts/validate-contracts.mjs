@@ -7,20 +7,29 @@ import addFormats from "ajv-formats";
 const root = new URL("../", import.meta.url);
 const loadJson = async (path) => JSON.parse(await readFile(new URL(path, root), "utf8"));
 
+const middlewareSchemaPath = "contracts/json-schema/middleware-stack.schema.json";
+const adapterSchemaPath = "contracts/json-schema/adapter-descriptor.schema.json";
+const middlewareSchema = await loadJson(middlewareSchemaPath);
+
 const cases = [
-  ["contracts/json-schema/middleware-stack.schema.json", "contracts/fixtures/stack.minimal.json"],
-  ["contracts/json-schema/middleware-stack.schema.json", "contracts/fixtures/stack.ssr.json"],
-  ["contracts/json-schema/adapter-descriptor.schema.json", "contracts/fixtures/adapter-descriptor.example.json"]
+  [middlewareSchemaPath, "contracts/fixtures/stack.minimal.json"],
+  [middlewareSchemaPath, "contracts/fixtures/stack.ssr.json"],
+  [adapterSchemaPath, "contracts/fixtures/adapter-descriptor.example.json"]
 ];
 
 for (const [schemaPath, fixturePath] of cases) {
-  const schema = await loadJson(schemaPath);
+  const schema = schemaPath === middlewareSchemaPath ? middlewareSchema : await loadJson(schemaPath);
   const fixture = await loadJson(fixturePath);
   // A schema may intentionally have multiple independent fixtures. Use one
   // validator registry per fixture so a repeated canonical $id does not look
-  // like an accidental duplicate schema registration.
+  // like an accidental duplicate schema registration. When a peer schema uses
+  // a canonical cross-file $ref, register that authority before compiling the
+  // dependent root rather than duplicating its definition locally.
   const fixtureAjv = new Ajv2020({ allErrors: true, strict: true });
   addFormats(fixtureAjv);
+  if (schemaPath === adapterSchemaPath) {
+    fixtureAjv.addSchema(middlewareSchema);
+  }
   const validate = fixtureAjv.compile(schema);
   assert(
     validate(fixture),
@@ -29,7 +38,6 @@ for (const [schemaPath, fixturePath] of cases) {
   console.log(`validated ${fixturePath}`);
 }
 
-const middlewareSchema = await loadJson("contracts/json-schema/middleware-stack.schema.json");
 const malformedIssuer = await loadJson("contracts/fixtures/stack.minimal.json");
 malformedIssuer.integrations.sharedAuth.issuer = "not a uri";
 const malformedIssuerAjv = new Ajv2020({ allErrors: true, strict: true });
