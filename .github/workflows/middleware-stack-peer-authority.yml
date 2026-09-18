@@ -148,12 +148,16 @@ jobs:
           fs.writeFileSync('target/middleware-stack-tjsv/drifted.schema.json', `${JSON.stringify(source, null, 2)}\n`);
           NODE
           set +e
+          mkdir -p target/middleware-stack-tjsv/drift-generated
           NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
-            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+              --typespec=contracts/typespec/main.tsp \
               --schema=target/middleware-stack-tjsv/drifted.schema.json \
-              --generated-schema=target/middleware-stack-tjsv/generated/middleware-stack.generated.schema.json \
               --mapping=contracts/tjsv/middleware-stack.mapping.json \
+              --output-dir=target/middleware-stack-tjsv/drift-generated \
+              --bundle-id=middleware-stack.drift.generated.schema.json \
               --report=target/middleware-stack-tjsv/drift-report.json \
+              --contract-ir=target/middleware-stack-tjsv/drift-contract-ir.json \
               --quiet
           rc=$?
           set -e
