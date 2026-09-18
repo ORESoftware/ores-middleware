@@ -467,4 +467,25 @@ mod response_header_precedence_tests {
             Some("default-src 'self'; frame-ancestors 'none'")
         );
     }
+
+    #[test]
+    fn non_csp_finish_headers_keep_existing_overwrite_semantics() {
+        let mut response = Response::new(Body::empty());
+        response
+            .headers_mut()
+            .insert("x-frame-options", HeaderValue::from_static("SAMEORIGIN"));
+
+        apply_finish_headers(
+            &mut response,
+            [("x-frame-options".to_owned(), "DENY".to_owned())],
+        );
+
+        assert_eq!(
+            response
+                .headers()
+                .get("x-frame-options")
+                .and_then(|value| value.to_str().ok()),
+            Some("DENY")
+        );
+    }
 }
