@@ -3,7 +3,7 @@
 //! A server should not have to be told where its own `.ores-mw.toml` is. This
 //! module resolves a starting directory using the precedence already shared
 //! across the ORES SDKs, then walks up the directory tree and consumes the
-//! first matching file it finds.
+//! first matching file it finds without crossing the first Git repository root.
 //!
 //! Resolution order, highest priority first:
 //!
@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 /// Hard ceiling on how far up the tree the walk will look. A repository nested
 /// more deeply than this is pathological, and the bound keeps a runaway walk
-/// from touching unrelated parts of the filesystem.
+/// from touching unrelated parts of the filesystem when no Git boundary exists.
 pub const MAX_ANCESTORS: usize = 64;
 
 /// Refuse implausibly large documents before reading them into memory.
@@ -33,7 +33,7 @@ pub const MAX_CONFIG_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveryError {
-    /// No file of that name exists in the starting directory or any ancestor.
+    /// No file of that name exists in the starting directory or any permitted ancestor.
     NotFound {
         file_name: String,
         searched_from: PathBuf,
@@ -67,7 +67,7 @@ impl fmt::Display for DiscoveryError {
                 searched_from,
             } => write!(
                 formatter,
-                "{}: no {file_name} found in {} or any parent directory",
+                "{}: no {file_name} found in {} or any permitted parent directory",
                 self.code(),
                 searched_from.display()
             ),
@@ -95,18 +95,17 @@ pub struct Discovered {
     pub path: PathBuf,
     pub source: String,
     /// Whether the directory holding the file is a repository root, judged by an
-    /// adjacent `.git` directory. A configuration that governs a repository is
-    /// expected to sit at its root; anywhere else it may be a stray file that
-    /// silently governs more, or less, than its author intended.
+    /// adjacent `.git` marker. Normal clones use a directory; worktrees and
+    /// submodules use a file.
     pub at_repo_root: bool,
 }
 
-/// A directory is a repository root only when it holds an adjacent `.git`
-/// directory. Worktree/submodule `.git` files do not satisfy the fleet placement
-/// contract and therefore still produce the non-root warning.
+/// A directory is a repository root when it holds an adjacent `.git` marker.
+/// Git worktrees and submodules legitimately use a `.git` file rather than a
+/// directory, so both shapes are repository boundaries.
 #[must_use]
 pub fn is_repo_root(directory: &Path) -> bool {
-    directory.join(".git").is_dir()
+    directory.join(".git").exists()
 }
 
 /// Where the search should begin. Separating this from the walk keeps the
@@ -199,11 +198,13 @@ fn read_checked(path: &Path) -> Result<String, DiscoveryError> {
     Ok(source)
 }
 
-/// Walks from `directory` up to the filesystem root, returning the first
-/// `file_name` found.
+/// Walks from `directory` upward, returning the nearest `file_name` without
+/// crossing the first Git repository boundary. The repository root itself is
+/// checked before the walk stops. If no Git boundary is present, the existing
+/// `MAX_ANCESTORS` ceiling remains the fallback bound.
 ///
 /// # Errors
-/// Returns `NotFound` when no ancestor within `MAX_ANCESTORS` holds the file.
+/// Returns `NotFound` when no permitted ancestor holds the file.
 pub fn walk_up(directory: &Path, file_name: &str) -> Result<Discovered, DiscoveryError> {
     // Resolve symlinks first so the ancestor chain is the real one; fall back to
     // the given path when the directory does not exist yet.
@@ -216,6 +217,9 @@ pub fn walk_up(directory: &Path, file_name: &str) -> Result<Discovered, Discover
                 path: candidate,
                 at_repo_root: is_repo_root(ancestor),
             });
+        }
+        if is_repo_root(ancestor) {
+            break;
         }
     }
     Err(DiscoveryError::NotFound {
@@ -244,14 +248,10 @@ pub fn discover(file_name: &str, origin: &Origin) -> Result<Discovered, Discover
     Ok(found)
 }
 
-/// Emits an ORES telemetry warning when a configuration file governs a tree from
-/// somewhere other than a repository root.
-///
-/// This is a warning, not an error: a nested file is legitimate in a workspace
-/// member, and refusing to start would be worse than saying so. But it is worth
-/// saying, because the two ways this goes wrong are both quiet — a file left
-/// behind in a subdirectory that shadows the real one, or a walk that escaped the
-/// repository entirely and picked up an unrelated configuration.
+/// Emits an ORES telemetry warning when an explicitly selected or nested
+/// configuration file governs a tree from somewhere other than a repository
+/// root. Implicit directory discovery itself never crosses a Git repository
+/// boundary.
 pub fn warn_if_not_repo_root(found: &Discovered) {
     if found.at_repo_root {
         return;
@@ -260,8 +260,7 @@ pub fn warn_if_not_repo_root(found: &Discovered) {
         .warn(vec![next_loggers::json!({
             "event": "ores.config.not_at_repo_root",
             "config_path": found.path.display().to_string(),
-            "detail": "configuration was found outside a repository root (no adjacent .git directory); \
-    confirm this file is meant to govern the running service",
+            "detail": "configuration was found away from the repository root (no adjacent .git marker); confirm this file is meant to govern the running service",
         })])
         .send();
 }
@@ -335,6 +334,37 @@ mod tests {
         let found = discover(".ores-mw.toml", &origin_dir(&deep)).expect("discovers");
         assert!(found.source.contains("near = true"), "{}", found.source);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn implicit_walk_stops_after_checking_the_first_repository_root() {
+        let outer = temp_root("repo-boundary");
+        let repo = outer.join("repo");
+        let deep = repo.join("services/api");
+        fs::create_dir_all(&deep).expect("dirs");
+        fs::create_dir_all(repo.join(".git")).expect("git dir");
+        fs::write(outer.join(".ores-mw.toml"), "outside = true\n").expect("outside config");
+
+        let error = discover(".ores-mw.toml", &origin_dir(&deep))
+            .expect_err("implicit discovery must not escape the repository");
+        assert_eq!(error.code(), "config_not_found");
+        let _ = fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn repository_root_candidate_is_checked_before_the_walk_stops() {
+        let outer = temp_root("repo-root-config");
+        let repo = outer.join("repo");
+        let deep = repo.join("services/api");
+        fs::create_dir_all(&deep).expect("dirs");
+        fs::create_dir_all(repo.join(".git")).expect("git dir");
+        fs::write(repo.join(".ores-mw.toml"), "at_root = true\n").expect("root config");
+        fs::write(outer.join(".ores-mw.toml"), "outside = true\n").expect("outside config");
+
+        let found = discover(".ores-mw.toml", &origin_dir(&deep)).expect("root config");
+        assert!(found.source.contains("at_root = true"));
+        assert!(found.at_repo_root);
+        let _ = fs::remove_dir_all(&outer);
     }
 
     #[test]
@@ -507,33 +537,45 @@ mod tests {
     }
 
     #[test]
-    fn a_file_without_an_adjacent_git_directory_is_flagged_for_warning() {
+    fn a_file_without_an_adjacent_git_is_flagged_for_warning() {
         let root = temp_root("no-git");
         let nested = root.join("services/api");
         fs::create_dir_all(&nested).expect("dirs");
-        // The config sits in a subdirectory with no .git directory beside it.
+        // The config sits in a subdirectory with no .git marker beside it.
         fs::write(nested.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
 
         let found = discover(".ores-mw.toml", &origin_dir(&nested)).expect("discovers");
         assert!(
             !found.at_repo_root,
-            "a config outside a repo root must be flagged so the warning fires"
+            "a nested config must be flagged so the warning fires"
         );
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn a_git_file_does_not_count_as_the_fleet_repo_root_marker() {
+    fn a_git_file_counts_as_a_repo_root_for_worktrees_and_submodules() {
         let root = temp_root("git-file");
         fs::write(root.join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").expect("git file");
         fs::write(root.join(".ores-mw.toml"), "schema_version = 1\n").expect("write");
 
         let found = discover(".ores-mw.toml", &origin_dir(&root)).expect("discovers");
-        assert!(
-            !found.at_repo_root,
-            "a .git file is not the adjacent .git directory required by fleet policy"
-        );
+        assert!(found.at_repo_root, "a .git file is a repository root");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_git_file_stops_the_implicit_parent_walk() {
+        let outer = temp_root("git-file-boundary");
+        let repo = outer.join("worktree");
+        let deep = repo.join("src/service");
+        fs::create_dir_all(&deep).expect("dirs");
+        fs::write(repo.join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").expect("git file");
+        fs::write(outer.join(".ores-mw.toml"), "outside = true\n").expect("outside config");
+
+        let error = discover(".ores-mw.toml", &origin_dir(&deep))
+            .expect_err("worktree boundary must stop parent discovery");
+        assert_eq!(error.code(), "config_not_found");
+        let _ = fs::remove_dir_all(&outer);
     }
 
     #[test]
