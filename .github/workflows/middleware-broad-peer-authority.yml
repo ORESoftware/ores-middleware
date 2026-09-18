@@ -9,7 +9,6 @@ on:
       - 'scripts/compare-authorities.mjs'
       - 'scripts/validate-contracts.mjs'
       - 'scripts/mutate-middleware-broad-peer-authority.mjs'
-      - 'scripts/mutate-middleware-broad-peer-authority.mjs'
       - '.github/workflows/middleware-broad-peer-authority.yml'
   push:
     branches: [main, dev]
@@ -19,6 +18,7 @@ on:
       - 'contracts/tjsv/middleware-broad.mapping.json'
       - 'scripts/compare-authorities.mjs'
       - 'scripts/validate-contracts.mjs'
+      - 'scripts/mutate-middleware-broad-peer-authority.mjs'
       - '.github/workflows/middleware-broad-peer-authority.yml'
   workflow_dispatch:
 
