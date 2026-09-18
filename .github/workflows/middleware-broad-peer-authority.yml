@@ -117,11 +117,22 @@ jobs:
           }
           const report = JSON.parse(fs.readFileSync('target/middleware-broad-tjsv/report.json', 'utf8'));
           for (const field of ['typespecDeclarations', 'generatedDeclarations', 'authoredDeclarations']) {
-            if (report.counts?.[field] !== 32) throw new Error(`${field} must equal 33`);
+            if (report.counts?.[field] !== 33) throw new Error(`${field} must equal 33`);
           }
-          if ((report.coverage?.outOfScopeTypeSpecDeclarations ?? []).length !== 0) {
-            throw new Error('out-of-scope TypeSpec data declarations are forbidden');
+          const outOfScope = report.coverage?.outOfScopeTypeSpecDeclarations ?? [];
+          if (
+            outOfScope.length !== 1 ||
+            outOfScope[0]?.qualifiedName !== 'Ores.Middleware.MiddlewareSdk' ||
+            outOfScope[0]?.kind !== 'interface' ||
+            outOfScope[0]?.reason !== 'not representable as a JSON Schema declaration'
+          ) {
+            throw new Error(`expected only the non-data MiddlewareSdk interface out of scope, got ${JSON.stringify(outOfScope)}`);
           }
+          if (report.status !== 'passed') throw new Error(`broad peer report status must be passed, got ${report.status}`);
+          if (report.counts?.findings !== 0 || report.counts?.structuralFindings !== 0 || report.counts?.differentialFindings !== 0) {
+            throw new Error('broad peer report must have zero findings');
+          }
+          if (report.zeroUnexplainedFindings !== true) throw new Error('broad peer report must have zero unexplained findings');
           NODE
 
       - name: Prove capability drift fails closed
@@ -138,13 +149,23 @@ jobs:
           fs.writeFileSync(path,`${JSON.stringify(schema,null,2)}\n`);
           NODE
           set +e
+          mkdir -p target/middleware-broad-tjsv/drift-generated
           NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
-            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs validate \
+            node target/tools/tjsv/bin/typespec-json-schema-validator.mjs check \
+              --typespec=contracts/typespec/main.tsp \
               --schema=target/middleware-broad-tjsv/drift-schema \
-              --generated-schema=target/middleware-broad-tjsv/generated/middleware-broad.generated.schema.json \
               --mapping=contracts/tjsv/middleware-broad.mapping.json \
+              --output-dir=target/middleware-broad-tjsv/drift-generated \
+              --bundle-id=middleware-broad.drift.generated.schema.json \
               --report=target/middleware-broad-tjsv/drift-report.json \
-              --quiet
+              --contract-ir=target/middleware-broad-tjsv/drift-contract-ir.json \
+              --probes=true \
+              --max-probes=128 \
+              --int64-strategy=number \
+              --seal-object-schemas=false \
+              --polymorphic-models-strategy=oneOf \
+              --format-assertion=true \
+              --quiet=true
           rc=$?
           set -e
           if [ "$rc" -ne 2 ]; then
