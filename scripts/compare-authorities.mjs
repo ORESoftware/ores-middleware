@@ -21,9 +21,14 @@ function sameSet(label, left, right) {
 
 const tspCapabilities = typeSpecEnum("MiddlewareCapability");
 const stackCapabilities = stack.$defs.capability.enum;
-const descriptorCapabilities = descriptor.$defs.adapterDescriptor.properties.capabilities.items.enum;
+const descriptorCapabilityRef = descriptor.$defs.adapterDescriptor.properties.capabilities.items.$ref;
+assert.equal(
+  descriptorCapabilityRef,
+  "https://schemas.oresoftware.com/middleware/v1/middleware-stack.schema.json#/$defs/capability",
+  "adapter descriptor capabilities must reference the canonical middleware capability authority"
+);
 sameSet("capability authority", tspCapabilities, stackCapabilities);
-sameSet("descriptor capability projection", tspCapabilities, descriptorCapabilities);
+sameSet("descriptor capability projection", tspCapabilities, stackCapabilities);
 
 const tspOperations = typeSpecEnum("SdkOperation");
 const schemaOperations = descriptor.$defs.sdkOperation.enum;
