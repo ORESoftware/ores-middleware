@@ -29,6 +29,7 @@ pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
 pub mod runtime_manifest;
+pub mod runtime_manifest_evidence;
 pub mod security;
 pub mod shared_auth;
 pub mod shutdown;
@@ -116,6 +117,10 @@ pub use config_discovery::{Discovered, DiscoveryError, Origin, Start};
 pub use runtime_manifest::{
     MANIFEST_ENV_PREFIX, MANIFEST_FILE_NAME, ManifestLoadError, RuntimeManifestError,
     admit_server_stack, admit_server_stack_from, admit_server_stack_from_env,
+};
+pub use runtime_manifest_evidence::{
+    MANIFEST_ADMISSION_EVIDENCE_SCHEMA, ManifestAdmissionEvidence,
+    admit_server_stack_with_evidence_from, admit_server_stack_with_evidence_from_env,
 };
 pub use security::{CorsPolicy, CorsStage, CsrfPolicy, CsrfStage};
 pub use shared_auth::{
