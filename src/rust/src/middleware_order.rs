@@ -4,6 +4,10 @@ use crate::RateLimitFailureMode;
 
 /// Stages in the historical reviewed ORES middleware profile.
 ///
+/// The list is an observable request/response execution trace, not the lexical
+/// nesting order of framework layers: response stages occur after the handler,
+/// in the order listed here.
+///
 /// This closed enum exists for the opt-in compatibility/reference validator
 /// below. It is not the universe of middleware a consumer may compose. New
 /// consumer-owned plans can use arbitrary string stage names through
