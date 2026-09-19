@@ -65,6 +65,17 @@ pub struct IntegrationError {
     pub message: String,
 }
 
+impl std::fmt::Display for IntegrationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+// A public error type that is not `std::error::Error` cannot be propagated with
+// `?` into `Box<dyn std::error::Error>`, which is the return type of nearly
+// every consumer's `main` and setup function.
+impl std::error::Error for IntegrationError {}
+
 pub trait AuthVerifier: Send + Sync {
     fn verify<'a>(
         &'a self,
@@ -545,5 +556,24 @@ mod tests {
         assert!(!second.is_allowed());
         assert!(second.retry_after_ms.is_some_and(|value| value > 0));
         assert_eq!(second.remaining, 0);
+    }
+}
+
+#[cfg(test)]
+mod integration_error_tests {
+    use super::IntegrationError;
+
+    fn setup() -> Result<(), Box<dyn std::error::Error>> {
+        Err(IntegrationError {
+            code: "rate_limit_key_invalid",
+            message: "key too short".to_owned(),
+        })?;
+        Ok(())
+    }
+
+    #[test]
+    fn propagates_with_question_mark_into_a_boxed_error() {
+        let error = setup().expect_err("propagates");
+        assert_eq!(error.to_string(), "rate_limit_key_invalid: key too short");
     }
 }
