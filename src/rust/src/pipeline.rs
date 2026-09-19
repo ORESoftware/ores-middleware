@@ -178,10 +178,16 @@ impl MiddlewareStack {
             }
 
             enforce_transport_policy(&self.config, &request)?;
-            self.auth
-                .verify(&request)
-                .await
-                .map_err(|error| MiddlewareError::new(401, error.code, error.message))
+            self.auth.verify(&request).await.map_err(|error| {
+                // Provider diagnostics can contain SDK payloads, token fragments, or
+                // backend topology. Keep only the stable provider code in trusted logs;
+                // the request/trace ids are already carried by the lifecycle span.
+                tracing::warn!(
+                    code = error.code,
+                    "authentication provider rejected request"
+                );
+                MiddlewareError::new(401, "authentication_failed", "authentication failed")
+            })
         })
         .await
         .map_err(|error| correlate_error(&self.config, &base_context, error))?;
