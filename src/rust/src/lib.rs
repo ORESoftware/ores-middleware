@@ -17,6 +17,7 @@ pub mod fallthrough;
 pub mod frameworks;
 pub mod hardening;
 mod integrations;
+pub mod lambda;
 pub mod middleware_order;
 mod net;
 pub mod operation;
@@ -67,6 +68,10 @@ pub use context::{
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
+};
+pub use lambda::{
+    LambdaInvocationBoundary, LambdaInvocationError, LambdaInvocationMetadata,
+    LambdaInvocationTrigger,
 };
 pub use middleware_order::{
     DEFAULT_MIDDLEWARE_ORDER, MiddlewareStage, OperationClass, OrderViolation,
