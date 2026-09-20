@@ -1,6 +1,6 @@
 use ores_middleware::{
     RouteRateLimitBindingRequest, RouteRateLimitBindingResolutionError,
-    RouteRateLimitBindingTable, RouteRateLimitBindingSource,
+    RouteRateLimitBindingSource, RouteRateLimitBindingTable,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -68,7 +68,10 @@ fn shared_route_binding_corpus_matches_rust_runtime() {
             .expect("expect.kind");
 
         if kind == "ambiguous" {
-            let error = case.config.resolve(&request).expect_err("expected ambiguity");
+            let error = case
+                .config
+                .resolve(&request)
+                .expect_err("expected ambiguity");
             match error {
                 RouteRateLimitBindingResolutionError::Ambiguous {
                     route_class_ids,
@@ -104,7 +107,11 @@ fn shared_route_binding_corpus_matches_rust_runtime() {
             .get("policy_id")
             .and_then(Value::as_str)
             .expect("expect.policy_id");
-        assert_eq!(resolved.policy_id, expected_policy_id, "{} policy drift", case.id);
+        assert_eq!(
+            resolved.policy_id, expected_policy_id,
+            "{} policy drift",
+            case.id
+        );
 
         match kind {
             "route" => {
