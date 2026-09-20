@@ -10,6 +10,7 @@ use crate::{RequestContext, run_with_context, run_with_ores_log_context};
 #[serde(rename_all = "lowercase")]
 pub enum OperationTransport {
     Http,
+    Lambda,
     Tcp,
     WebSocket,
 }
@@ -18,6 +19,7 @@ impl OperationTransport {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Http => "http",
+            Self::Lambda => "lambda",
             Self::Tcp => "tcp",
             Self::WebSocket => "websocket",
         }
@@ -105,7 +107,7 @@ impl<T> OperationOutcome<T> {
     }
 }
 
-/// Executes one HTTP request, TCP callback, or WebSocket message inside the
+/// Executes one HTTP request, Lambda callback, TCP callback, or WebSocket message inside the
 /// middleware task-local, ores-otel task context, and a `tracing` span.
 /// Returned errors and unwind panics become typed outcomes instead of
 /// unwinding the listener task.
@@ -400,6 +402,31 @@ mod tests {
             deadline_unix_ms: None,
             baggage: BTreeMap::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn lambda_callback_transport_is_explicit_and_stable() {
+        #[derive(Debug)]
+        struct CallbackError;
+
+        assert_eq!(
+            serde_json::to_string(&OperationTransport::Lambda).unwrap(),
+            "\"lambda\""
+        );
+        let failed = run_operation_boundary(
+            request_context(0),
+            OperationDescriptor {
+                transport: OperationTransport::Lambda,
+                scope: OperationScope::Callback,
+                name: "lambda.invoke".into(),
+            },
+            async { Err::<(), _>(CallbackError) },
+        )
+        .await;
+        let failure = failed.failure().expect("lambda error must be captured");
+        assert_eq!(failure.transport, OperationTransport::Lambda);
+        assert_eq!(failure.scope, OperationScope::Callback);
+        assert_eq!(failure.operation, "lambda.invoke");
     }
 
     #[tokio::test]

@@ -1,9 +1,10 @@
 import ores_middleware
 import ores_middleware/otel
 
-/// Network protocol owning the guarded operation.
+/// Network protocol or invocation carrier owning the guarded operation.
 pub type OperationTransport {
   Http
+  Lambda
   Tcp
   WebSocket
 }
@@ -53,6 +54,7 @@ pub fn run_with_logger(
 fn transport_name(transport: OperationTransport) -> String {
   case transport {
     Http -> "http"
+    Lambda -> "lambda"
     Tcp -> "tcp"
     WebSocket -> "websocket"
   }
