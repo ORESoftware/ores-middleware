@@ -1,0 +1,58 @@
+name: route rate limit rustfmt candidate
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/route-rate-limit-rustfmt-candidate.yml
+      - src/rust/src/rate_limit_bindings.rs
+      - src/rust/tests/rate_limit_bindings_corpus.rs
+      - src/rust/tests/rate_limit_binding_request_hardening.rs
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out same-repository PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          persist-credentials: true
+          show-progress: false
+      - name: Install the workflow Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - name: Apply exact workflow formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 \
+            src/rust/src/rate_limit_bindings.rs \
+            src/rust/tests/rate_limit_bindings_corpus.rs \
+            src/rust/tests/rate_limit_binding_request_hardening.rs
+          git diff --check
+      - name: Commit format-only delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- \
+            src/rust/src/rate_limit_bindings.rs \
+            src/rust/tests/rate_limit_bindings_corpus.rs \
+            src/rust/tests/rate_limit_binding_request_hardening.rs; then
+            echo 'route rate-limit sources already match Rust 1.95 rustfmt'
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- \
+            src/rust/src/rate_limit_bindings.rs \
+            src/rust/tests/rate_limit_bindings_corpus.rs \
+            src/rust/tests/rate_limit_binding_request_hardening.rs
+          git commit -m 'style: apply Rust 1.95 route binding format'
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
