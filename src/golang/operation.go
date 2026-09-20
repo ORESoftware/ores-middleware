@@ -11,6 +11,7 @@ type OperationTransport string
 
 const (
 	OperationTransportHTTP      OperationTransport = "http"
+	OperationTransportLambda    OperationTransport = "lambda"
 	OperationTransportTCP       OperationTransport = "tcp"
 	OperationTransportWebSocket OperationTransport = "websocket"
 )
@@ -62,7 +63,7 @@ func (outcome OperationOutcome[T]) OK() bool { return outcome.Failure == nil }
 type OperationFailureReporter func(context.Context, OperationFailure)
 
 // CaptureOperationContext takes a defensive copy suitable for an explicitly
-// propagated goroutine, TCP connection, WebSocket message, or queue callback.
+// propagated goroutine, Lambda/queue callback, TCP connection, or WebSocket message.
 func CaptureOperationContext(ctx context.Context) (RequestContext, bool) {
 	return CurrentContext(ctx)
 }
