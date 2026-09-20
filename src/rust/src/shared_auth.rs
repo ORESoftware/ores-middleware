@@ -140,7 +140,7 @@ impl SharedAuthRuntimeTopology {
             supabase,
             neon,
             server_role,
-            audience,
+            audience: audience.into(),
             decision_mode,
         };
         let issues = topology.validation_issues();
