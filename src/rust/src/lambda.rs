@@ -1,4 +1,11 @@
-use std::{collections::BTreeMap, fmt, future::Future, path::PathBuf, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    fs::{self, File},
+    future::Future,
+    path::PathBuf,
+    time::Duration,
+};
 
 use uuid::Uuid;
 
@@ -49,6 +56,7 @@ pub enum LambdaInvocationError {
     Manifest(ManifestLoadError),
     Bootstrap(BootstrapError),
     InvalidMetadata(&'static str),
+    InvalidStackConfig { path: PathBuf },
     PayloadTooLarge { payload_bytes: u64, limit: u64 },
 }
 
@@ -59,6 +67,7 @@ impl LambdaInvocationError {
             Self::Manifest(error) => error.code(),
             Self::Bootstrap(error) => error.code,
             Self::InvalidMetadata(_) => "invalid_lambda_invocation_metadata",
+            Self::InvalidStackConfig { .. } => "lambda_stack_config_invalid",
             Self::PayloadTooLarge { .. } => "lambda_payload_too_large",
         }
     }
@@ -67,9 +76,20 @@ impl LambdaInvocationError {
 impl fmt::Display for LambdaInvocationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Manifest(error) => write!(formatter, "lambda middleware manifest admission failed: {error}"),
-            Self::Bootstrap(error) => write!(formatter, "lambda middleware bootstrap failed: {error}"),
-            Self::InvalidMetadata(field) => write!(formatter, "invalid trusted Lambda metadata field: {field}"),
+            Self::Manifest(error) => {
+                write!(formatter, "lambda middleware manifest admission failed: {error}")
+            }
+            Self::Bootstrap(error) => {
+                write!(formatter, "lambda middleware bootstrap failed: {error}")
+            }
+            Self::InvalidMetadata(field) => {
+                write!(formatter, "invalid trusted Lambda metadata field: {field}")
+            }
+            Self::InvalidStackConfig { path } => write!(
+                formatter,
+                "Lambda middleware stack config is not a readable regular file: {}",
+                path.display()
+            ),
             Self::PayloadTooLarge {
                 payload_bytes,
                 limit,
@@ -88,10 +108,11 @@ impl std::error::Error for LambdaInvocationError {}
 ///
 /// HTTP-triggered functions should continue to use the framework/Axum adapter so
 /// TLS, forwarded-header, CORS and response-header policy stay on the HTTP path.
-/// This boundary admits `.ores-mw.toml`, bootstraps the same middleware config,
-/// applies the shared payload/deadline policy, and executes the callback through
-/// the first-class `lambda` operation boundary with task-local request/log
-/// context. It intentionally does not fabricate HTTP method/path/header values.
+/// This boundary admits `.ores-mw.toml`, requires its selected stack policy file
+/// to be present and readable, bootstraps the same middleware config, applies the
+/// shared payload/deadline policy, and executes the callback through the
+/// first-class `lambda` operation boundary with task-local request/log context.
+/// It intentionally does not fabricate HTTP method/path/header values.
 #[derive(Clone)]
 pub struct LambdaInvocationBoundary {
     stack: MiddlewareStack,
@@ -101,9 +122,9 @@ pub struct LambdaInvocationBoundary {
 }
 
 impl LambdaInvocationBoundary {
-    /// Discover and admit `.ores-mw.toml`, prove the selected server stack path,
-    /// and bootstrap the same environment-driven middleware configuration used
-    /// by HTTP servers.
+    /// Discover and admit `.ores-mw.toml`, prove the selected server stack path
+    /// names a readable regular non-symlink file, and bootstrap the same
+    /// environment-driven middleware configuration used by HTTP servers.
     pub fn from_env(
         service_name: impl Into<String>,
         target_name: Option<&str>,
@@ -111,12 +132,13 @@ impl LambdaInvocationBoundary {
     ) -> Result<Self, LambdaInvocationError> {
         let manifest_path = admit_server_stack_from_env(target_name, expected_stack_config)
             .map_err(LambdaInvocationError::Manifest)?;
+        let stack_config_path = admit_stack_config_file(expected_stack_config)?;
         let stack = stack_from_env(service_name).map_err(LambdaInvocationError::Bootstrap)?;
         Ok(Self {
             stack,
             manifest_path,
             target_name: target_name.map(ToOwned::to_owned),
-            stack_config: expected_stack_config.to_owned(),
+            stack_config: stack_config_path.to_string_lossy().into_owned(),
         })
     }
 
@@ -260,6 +282,18 @@ struct AdmittedInvocation {
     timeout: Duration,
 }
 
+fn admit_stack_config_file(path: &str) -> Result<PathBuf, LambdaInvocationError> {
+    let path = PathBuf::from(path);
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|_| LambdaInvocationError::InvalidStackConfig { path: path.clone() })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(LambdaInvocationError::InvalidStackConfig { path });
+    }
+    File::open(&path)
+        .map_err(|_| LambdaInvocationError::InvalidStackConfig { path: path.clone() })?;
+    Ok(path)
+}
+
 fn valid_token(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_TOKEN_BYTES
@@ -276,7 +310,13 @@ fn valid_trace_id(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+    use std::{
+        convert::Infallible,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
 
     use super::*;
     use crate::{MiddlewareStack, OperationFailureKind, current_context, default_config};
@@ -296,6 +336,59 @@ mod tests {
             payload_bytes: 32,
             deadline_unix_ms: None,
         }
+    }
+
+    fn temp_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("ores-mw-lambda-stack-{tag}-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn stack_config_admission_accepts_a_readable_regular_file() {
+        let root = temp_path("regular");
+        fs::create_dir_all(&root).expect("fixture root");
+        let path = root.join("middleware.json");
+        fs::write(&path, b"{}\n").expect("fixture stack");
+
+        assert_eq!(admit_stack_config_file(path.to_str().expect("utf8 path")).unwrap(), path);
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn stack_config_admission_rejects_missing_and_directory_paths() {
+        let root = temp_path("invalid");
+        fs::create_dir_all(&root).expect("fixture root");
+        let missing = root.join("missing.json");
+        assert!(matches!(
+            admit_stack_config_file(missing.to_str().expect("utf8 path")),
+            Err(LambdaInvocationError::InvalidStackConfig { .. })
+        ));
+        assert!(matches!(
+            admit_stack_config_file(root.to_str().expect("utf8 path")),
+            Err(LambdaInvocationError::InvalidStackConfig { .. })
+        ));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stack_config_admission_rejects_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_path("symlink");
+        fs::create_dir_all(&root).expect("fixture root");
+        let target = root.join("target.json");
+        let link = root.join("stack.json");
+        fs::write(&target, b"{}\n").expect("fixture target");
+        symlink(&target, &link).expect("fixture symlink");
+
+        assert!(matches!(
+            admit_stack_config_file(link.to_str().expect("utf8 path")),
+            Err(LambdaInvocationError::InvalidStackConfig { .. })
+        ));
+
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[tokio::test]
@@ -330,7 +423,10 @@ mod tests {
                 Ok::<_, Infallible>(())
             })
             .await;
-        assert!(matches!(result, Err(LambdaInvocationError::PayloadTooLarge { .. })));
+        assert!(matches!(
+            result,
+            Err(LambdaInvocationError::PayloadTooLarge { .. })
+        ));
         assert!(!polled.load(Ordering::SeqCst));
     }
 
