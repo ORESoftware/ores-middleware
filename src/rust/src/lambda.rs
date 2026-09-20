@@ -54,7 +54,7 @@ pub enum LambdaInvocationError {
 
 impl LambdaInvocationError {
     #[must_use]
-    pub const fn code(&self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::Manifest(error) => error.code(),
             Self::Bootstrap(error) => error.code,
