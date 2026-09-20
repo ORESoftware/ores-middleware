@@ -1,12 +1,19 @@
-use std::{collections::BTreeMap, fmt, future::Future, path::PathBuf, time::Duration};
+use std::{
+    collections::BTreeMap,
+    env, fmt,
+    fs::{self, File},
+    future::Future,
+    path::PathBuf,
+    str::FromStr,
+    time::Duration,
+};
 
 use uuid::Uuid;
 
 use crate::{
-    BootstrapError, ManifestLoadError, MiddlewareStack, OperationDescriptor, OperationOutcome,
-    OperationScope, OperationTransport, RequestContext, admit_server_stack_from_env,
+    BootstrapError, ManifestLoadError, OperationDescriptor, OperationOutcome, OperationScope,
+    OperationTransport, RequestContext, admit_server_stack_from_env, default_config,
     run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
-    stack_from_env,
 };
 
 const MAX_TOKEN_BYTES: usize = 128;
@@ -49,6 +56,7 @@ pub enum LambdaInvocationError {
     Manifest(ManifestLoadError),
     Bootstrap(BootstrapError),
     InvalidMetadata(&'static str),
+    InvalidStackConfig { path: PathBuf },
     PayloadTooLarge { payload_bytes: u64, limit: u64 },
 }
 
@@ -59,6 +67,7 @@ impl LambdaInvocationError {
             Self::Manifest(error) => error.code(),
             Self::Bootstrap(error) => error.code,
             Self::InvalidMetadata(_) => "invalid_lambda_invocation_metadata",
+            Self::InvalidStackConfig { .. } => "lambda_stack_config_invalid",
             Self::PayloadTooLarge { .. } => "lambda_payload_too_large",
         }
     }
@@ -67,9 +76,20 @@ impl LambdaInvocationError {
 impl fmt::Display for LambdaInvocationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Manifest(error) => write!(formatter, "lambda middleware manifest admission failed: {error}"),
-            Self::Bootstrap(error) => write!(formatter, "lambda middleware bootstrap failed: {error}"),
-            Self::InvalidMetadata(field) => write!(formatter, "invalid trusted Lambda metadata field: {field}"),
+            Self::Manifest(error) => {
+                write!(formatter, "lambda middleware manifest admission failed: {error}")
+            }
+            Self::Bootstrap(error) => {
+                write!(formatter, "lambda middleware bootstrap failed: {error}")
+            }
+            Self::InvalidMetadata(field) => {
+                write!(formatter, "invalid trusted Lambda metadata field: {field}")
+            }
+            Self::InvalidStackConfig { path } => write!(
+                formatter,
+                "Lambda middleware stack config is not a readable regular file: {}",
+                path.display()
+            ),
             Self::PayloadTooLarge {
                 payload_bytes,
                 limit,
@@ -83,27 +103,41 @@ impl fmt::Display for LambdaInvocationError {
 
 impl std::error::Error for LambdaInvocationError {}
 
+/// The callback-native subset currently enforced before user code runs.
+///
+/// HTTP-only policy (TLS/forwarded headers, response security headers,
+/// compression) and callback auth/rate/idempotency are intentionally absent
+/// until they have trusted callback-native inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LambdaInvocationPolicy {
+    timeout_ms: u64,
+    max_payload_bytes: u64,
+}
+
 /// Fail-closed, provider-neutral middleware boundary for queue, schedule and
 /// direct Lambda callbacks.
 ///
 /// HTTP-triggered functions should continue to use the framework/Axum adapter so
 /// TLS, forwarded-header, CORS and response-header policy stay on the HTTP path.
-/// This boundary admits `.ores-mw.toml`, bootstraps the same middleware config,
-/// applies the shared payload/deadline policy, and executes the callback through
-/// the first-class `lambda` operation boundary with task-local request/log
-/// context. It intentionally does not fabricate HTTP method/path/header values.
+/// This boundary admits `.ores-mw.toml`, requires its selected stack policy file
+/// to be present and readable, resolves the callback-native payload/deadline
+/// subset from the canonical environment names, and executes the callback
+/// through the first-class `lambda` operation boundary with task-local
+/// request/log context. It intentionally does not fabricate HTTP metadata or
+/// require HTTP-only TLS settings in production.
 #[derive(Clone)]
 pub struct LambdaInvocationBoundary {
-    stack: MiddlewareStack,
+    policy: LambdaInvocationPolicy,
     manifest_path: PathBuf,
     target_name: Option<String>,
     stack_config: String,
 }
 
 impl LambdaInvocationBoundary {
-    /// Discover and admit `.ores-mw.toml`, prove the selected server stack path,
-    /// and bootstrap the same environment-driven middleware configuration used
-    /// by HTTP servers.
+    /// Discover and admit `.ores-mw.toml`, prove the selected server stack path
+    /// names a readable regular non-symlink file, and resolve the callback-native
+    /// middleware limits from the same canonical environment names used by the
+    /// server bootstrap.
     pub fn from_env(
         service_name: impl Into<String>,
         target_name: Option<&str>,
@@ -111,12 +145,16 @@ impl LambdaInvocationBoundary {
     ) -> Result<Self, LambdaInvocationError> {
         let manifest_path = admit_server_stack_from_env(target_name, expected_stack_config)
             .map_err(LambdaInvocationError::Manifest)?;
-        let stack = stack_from_env(service_name).map_err(LambdaInvocationError::Bootstrap)?;
+        let stack_config_path = admit_stack_config_file(expected_stack_config)?;
+        let policy = invocation_policy_from_lookup(service_name.into(), |name| {
+            env::var(name).ok()
+        })
+        .map_err(LambdaInvocationError::Bootstrap)?;
         Ok(Self {
-            stack,
+            policy,
             manifest_path,
             target_name: target_name.map(ToOwned::to_owned),
-            stack_config: expected_stack_config.to_owned(),
+            stack_config: stack_config_path.to_string_lossy().into_owned(),
         })
     }
 
@@ -190,11 +228,10 @@ impl LambdaInvocationBoundary {
         if !valid_token(&metadata.function_name) {
             return Err(LambdaInvocationError::InvalidMetadata("function_name"));
         }
-        let max_payload = self.stack.config().settings.max_body_bytes as u64;
-        if metadata.payload_bytes > max_payload {
+        if metadata.payload_bytes > self.policy.max_payload_bytes {
             return Err(LambdaInvocationError::PayloadTooLarge {
                 payload_bytes: metadata.payload_bytes,
-                limit: max_payload,
+                limit: self.policy.max_payload_bytes,
             });
         }
 
@@ -204,7 +241,7 @@ impl LambdaInvocationBoundary {
             None => Uuid::new_v4().simple().to_string(),
         };
         let now = RequestContext::now_ms();
-        let configured_deadline = now.saturating_add(self.stack.config().settings.timeout_ms);
+        let configured_deadline = now.saturating_add(self.policy.timeout_ms);
         let deadline_unix_ms = metadata
             .deadline_unix_ms
             .map_or(configured_deadline, |provider| provider.min(configured_deadline));
@@ -244,9 +281,9 @@ impl LambdaInvocationBoundary {
     }
 
     #[cfg(test)]
-    fn from_stack_for_test(stack: MiddlewareStack) -> Self {
+    fn from_policy_for_test(policy: LambdaInvocationPolicy) -> Self {
         Self {
-            stack,
+            policy,
             manifest_path: PathBuf::from(".ores-mw.toml"),
             target_name: Some("lambda".into()),
             stack_config: "config/middleware.json".into(),
@@ -258,6 +295,90 @@ struct AdmittedInvocation {
     context: RequestContext,
     descriptor: OperationDescriptor,
     timeout: Duration,
+}
+
+fn invocation_policy_from_lookup<F>(
+    service_name: String,
+    lookup: F,
+) -> Result<LambdaInvocationPolicy, BootstrapError>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let defaults = default_config(service_name);
+    if let Some(value) = first_value(&lookup, &["ORES_MIDDLEWARE_ENV", "APP_ENV", "RUST_ENV"]) {
+        validate_environment(&value)?;
+    }
+    let timeout_ms = parse_positive(
+        lookup("ORES_MIDDLEWARE_TIMEOUT_MS"),
+        "ORES_MIDDLEWARE_TIMEOUT_MS",
+        defaults.settings.timeout_ms,
+    )?;
+    let max_payload_bytes = parse_positive(
+        lookup("ORES_MIDDLEWARE_MAX_BODY_BYTES"),
+        "ORES_MIDDLEWARE_MAX_BODY_BYTES",
+        defaults.settings.max_body_bytes as u64,
+    )?;
+    Ok(LambdaInvocationPolicy {
+        timeout_ms,
+        max_payload_bytes,
+    })
+}
+
+fn first_value<F>(lookup: &F, names: &[&str]) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    names.iter().find_map(|name| lookup(name))
+}
+
+fn validate_environment(value: &str) -> Result<(), BootstrapError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "development" | "dev" | "local" | "test" | "testing" | "staging" | "stage"
+        | "production" | "prod" => Ok(()),
+        other => Err(BootstrapError {
+            variable: Some("ORES_MIDDLEWARE_ENV".into()),
+            code: "invalid_value",
+            message: format!("unsupported runtime environment {other:?}"),
+        }),
+    }
+}
+
+fn parse_positive<T>(
+    value: Option<String>,
+    variable: &'static str,
+    default: T,
+) -> Result<T, BootstrapError>
+where
+    T: FromStr + PartialEq + Default,
+{
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    let parsed = value.trim().parse::<T>().map_err(|_| BootstrapError {
+        variable: Some(variable.into()),
+        code: "invalid_number",
+        message: format!("expected a positive numeric value, got {value:?}"),
+    })?;
+    if parsed == T::default() {
+        return Err(BootstrapError {
+            variable: Some(variable.into()),
+            code: "invalid_number",
+            message: "value must be positive".into(),
+        });
+    }
+    Ok(parsed)
+}
+
+fn admit_stack_config_file(path: &str) -> Result<PathBuf, LambdaInvocationError> {
+    let path = PathBuf::from(path);
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|_| LambdaInvocationError::InvalidStackConfig { path: path.clone() })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(LambdaInvocationError::InvalidStackConfig { path });
+    }
+    File::open(&path)
+        .map_err(|_| LambdaInvocationError::InvalidStackConfig { path: path.clone() })?;
+    Ok(path)
 }
 
 fn valid_token(value: &str) -> bool {
@@ -276,15 +397,22 @@ fn valid_trace_id(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+    use std::{
+        convert::Infallible,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
 
     use super::*;
-    use crate::{MiddlewareStack, OperationFailureKind, current_context, default_config};
 
     fn boundary() -> LambdaInvocationBoundary {
-        LambdaInvocationBoundary::from_stack_for_test(
-            MiddlewareStack::new(default_config("lambda-test")).expect("valid stack"),
-        )
+        let defaults = default_config("lambda-test");
+        LambdaInvocationBoundary::from_policy_for_test(LambdaInvocationPolicy {
+            timeout_ms: defaults.settings.timeout_ms,
+            max_payload_bytes: defaults.settings.max_body_bytes as u64,
+        })
     }
 
     fn metadata() -> LambdaInvocationMetadata {
@@ -298,11 +426,116 @@ mod tests {
         }
     }
 
+    fn temp_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("ores-mw-lambda-stack-{tag}-{}", Uuid::new_v4()))
+    }
+
+    fn policy_from(values: &[(&str, &str)]) -> Result<LambdaInvocationPolicy, BootstrapError> {
+        let values = values
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect::<BTreeMap<_, _>>();
+        invocation_policy_from_lookup("lambda-test".into(), |name| values.get(name).cloned())
+    }
+
+    #[test]
+    fn production_callback_policy_does_not_require_http_tls_mode() {
+        let policy = policy_from(&[("ORES_MIDDLEWARE_ENV", "production")]).unwrap();
+        assert!(policy.timeout_ms > 0);
+        assert!(policy.max_payload_bytes > 0);
+    }
+
+    #[test]
+    fn callback_policy_uses_shared_limit_environment_names() {
+        let policy = policy_from(&[
+            ("ORES_MIDDLEWARE_ENV", "prod"),
+            ("ORES_MIDDLEWARE_TIMEOUT_MS", "2750"),
+            ("ORES_MIDDLEWARE_MAX_BODY_BYTES", "8192"),
+        ])
+        .unwrap();
+        assert_eq!(policy.timeout_ms, 2_750);
+        assert_eq!(policy.max_payload_bytes, 8_192);
+    }
+
+    #[test]
+    fn callback_policy_rejects_invalid_environment_and_zero_limits() {
+        assert_eq!(
+            policy_from(&[("ORES_MIDDLEWARE_ENV", "mystery")])
+                .unwrap_err()
+                .code,
+            "invalid_value"
+        );
+        assert_eq!(
+            policy_from(&[("ORES_MIDDLEWARE_TIMEOUT_MS", "0")])
+                .unwrap_err()
+                .code,
+            "invalid_number"
+        );
+        assert_eq!(
+            policy_from(&[("ORES_MIDDLEWARE_MAX_BODY_BYTES", "0")])
+                .unwrap_err()
+                .code,
+            "invalid_number"
+        );
+    }
+
+    #[test]
+    fn stack_config_admission_accepts_a_readable_regular_file() {
+        let root = temp_path("regular");
+        fs::create_dir_all(&root).expect("fixture root");
+        let path = root.join("middleware.json");
+        fs::write(&path, b"{}\n").expect("fixture stack");
+
+        assert_eq!(
+            admit_stack_config_file(path.to_str().expect("utf8 path")).unwrap(),
+            path
+        );
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn stack_config_admission_rejects_missing_and_directory_paths() {
+        let root = temp_path("invalid");
+        fs::create_dir_all(&root).expect("fixture root");
+        let missing = root.join("missing.json");
+        assert!(matches!(
+            admit_stack_config_file(missing.to_str().expect("utf8 path")),
+            Err(LambdaInvocationError::InvalidStackConfig { .. })
+        ));
+        assert!(matches!(
+            admit_stack_config_file(root.to_str().expect("utf8 path")),
+            Err(LambdaInvocationError::InvalidStackConfig { .. })
+        ));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stack_config_admission_rejects_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_path("symlink");
+        fs::create_dir_all(&root).expect("fixture root");
+        let target = root.join("target.json");
+        let link = root.join("stack.json");
+        fs::write(&target, b"{}\n").expect("fixture target");
+        symlink(&target, &link).expect("fixture symlink");
+
+        assert!(matches!(
+            admit_stack_config_file(link.to_str().expect("utf8 path")),
+            Err(LambdaInvocationError::InvalidStackConfig { .. })
+        ));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     #[tokio::test]
     async fn callback_runs_with_lambda_context_and_no_payload_identity() {
         let outcome = boundary()
             .run(metadata(), async {
-                let context = current_context().expect("callback context");
+                let context = crate::current_context().expect("callback context");
                 assert_eq!(context.request_id, "invoke-1");
                 assert_eq!(context.user_id, None);
                 assert_eq!(context.tenant_id, None);
@@ -315,7 +548,7 @@ mod tests {
             .await
             .expect("metadata admitted");
         assert_eq!(outcome, OperationOutcome::Completed(42));
-        assert!(current_context().is_none());
+        assert!(crate::current_context().is_none());
     }
 
     #[tokio::test]
@@ -330,7 +563,10 @@ mod tests {
                 Ok::<_, Infallible>(())
             })
             .await;
-        assert!(matches!(result, Err(LambdaInvocationError::PayloadTooLarge { .. })));
+        assert!(matches!(
+            result,
+            Err(LambdaInvocationError::PayloadTooLarge { .. })
+        ));
         assert!(!polled.load(Ordering::SeqCst));
     }
 
@@ -349,7 +585,7 @@ mod tests {
             .expect("metadata admitted");
         assert!(matches!(
             outcome.failure().map(|failure| failure.kind),
-            Some(OperationFailureKind::DeadlineExceeded)
+            Some(crate::OperationFailureKind::DeadlineExceeded)
         ));
         assert!(!polled.load(Ordering::SeqCst));
     }
