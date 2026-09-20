@@ -50,6 +50,7 @@ fn assert_failure<T>(outcome: &OperationOutcome<T>, kind: OperationFailureKind, 
 async fn already_cancelled_never_polls_a_ready_handler() {
     for transport in [
         OperationTransport::Http,
+        OperationTransport::Lambda,
         OperationTransport::Tcp,
         OperationTransport::WebSocket,
     ] {
@@ -78,6 +79,7 @@ async fn already_cancelled_never_polls_a_ready_handler() {
 async fn zero_budget_never_polls_a_ready_handler() {
     for transport in [
         OperationTransport::Http,
+        OperationTransport::Lambda,
         OperationTransport::Tcp,
         OperationTransport::WebSocket,
     ] {
@@ -125,7 +127,7 @@ async fn cancellation_drops_unpolled_handler_before_returning() {
     let dropped = Arc::new(AtomicBool::new(false));
     let outcome = run_operation_boundary_with_cancellation(
         context(3),
-        descriptor(OperationTransport::Tcp),
+        descriptor(OperationTransport::Lambda),
         ready(()),
         DropProbe {
             polled: polled.clone(),
@@ -162,7 +164,7 @@ async fn pending_cancellation_allows_handler_and_preserves_context() {
     let expected = context(5);
     let outcome = run_operation_boundary_with_cancellation(
         expected.clone(),
-        descriptor(OperationTransport::Tcp),
+        descriptor(OperationTransport::Lambda),
         pending(),
         async {
             assert_eq!(current_context(), Some(expected));
@@ -205,7 +207,7 @@ async fn concurrent_cancelled_operations_do_not_dispatch_or_leak_context() {
     let tasks = (10..74).map(|slot| async move {
         let outcome = run_operation_boundary_with_cancellation(
             context(slot),
-            descriptor(OperationTransport::Tcp),
+            descriptor(OperationTransport::Lambda),
             ready(()),
             async {
                 panic!("a cancelled operation must never dispatch");
