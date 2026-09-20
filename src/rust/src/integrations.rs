@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    fmt,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -64,6 +65,14 @@ pub struct IntegrationError {
     pub code: &'static str,
     pub message: String,
 }
+
+impl fmt::Display for IntegrationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} ({})", self.message, self.code)
+    }
+}
+
+impl std::error::Error for IntegrationError {}
 
 pub trait AuthVerifier: Send + Sync {
     fn verify<'a>(
