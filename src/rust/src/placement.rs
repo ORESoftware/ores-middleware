@@ -17,6 +17,7 @@ pub enum MiddlewareExecutionTarget {
     ServiceMesh,
     WebServer,
     ApiServer,
+    LambdaFunction,
 }
 
 impl MiddlewareExecutionTarget {
@@ -27,7 +28,9 @@ impl MiddlewareExecutionTarget {
                 MiddlewarePlacement::Edge
             }
             Self::ServiceMesh => MiddlewarePlacement::Transport,
-            Self::WebServer | Self::ApiServer => MiddlewarePlacement::Application,
+            Self::WebServer | Self::ApiServer | Self::LambdaFunction => {
+                MiddlewarePlacement::Application
+            }
         }
     }
 }
@@ -117,6 +120,25 @@ mod tests {
     }
 
     #[test]
+    fn lambda_functions_are_application_targets() {
+        assert_eq!(
+            MiddlewareExecutionTarget::LambdaFunction.placement(),
+            MiddlewarePlacement::Application
+        );
+        let database_capability = MiddlewareCapabilities {
+            placements: vec![MiddlewarePlacement::Application],
+            requires_request_body: false,
+            requires_authenticated_identity: false,
+            requires_database: true,
+        };
+        assert!(
+            database_capability
+                .validate_target(MiddlewareExecutionTarget::LambdaFunction)
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn database_middleware_is_rejected_at_ingress() {
         let capabilities = MiddlewareCapabilities {
             placements: vec![MiddlewarePlacement::Edge, MiddlewarePlacement::Application],
@@ -146,6 +168,11 @@ mod tests {
         assert!(
             capabilities
                 .validate_target(MiddlewareExecutionTarget::ApiServer)
+                .is_empty()
+        );
+        assert!(
+            capabilities
+                .validate_target(MiddlewareExecutionTarget::LambdaFunction)
                 .is_empty()
         );
     }
