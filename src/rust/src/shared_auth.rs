@@ -140,7 +140,7 @@ impl SharedAuthRuntimeTopology {
             supabase,
             neon,
             server_role,
-            audience: audience.into(),
+            audience,
             decision_mode,
         };
         let issues = topology.validation_issues();
@@ -458,7 +458,8 @@ impl SharedAuthReadyStack {
             supabase: supabase_verifier,
             neon: neon_verifier,
         };
-        let inner = MiddlewareStack::new(config)?.with_auth_verifier(Arc::new(verifier));
+        let inner = MiddlewareStack::new(config)?
+            .with_trusted_auth_policy_verifier(Arc::new(verifier));
         Ok(Self { inner, topology })
     }
 
