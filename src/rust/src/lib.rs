@@ -17,6 +17,8 @@ pub mod fallthrough;
 pub mod frameworks;
 pub mod hardening;
 mod integrations;
+pub mod lambda;
+pub mod lambda_capabilities;
 pub mod middleware_order;
 mod net;
 pub mod operation;
@@ -36,76 +38,87 @@ pub mod shutdown;
 pub mod stage;
 pub mod validation;
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 impl std::fmt::Debug for hardening::HardenedStagePipeline {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("HardenedStagePipeline").finish_non_exhaustive()
+        formatter
+            .debug_struct("HardenedStagePipeline")
+            .finish_non_exhaustive()
     }
 }
 
 pub use auth_provider::{
-    FnAuthProvider, FnSharedAuthProvider, StaticAuthVerifier, StaticSharedAuthProviderVerifier,
-    auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn,
+    auth_provider_fn, dyn_auth_provider, shared_auth_provider_fn, FnAuthProvider,
+    FnSharedAuthProvider, StaticAuthVerifier, StaticSharedAuthProviderVerifier,
 };
 pub use auth_stage::{AuthDecisionEnricher, AuthStage, NoopAuthDecisionEnricher};
-pub use bootstrap::{BootstrapError, config_from_env, stack_from_env};
+pub use bootstrap::{config_from_env, stack_from_env, BootstrapError};
 pub use composition::{
-    MiddlewareCompositionPlan, MiddlewareOrderIssue, MiddlewareOrderPolicy,
-    MiddlewareOrderingRule, OrderIssueSeverity, validate_consumer_middleware_order,
-    validate_declared_middleware_plan, validate_runtime_middleware_plan,
+    validate_consumer_middleware_order, validate_declared_middleware_plan,
+    validate_runtime_middleware_plan, MiddlewareCompositionPlan, MiddlewareOrderIssue,
+    MiddlewareOrderPolicy, MiddlewareOrderingRule, OrderIssueSeverity,
 };
 pub use config::{
-    MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment, ValidationIssue, default_config,
-    validate_config,
+    default_config, validate_config, MiddlewareConfig, RateLimitPolicy, RuntimeEnvironment,
+    ValidationIssue,
 };
+pub use config_discovery::{Discovered, DiscoveryError, Origin, Start};
 pub use context::{
-    ContextRegistry, RequestContext, capture_request_context, current_context,
-    current_correlation_id, current_logged_in_user_id, current_request_id, current_session_id,
-    current_tenant_id, current_trace_id, current_user_id, run_with_captured_context,
-    run_with_context, spawn_with_current_context,
+    capture_request_context, current_context, current_correlation_id,
+    current_logged_in_user_id, current_request_id, current_session_id, current_tenant_id,
+    current_trace_id, current_user_id, run_with_captured_context, run_with_context,
+    spawn_with_current_context, ContextRegistry, RequestContext,
 };
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
 };
+pub use lambda::{
+    LambdaInvocationBoundary, LambdaInvocationError, LambdaInvocationMetadata,
+    LambdaInvocationTrigger,
+};
+pub use lambda_capabilities::{
+    lambda_invocation_capabilities, LAMBDA_INVOCATION_CAPABILITIES,
+};
 pub use middleware_order::{
-    DEFAULT_MIDDLEWARE_ORDER, MiddlewareStage, OperationClass, OrderViolation,
-    RateLimitConsistency, RateLimitPosture, rate_limit_posture, validate_middleware_order,
+    rate_limit_posture, validate_middleware_order, MiddlewareStage, OperationClass, OrderViolation,
+    RateLimitConsistency, RateLimitPosture, DEFAULT_MIDDLEWARE_ORDER,
 };
 pub use operation::{
-    OperationDescriptor, OperationFailure, OperationFailureKind, OperationOutcome, OperationScope,
-    OperationTransport, run_operation_boundary, run_operation_boundary_with_cancellation,
+    run_operation_boundary, run_operation_boundary_with_cancellation,
     run_operation_boundary_with_timeout, run_operation_boundary_with_timeout_and_cancellation,
+    OperationDescriptor, OperationFailure, OperationFailureKind, OperationOutcome, OperationScope,
+    OperationTransport,
 };
 pub use otel::{
-    RequestLogger, ServerOtelRuntime, ServerOtelRuntimeError, load_server_otel_runtime,
-    load_server_otel_runtime_from_process_env, run_with_ores_log_context,
-    server_otel_runtime_from_resolved, should_sample_trace, to_ores_log_context,
+    load_server_otel_runtime, load_server_otel_runtime_from_process_env,
+    run_with_ores_log_context, server_otel_runtime_from_resolved, should_sample_trace,
+    to_ores_log_context, RequestLogger, ServerOtelRuntime, ServerOtelRuntimeError,
 };
+pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use placement::{
     MiddlewareCapabilities, MiddlewareExecutionTarget, MiddlewarePlacement,
     MiddlewarePlacementViolation,
 };
-pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use rate_limit::{
-    DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm, RateLimitDecision,
-    RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
+    derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm,
+    RateLimitDecision, RateLimitDecisionKind, RateLimitDecisionSource, RateLimitFailureMode,
     RateLimitKeyDerivationMode, RateLimitKeyDeriver, RateLimitLayer, RateLimitPrincipal,
-    RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
+    RateLimitRequest, RateLimitSignal, UnavailableRateLimitKeyDeriver,
 };
 pub use rate_limit_bindings::{
-    MAX_ROUTE_METHODS, MAX_ROUTE_RATE_LIMIT_BINDINGS, MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH,
-    ROUTE_RATE_LIMIT_BINDING_SCHEMA,
     ResolvedRouteRateLimitBinding, RouteRateLimitBinding, RouteRateLimitBindingRequest,
     RouteRateLimitBindingResolutionError, RouteRateLimitBindingSelector,
     RouteRateLimitBindingSource, RouteRateLimitBindingTable, RouteRateLimitBindingViolation,
+    MAX_ROUTE_METHODS, MAX_ROUTE_RATE_LIMIT_BINDINGS, MAX_ROUTE_RATE_LIMIT_REQUEST_PATH_LENGTH,
+    ROUTE_RATE_LIMIT_BINDING_SCHEMA,
 };
 pub use rate_limit_routes::{
     RateLimitRouteSelector, ResolvedRouteRateLimitPolicy, RouteRateLimitPolicySource,
-    RouteRateLimitRequest, RouteRateLimitResolutionError, RouteRateLimitRule,
-    RouteRateLimitTable, RouteRateLimitViolation,
+    RouteRateLimitRequest, RouteRateLimitResolutionError, RouteRateLimitRule, RouteRateLimitTable,
+    RouteRateLimitViolation,
 };
 pub use rate_limit_v2::{
     RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyDecodeError, RateLimitPolicyV2,
@@ -115,27 +128,26 @@ pub use resilience::{
     Bulkhead, BulkheadRejected, CircuitAdmission, CircuitBreaker, CircuitBreakerConfig,
     CircuitStateSnapshot, ResilienceConfigError,
 };
-pub use config_discovery::{Discovered, DiscoveryError, Origin, Start};
 pub use runtime_manifest::{
-    MANIFEST_ENV_PREFIX, MANIFEST_FILE_NAME, ManifestLoadError, RuntimeManifestError,
-    admit_server_stack, admit_server_stack_from, admit_server_stack_from_env,
+    admit_server_stack, admit_server_stack_from, admit_server_stack_from_env, ManifestLoadError,
+    RuntimeManifestError, MANIFEST_ENV_PREFIX, MANIFEST_FILE_NAME,
 };
 pub use runtime_manifest_evidence::{
-    MANIFEST_ADMISSION_EVIDENCE_SCHEMA, ManifestAdmissionEvidence,
     admit_server_stack_with_evidence_from, admit_server_stack_with_evidence_from_env,
+    ManifestAdmissionEvidence, MANIFEST_ADMISSION_EVIDENCE_SCHEMA,
 };
 pub use security::{CorsPolicy, CorsStage, CsrfPolicy, CsrfStage};
 pub use shared_auth::{
+    SharedAuthDataPlane, SharedAuthDatabaseEnvKeys, SharedAuthDecisionMode, SharedAuthProvider,
+    SharedAuthProviderContext, SharedAuthProviderFailure, SharedAuthProviderFailureKind,
+    SharedAuthProviderTopology, SharedAuthProviderVerifier, SharedAuthReadyStack,
+    SharedAuthRuntimeTopology, SharedAuthServerRole, SharedAuthVerifiedPrincipal,
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
-    SUPABASE_AUTH_DATABASE_URL_ENV, SharedAuthDataPlane, SharedAuthDatabaseEnvKeys,
-    SharedAuthDecisionMode, SharedAuthProvider, SharedAuthProviderContext,
-    SharedAuthProviderFailure, SharedAuthProviderFailureKind, SharedAuthProviderTopology,
-    SharedAuthProviderVerifier, SharedAuthReadyStack, SharedAuthRuntimeTopology,
-    SharedAuthServerRole, SharedAuthVerifiedPrincipal,
+    SUPABASE_AUTH_DATABASE_URL_ENV,
 };
 pub use shutdown::{
-    DEFAULT_DRAIN_TIMEOUT, DEFAULT_RETRY_AFTER, DrainGuard, DrainOutcome, SHUTDOWN_HTTP_STATUS,
-    ShutdownCoordinator, ShutdownPhase, ShutdownRejection,
+    DrainGuard, DrainOutcome, ShutdownCoordinator, ShutdownPhase, ShutdownRejection,
+    DEFAULT_DRAIN_TIMEOUT, DEFAULT_RETRY_AFTER, SHUTDOWN_HTTP_STATUS,
 };
 pub use stage::{
     MiddlewareStageHandler, StageDecision, StageInput, StagePipeline, StageRejection, StageResponse,
@@ -144,15 +156,34 @@ pub use validation::{ContractViolation, RequestContractValidator, ValidationStag
 
 pub const CONTRACT_VERSION: &str = "1.0.0";
 pub const CAPABILITIES: &[&str] = &[
-    "request-context", "panic-recovery", "request-id", "trace-context",
-    "structured-logging", "metrics-red", "deadline-timeout", "payload-limit",
-    "rate-limit", "auth", "sync-observer", "json", "headers", "compression",
-    "tls-policy", "security-headers", "idempotency", "ip-policy", "cache-etag",
-    "content-negotiation", "fault-injection", "test-auth-bypass", "schema-capture",
-    "graceful-shutdown",
+    "request-context",
+    "panic-recovery",
+    "request-id",
+    "trace-context",
+    "structured-logging",
+    "metrics-red",
+    "deadline-timeout",
+    "payload-limit",
+    "rate-limit",
+    "auth",
+    "sync-observer",
+    "json",
+    "headers",
+    "compression",
+    "tls-policy",
+    "security-headers",
+    "idempotency",
+    "ip-policy",
+    "cache-etag",
+    "content-negotiation",
+    "fault-injection",
+    "test-auth-bypass",
+    "schema-capture",
 ];
 
-pub fn capabilities() -> &'static [&'static str] { CAPABILITIES }
+pub fn capabilities() -> &'static [&'static str] {
+    CAPABILITIES
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -172,7 +203,12 @@ pub fn descriptor() -> AdapterDescriptor {
         language: "rust".into(),
         runtime: "tokio".into(),
         package_name: "ores-middleware".into(),
-        framework_adapters: vec!["axum".into(), "mash".into(), "leptos".into(), "dioxus".into()],
+        framework_adapters: vec![
+            "axum".into(),
+            "mash".into(),
+            "leptos".into(),
+            "dioxus".into(),
+        ],
         capabilities: CAPABILITIES.iter().map(|value| (*value).to_owned()).collect(),
         operation_symbols: BTreeMap::from([
             ("descriptor".into(), "descriptor".into()),
@@ -197,8 +233,16 @@ mod tests {
         config.settings.fault_injection.enabled = true;
         config.settings.test_auth_bypass.enabled = true;
         let issues = validate_config(&config);
-        assert!(issues.iter().any(|issue| issue.path.contains("faultInjection")));
-        assert!(issues.iter().any(|issue| issue.path.contains("testAuthBypass")));
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.path.contains("faultInjection"))
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.path.contains("testAuthBypass"))
+        );
     }
 
     #[tokio::test]
@@ -217,7 +261,8 @@ mod tests {
         run_with_context(context, async {
             assert_eq!(current_context().unwrap().request_id, "r1");
             assert_eq!(current_request_id().as_deref(), Some("r1"));
-        }).await;
+        })
+        .await;
         assert!(current_context().is_none());
         assert!(current_request_id().is_none());
     }
@@ -234,6 +279,10 @@ mod tests {
         let mut config = default_config("test-service");
         config.settings.tls.mode = "disabled".into();
         config.settings.tls.require_https = true;
-        assert!(validate_config(&config).iter().any(|issue| issue.code == "disabled_tls_requires_false"));
+        assert!(
+            validate_config(&config)
+                .iter()
+                .any(|issue| issue.code == "disabled_tls_requires_false")
+        );
     }
 }
