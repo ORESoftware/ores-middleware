@@ -107,7 +107,7 @@ adapter = "none"
 
 [scripts]
 # Zed 0.2.3 exposes one closed test hook. Richer commands live in package.json.
-# This hook runs the repository audit plus independent generation/validation;
-# the database-backed four-way ORM catalog and row-level gates remain in
-# service-enabled CI.
-test = "python3 scripts/audit.py --receipt target/audit/receipt.json && npm run contracts:polyglot-generate && npm run contracts:generated-check"
+# This hook runs the fail-closed conformance/governance/source admission gate,
+# repository audit, and independent generation/validation. The database-backed
+# four-way ORM catalog and row-level gates remain in service-enabled CI.
+test = "sh conformance/check.sh --full && python3 scripts/audit.py --receipt target/audit/receipt.json && npm run contracts:polyglot-generate && npm run contracts:generated-check"
