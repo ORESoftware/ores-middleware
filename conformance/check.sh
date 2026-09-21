@@ -13,8 +13,11 @@ for boundary in contracts conformance governance src; do
   [ ! -L "$boundary" ] || fail "$boundary must be a real directory, not a symbolic link"
   [ -d "$boundary" ] || fail "missing required top-level $boundary/ boundary"
 done
-escaped=$(find contracts conformance governance src -type l -print -quit 2>/dev/null || true)
-[ -z "$escaped" ] || fail "symbolic links are not allowed inside contract/conformance/governance/source boundaries: $escaped"
+# Inspect the authored repository boundary, not dependency/build output created by
+# package managers during CI. Git mode 120000 is the authoritative signal for a
+# committed symbolic link and cannot be confused by node_modules/target/_build.
+escaped=$(git ls-files -s -- contracts conformance governance src | awk '$1 == "120000" { print $4; exit }')
+[ -z "$escaped" ] || fail "symbolic links are not allowed inside tracked contract/conformance/governance/source boundaries: $escaped"
 echo "[zed-conformance] structural boundary check passed"
 [ "$mode" = full ] || exit 0
 command -v node >/dev/null 2>&1 || fail "node is required to run conformance checks"
