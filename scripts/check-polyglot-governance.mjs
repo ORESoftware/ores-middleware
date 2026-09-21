@@ -30,53 +30,68 @@ async function readJson(path, label) {
 }
 
 function sorted(values) {
-  return [...values].sort((a, b) => a.localeCompare(b));
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...values].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
 function workflowJobBlock(workflow, jobName) {
-  const marker = new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, "m");
-  const match = marker.exec(workflow);
-  if (!match) fail(`missing contract-conformance CI job: ${jobName}`);
-  const start = match.index;
-  const remainder = workflow.slice(start + match[0].length);
-  const next = /^  [A-Za-z0-9_-]+:\s*$/m.exec(remainder);
-  const end = next ? start + match[0].length + next.index : workflow.length;
-  return workflow.slice(start, end);
+  const lines = workflow.split(/\r?\n/);
+  const marker = `  ${jobName}:`;
+  const start = lines.findIndex((line) => line === marker);
+  if (start < 0) fail(`missing contract-conformance CI job: ${jobName}`);
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^  [A-Za-z0-9_-]+:$/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
 }
 
 function zpkgTargetDir(zpkg, target) {
-  const section = new RegExp(`^\\[targets\\.${escapeRegExp(target)}\\]\\s*$([\\s\\S]*?)(?=^\\[|\\Z)`, "m").exec(zpkg);
-  if (!section) fail(`missing .zpkg.toml target: ${target}`);
-  const dir = /^dir\s*=\s*"([^"]+)"\s*$/m.exec(section[1]);
-  if (!dir) fail(`missing dir in .zpkg.toml target: ${target}`);
-  return dir[1];
+  const lines = zpkg.split(/\r?\n/);
+  const marker = `[targets.${target}]`;
+  const start = lines.findIndex((line) => line.trim() === marker);
+  if (start < 0) fail(`missing .zpkg.toml target: ${target}`);
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^\s*\[.+\]\s*$/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  for (const line of lines.slice(start + 1, end)) {
+    const match = /^\s*dir\s*=\s*"([^"]+)"\s*$/.exec(line);
+    if (match) return match[1];
+  }
+  fail(`missing dir in .zpkg.toml target: ${target}`);
 }
 
 const registry = await readJson(registryPath, "polyglot governance registry");
 assert.equal(registry.schema, "ores.middleware.polyglot-governance/v1", "unexpected governance schema");
 assert.equal(registry.repository, "ORESoftware/ores-middleware", "unexpected governance repository");
-assert.equal(registry.policy?.allSourceDirectoriesMustBeGoverned, true);
-assert.equal(registry.policy?.conformanceParticipantsMustMatchGovernedLanguages, true);
-assert.equal(registry.policy?.adapterOperationSurfaceMustMatch, true);
-assert.equal(registry.policy?.zpkgTargetsMustMatchGovernedLanguages, true);
-assert.equal(registry.policy?.contractConformanceCiMustExerciseEveryLanguage, true);
+for (const key of [
+  "allSourceDirectoriesMustBeGoverned",
+  "conformanceParticipantsMustMatchGovernedLanguages",
+  "adapterOperationSurfaceMustMatch",
+  "zpkgTargetsMustMatchGovernedLanguages",
+  "contractConformanceCiMustExerciseEveryLanguage",
+  "missingOrExtraParticipantFailsClosed",
+]) {
+  assert.equal(registry.policy?.[key], true, `policy.${key} must be true`);
+}
 assert.equal(registry.policy?.generatedArtifactsAreAuthority, false);
 assert.equal(registry.policy?.runtimeSpecificGoldensAllowed, false);
-assert.equal(registry.policy?.missingOrExtraParticipantFailsClosed, true);
 
 const sourceRoot = normalizeRepoPath(registry.sourceRoot, "sourceRoot");
 const contractRoot = normalizeRepoPath(registry.contractRoot, "contractRoot");
 assert.equal(sourceRoot, "src");
 assert.equal(contractRoot, "contracts");
 
-const sourceStat = await lstat(resolve(root, sourceRoot));
-const contractStat = await lstat(resolve(root, contractRoot));
-if (!sourceStat.isDirectory() || sourceStat.isSymbolicLink()) fail("src/ must be a real directory");
-if (!contractStat.isDirectory() || contractStat.isSymbolicLink()) fail("contracts/ must be a real directory");
+for (const path of [sourceRoot, contractRoot, "conformance", "governance"]) {
+  const stat = await lstat(resolve(root, path));
+  if (!stat.isDirectory() || stat.isSymbolicLink()) fail(`${path}/ must be a real directory`);
+}
 
 if (!Array.isArray(registry.participants) || registry.participants.length === 0) fail("participants must be non-empty");
 if (!Array.isArray(registry.requiredOperationSymbols) || registry.requiredOperationSymbols.length === 0) {
@@ -157,26 +172,44 @@ const governedOrIgnored = new Set([
   ...participantDirs,
   ...[...ignoredNames].map((name) => `src/${name}`),
 ]);
-assert.deepEqual(sorted(discoveredDirs), sorted(governedOrIgnored), "every immediate src/ directory must be governed or explicitly ignored");
+assert.deepEqual(
+  sorted(discoveredDirs),
+  sorted(governedOrIgnored),
+  "every immediate src/ directory must be governed or explicitly ignored",
+);
 
 const conformance = await readJson(registry.conformanceManifest, "conformance manifest");
 assert.equal(conformance.repository, registry.repository, "conformance repository mismatch");
+assert.equal(conformance.governanceRegistry, registryPath, "conformance manifest must bind the governance registry");
 const contractRoots = new Set((conformance.contractRoots ?? []).map((value) => String(value).replace(/\/$/, "")));
 if (!contractRoots.has(contractRoot)) fail(`conformance manifest must bind contract root ${contractRoot}/`);
 if (!Array.isArray(conformance.requiredParticipants)) fail("conformance requiredParticipants must be an array");
 const conformanceIds = conformance.requiredParticipants.map((entry) => typeof entry === "string" ? entry : entry?.id);
-assert.deepEqual(sorted(conformanceIds), sorted(participantIds), "conformance participants must exactly match governed src languages");
+if (conformanceIds.some((id) => typeof id !== "string" || id.length === 0)) fail("conformance participant ids must be non-empty strings");
+assert.deepEqual(
+  sorted(conformanceIds),
+  sorted(participantIds),
+  "conformance participants must exactly match governed src languages",
+);
 
-const zpkg = await readFile(resolve(root, normalizeRepoPath(registry.zpkgManifest, "zpkgManifest")), "utf8");
+const zpkgPath = normalizeRepoPath(registry.zpkgManifest, "zpkgManifest");
+const zpkg = await readFile(resolve(root, zpkgPath), "utf8");
 for (const participant of registry.participants) {
-  assert.equal(zpkgTargetDir(zpkg, participant.zpkgTarget), participant.sourceDir, `${participant.id} Zed target points at the wrong source directory`);
+  assert.equal(
+    zpkgTargetDir(zpkg, participant.zpkgTarget),
+    participant.sourceDir,
+    `${participant.id} Zed target points at the wrong source directory`,
+  );
 }
 
-const workflow = await readFile(resolve(root, normalizeRepoPath(registry.contractConformanceWorkflow, "contractConformanceWorkflow")), "utf8");
+const workflowPath = normalizeRepoPath(registry.contractConformanceWorkflow, "contractConformanceWorkflow");
+const workflow = await readFile(resolve(root, workflowPath), "utf8");
 for (const participant of registry.participants) {
   const block = workflowJobBlock(workflow, participant.ciJob);
   for (const token of participant.requiredCiTokens) {
-    if (!block.includes(token)) fail(`${participant.id} contract-conformance job ${participant.ciJob} is missing required token: ${token}`);
+    if (!block.includes(token)) {
+      fail(`${participant.id} contract-conformance job ${participant.ciJob} is missing required token: ${token}`);
+    }
   }
 }
 
