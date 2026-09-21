@@ -1,0 +1,97 @@
+{
+  "schema": "ores.middleware.polyglot-governance/v1",
+  "repository": "ORESoftware/ores-middleware",
+  "sourceRoot": "src",
+  "contractRoot": "contracts",
+  "conformanceManifest": "conformance/manifest.v1.json",
+  "contractConformanceWorkflow": ".github/workflows/contract-conformance.yml",
+  "zpkgManifest": ".zpkg.toml",
+  "requiredOperationSymbols": [
+    "descriptor",
+    "defaultConfig",
+    "validateConfig",
+    "createMiddleware",
+    "runWithContext",
+    "currentContext",
+    "capabilities"
+  ],
+  "participants": [
+    {
+      "id": "rust",
+      "sourceDir": "src/rust",
+      "adapterManifest": "src/rust/adapter.manifest.json",
+      "zpkgTarget": "rust",
+      "ciJob": "rust",
+      "requiredCiTokens": [
+        "cargo test --manifest-path src/rust/Cargo.toml --all-features",
+        "--bin contractcheck"
+      ]
+    },
+    {
+      "id": "ts",
+      "sourceDir": "src/ts",
+      "adapterManifest": "src/ts/adapter.manifest.json",
+      "zpkgTarget": "typescript",
+      "ciJob": "typescript",
+      "requiredCiTokens": [
+        "npm --prefix src/ts test",
+        "src/ts/dist/contractcheck.js"
+      ]
+    },
+    {
+      "id": "golang",
+      "sourceDir": "src/golang",
+      "adapterManifest": "src/golang/adapter.manifest.json",
+      "zpkgTarget": "golang",
+      "ciJob": "golang",
+      "requiredCiTokens": [
+        "go test -race",
+        "go run ./cmd/contractcheck"
+      ]
+    },
+    {
+      "id": "gleam",
+      "sourceDir": "src/gleam",
+      "adapterManifest": "src/gleam/adapter.manifest.json",
+      "zpkgTarget": "gleam",
+      "ciJob": "beam",
+      "requiredCiTokens": [
+        "gleam test",
+        "ores_middleware_contractcheck"
+      ]
+    },
+    {
+      "id": "elixir",
+      "sourceDir": "src/elixir",
+      "adapterManifest": "src/elixir/adapter.manifest.json",
+      "zpkgTarget": "elixir",
+      "ciJob": "beam",
+      "requiredCiTokens": [
+        "mix test",
+        "OresMiddleware.descriptor_json()"
+      ]
+    },
+    {
+      "id": "erlang",
+      "sourceDir": "src/erlang",
+      "adapterManifest": "src/erlang/adapter.manifest.json",
+      "zpkgTarget": "erlang",
+      "ciJob": "beam",
+      "requiredCiTokens": [
+        "rebar3 eunit",
+        "escript/contractcheck.escript"
+      ]
+    }
+  ],
+  "ignoredSourceDirectories": [],
+  "policy": {
+    "allSourceDirectoriesMustBeGoverned": true,
+    "conformanceParticipantsMustMatchGovernedLanguages": true,
+    "adapterOperationSurfaceMustMatch": true,
+    "zpkgTargetsMustMatchGovernedLanguages": true,
+    "contractConformanceCiMustExerciseEveryLanguage": true,
+    "generatedArtifactsAreAuthority": false,
+    "runtimeSpecificGoldensAllowed": false,
+    "missingOrExtraParticipantFailsClosed": true
+  }
+}
