@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-sh ./conformance/check.sh --structural-only
+# The install hook is deterministic and local-only: admit the complete authored
+# contracts/conformance/governance/source boundary before enabling Git hooks.
+sh ./conformance/check.sh --full
 hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
 case "$hooks_path" in
   "")
