@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/host/v1/authored.schema.json",
+  "title": "ORES middleware host ABI",
+  "oneOf": [
+    { "$ref": "#/$defs/MiddlewareHostDescriptor" },
+    { "$ref": "#/$defs/MiddlewareHostRequest" },
+    { "$ref": "#/$defs/MiddlewareHostBeginResult" },
+    { "$ref": "#/$defs/MiddlewareHostFinishRequest" },
+    { "$ref": "#/$defs/MiddlewareHostFinishResult" }
+  ],
+  "$defs": {
+    "Sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "HttpMethod": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[A-Z0-9_-]+$"
+    },
+    "AbsolutePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192,
+      "pattern": "^/[^\\r\\n\\u0000]*$"
+    },
+    "SessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "HttpStatus": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "CanonicalHeaders": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[^\\r\\n\\u0000]*$"
+      }
+    },
+    "MiddlewareHostKind": {
+      "type": "string",
+      "enum": ["local_process", "cloudflare_worker"]
+    },
+    "MiddlewareHostOutcome": {
+      "type": "string",
+      "enum": ["completed", "disconnected", "timed_out", "child_failed"]
+    },
+    "MiddlewareHostDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": [
+        "schema",
+        "abiVersion",
+        "middlewareContractVersion",
+        "hostKind",
+        "configSha256"
+      ],
+      "properties": {
+        "schema": { "const": "ores.middleware.host/v1" },
+        "abiVersion": { "const": "1" },
+        "middlewareContractVersion": { "type": "string", "minLength": 1 },
+        "hostKind": { "$ref": "#/$defs/MiddlewareHostKind" },
+        "configSha256": { "$ref": "#/$defs/Sha256" }
+      }
+    },
+    "MiddlewareHostRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": [
+        "schema",
+        "method",
+        "path",
+        "headers",
+        "trustedTransportSecure"
+      ],
+      "properties": {
+        "schema": { "const": "ores.middleware.host/v1" },
+        "method": { "$ref": "#/$defs/HttpMethod" },
+        "path": { "$ref": "#/$defs/AbsolutePath" },
+        "headers": { "$ref": "#/$defs/CanonicalHeaders" },
+        "trustedRemoteIp": { "type": ["string", "null"] },
+        "contentLength": { "type": ["integer", "null"], "minimum": 0 },
+        "trustedTransportSecure": { "type": "boolean" }
+      }
+    },
+    "MiddlewareHostPermit": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": [
+        "decision",
+        "schema",
+        "sessionId",
+        "requestId",
+        "traceId",
+        "responseHeaders"
+      ],
+      "properties": {
+        "decision": { "const": "permit" },
+        "schema": { "const": "ores.middleware.host/v1" },
+        "sessionId": { "$ref": "#/$defs/SessionId" },
+        "requestId": { "type": "string", "minLength": 1 },
+        "traceId": { "type": "string", "minLength": 1 },
+        "responseHeaders": { "$ref": "#/$defs/CanonicalHeaders" }
+      }
+    },
+    "MiddlewareHostReject": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": ["decision", "schema", "status", "code", "message", "headers"],
+      "properties": {
+        "decision": { "const": "reject" },
+        "schema": { "const": "ores.middleware.host/v1" },
+        "status": { "$ref": "#/$defs/HttpStatus" },
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "headers": { "$ref": "#/$defs/CanonicalHeaders" }
+      }
+    },
+    "MiddlewareHostBeginResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/MiddlewareHostPermit" },
+        { "$ref": "#/$defs/MiddlewareHostReject" }
+      ]
+    },
+    "MiddlewareHostFinishRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": ["schema", "sessionId", "status", "outcome"],
+      "properties": {
+        "schema": { "const": "ores.middleware.host/v1" },
+        "sessionId": { "$ref": "#/$defs/SessionId" },
+        "status": { "$ref": "#/$defs/HttpStatus" },
+        "responseBytes": { "type": ["integer", "null"], "minimum": 0 },
+        "outcome": { "$ref": "#/$defs/MiddlewareHostOutcome" }
+      }
+    },
+    "MiddlewareHostFinishResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "unevaluatedProperties": false,
+      "required": ["schema", "outcome", "responseHeaders"],
+      "properties": {
+        "schema": { "const": "ores.middleware.host/v1" },
+        "outcome": { "$ref": "#/$defs/MiddlewareHostOutcome" },
+        "responseHeaders": { "$ref": "#/$defs/CanonicalHeaders" }
+      }
+    }
+  }
+}
