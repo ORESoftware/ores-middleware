@@ -156,7 +156,10 @@ impl RouteRateLimitBindingRequest<'_> {
             }
         }
 
-        if self.operation_id.is_some_and(|value| !valid_operation_id(value)) {
+        if self
+            .operation_id
+            .is_some_and(|value| !valid_operation_id(value))
+        {
             violations.push(RouteRateLimitBindingViolation {
                 code: "invalid-request-operation-id",
                 path: "operation_id".into(),
@@ -350,7 +353,8 @@ impl RouteRateLimitBindingTable {
     pub fn resolve<'a>(
         &'a self,
         request: &RouteRateLimitBindingRequest<'_>,
-    ) -> Result<Option<ResolvedRouteRateLimitBinding<'a>>, RouteRateLimitBindingResolutionError> {
+    ) -> Result<Option<ResolvedRouteRateLimitBinding<'a>>, RouteRateLimitBindingResolutionError>
+    {
         let table_violations = self.validate();
         if !table_violations.is_empty() {
             return Err(RouteRateLimitBindingResolutionError::InvalidTable {
@@ -751,13 +755,7 @@ mod tests {
     fn equal_specificity_fails_closed_with_stable_evidence() {
         let table = RouteRateLimitBindingTable {
             routes: vec![
-                binding(
-                    "users-b",
-                    "users:beta",
-                    &["GET"],
-                    Some("/users/:id"),
-                    None,
-                ),
+                binding("users-b", "users:beta", &["GET"], Some("/users/:id"), None),
                 binding(
                     "users-a",
                     "users:alpha",
@@ -790,13 +788,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_route_class_and_selector() {
-        let route = binding(
-            "search",
-            "search:read",
-            &["GET"],
-            Some("/search"),
-            None,
-        );
+        let route = binding("search", "search:read", &["GET"], Some("/search"), None);
         let table = RouteRateLimitBindingTable {
             routes: vec![
                 route.clone(),
@@ -824,13 +816,7 @@ mod tests {
     fn rejects_invalid_identifiers_and_method_tokens() {
         let table = RouteRateLimitBindingTable {
             default_policy_id: Some("Bad Policy".into()),
-            routes: vec![binding(
-                "BadRoute",
-                "also bad",
-                &["-"],
-                Some("/ok"),
-                None,
-            )],
+            routes: vec![binding("BadRoute", "also bad", &["-"], Some("/ok"), None)],
             ..Default::default()
         };
         let violations = table.validate();
@@ -877,13 +863,7 @@ mod tests {
 
     #[test]
     fn table_and_method_counts_are_bounded() {
-        let route = binding(
-            "route",
-            "route:policy",
-            &["GET"],
-            Some("/route"),
-            None,
-        );
+        let route = binding("route", "route:policy", &["GET"], Some("/route"), None);
         let mut table = RouteRateLimitBindingTable {
             routes: vec![route; MAX_ROUTE_RATE_LIMIT_BINDINGS + 1],
             ..Default::default()
