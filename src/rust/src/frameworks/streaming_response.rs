@@ -81,8 +81,12 @@ mod tests {
 
     #[tokio::test]
     async fn projected_headers_match_the_existing_finish_contract() {
-        let stack = MiddlewareStack::new(default_config("streaming-response-parity"))
-            .expect("middleware stack");
+        // This is a response-projection parity test, not a rate-limiter
+        // integration test. Keep every unrelated admission dependency explicit
+        // so a missing external limiter cannot prevent us from reaching finish().
+        let mut config = default_config("streaming-response-parity");
+        config.settings.rate_limit.enabled = false;
+        let stack = MiddlewareStack::new(config).expect("middleware stack");
         let request_id_header = stack.config().settings.request_id_header.clone();
         let active = stack
             .begin(RequestMetadata {
