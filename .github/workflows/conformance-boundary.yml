@@ -5,6 +5,11 @@ on:
     paths:
       - 'contracts/**'
       - 'conformance/**'
+      - 'governance/**'
+      - 'src/**'
+      - 'scripts/check-polyglot-governance.mjs'
+      - '.zpkg.toml'
+      - '.github/workflows/contract-conformance.yml'
       - 'artifacts/conformance/evidence/**'
       - '.github/workflows/conformance-boundary.yml'
   push:
@@ -12,6 +17,11 @@ on:
     paths:
       - 'contracts/**'
       - 'conformance/**'
+      - 'governance/**'
+      - 'src/**'
+      - 'scripts/check-polyglot-governance.mjs'
+      - '.zpkg.toml'
+      - '.github/workflows/contract-conformance.yml'
       - 'artifacts/conformance/evidence/**'
       - '.github/workflows/conformance-boundary.yml'
 
@@ -26,7 +36,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Check conformance boundary
+      - name: Check conformance, governance, contracts, and src participants
         run: |
+          node --check scripts/check-polyglot-governance.mjs
           node --check conformance/check.mjs
-          node conformance/check.mjs
+          sh conformance/check.sh --full
