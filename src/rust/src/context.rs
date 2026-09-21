@@ -1,7 +1,9 @@
 use std::{
     collections::{BTreeMap, HashMap},
     future::Future,
+    pin::Pin,
     sync::Arc,
+    task::{Context as TaskContext, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -95,9 +97,44 @@ pub fn capture_request_context() -> Option<RequestContext> {
     canonical::capture_request_context().map(RequestContext::from_canonical)
 }
 
-/// Re-enter a captured request snapshot. `None` deliberately installs an empty
-/// canonical logger frame for the duration of the future so unrelated caller
-/// context cannot leak into work that was captured outside a request.
+/// Poll a future under one exact canonical logger frame.
+///
+/// The canonical ordinary async helper deliberately merges a child frame over
+/// its caller. Re-entering a detached snapshot has different semantics: the
+/// captured frame must replace any unrelated caller frame, including when the
+/// snapshot is explicitly absent. Reusing the canonical exact captured-frame
+/// primitive on every poll preserves poll-safety without introducing another
+/// task-local or ambient context authority.
+struct ExactLogContextFuture<F> {
+    context: next_loggers::LogContext,
+    future: Pin<Box<F>>,
+}
+
+impl<F> ExactLogContextFuture<F> {
+    fn new(context: next_loggers::LogContext, future: F) -> Self {
+        Self {
+            context,
+            future: Box::pin(future),
+        }
+    }
+}
+
+impl<F> Future for ExactLogContextFuture<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, task: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        let this = self.as_mut().get_mut();
+        let context = this.context.clone();
+        next_loggers::with_captured_log_context(&context, || this.future.as_mut().poll(task))
+    }
+}
+
+/// Re-enter a detached request snapshot exactly. A captured `Some` must not
+/// inherit unrelated caller baggage, and captured `None` deliberately installs
+/// an empty canonical frame for the duration of every poll.
 pub async fn run_with_captured_context<F>(
     context: Option<RequestContext>,
     future: F,
@@ -105,10 +142,10 @@ pub async fn run_with_captured_context<F>(
 where
     F: Future,
 {
-    match context {
-        Some(context) => run_with_context(context, future).await,
-        None => next_loggers::with_log_context_async(next_loggers::LogContext::default(), future).await,
-    }
+    let exact = context
+        .map(|context| context.to_canonical().to_log_context())
+        .unwrap_or_default();
+    ExactLogContextFuture::new(exact, future).await
 }
 
 pub fn current_request_id() -> Option<String> {
@@ -116,7 +153,9 @@ pub fn current_request_id() -> Option<String> {
 }
 
 pub fn current_trace_id() -> Option<String> {
-    current_context().map(|context| context.trace_id).filter(|value| !value.is_empty())
+    current_context()
+        .map(|context| context.trace_id)
+        .filter(|value| !value.is_empty())
 }
 
 pub fn current_user_id() -> Option<String> {
@@ -230,7 +269,10 @@ mod tests {
             assert_eq!(current_logged_in_user_id().as_deref(), Some("user-42"));
             assert_eq!(current_tenant_id().as_deref(), Some("tenant-42"));
             let current = current_context().expect("request context");
-            assert_eq!(current.baggage.get("otel.safe").map(String::as_str), Some("42"));
+            assert_eq!(
+                current.baggage.get("otel.safe").map(String::as_str),
+                Some("42")
+            );
             assert!(!current.baggage.contains_key("authorization"));
             assert_eq!(
                 next_loggers::current_log_context().fields.get("request.id"),
@@ -271,6 +313,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn captured_scope_replaces_unrelated_caller_context() {
+        let mut captured_source = test_context("captured");
+        captured_source
+            .baggage
+            .insert("otel.captured-only".into(), "yes".into());
+        let captured = run_with_context(captured_source, async {
+            capture_request_context().expect("captured request context")
+        })
+        .await;
+
+        let mut caller = test_context("caller");
+        caller
+            .baggage
+            .insert("otel.caller-only".into(), "must-not-leak".into());
+        run_with_context(caller, async {
+            run_with_captured_context(Some(captured), async {
+                assert_eq!(current_request_id().as_deref(), Some("request-captured"));
+                let current = current_context().expect("captured request context");
+                assert_eq!(
+                    current
+                        .baggage
+                        .get("otel.captured-only")
+                        .map(String::as_str),
+                    Some("yes")
+                );
+                assert!(!current.baggage.contains_key("otel.caller-only"));
+            })
+            .await;
+
+            assert_eq!(current_request_id().as_deref(), Some("request-caller"));
+            let restored = current_context().expect("caller request context");
+            assert_eq!(
+                restored
+                    .baggage
+                    .get("otel.caller-only")
+                    .map(String::as_str),
+                Some("must-not-leak")
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn explicitly_absent_capture_clears_an_unrelated_request_scope() {
         let absent = capture_request_context();
         assert!(absent.is_none());
@@ -279,7 +364,10 @@ mod tests {
             assert_eq!(current_request_id().as_deref(), Some("request-caller"));
             run_with_captured_context(absent, async {
                 assert_eq!(current_request_id(), None);
-                assert_eq!(next_loggers::current_log_context(), next_loggers::LogContext::default());
+                assert_eq!(
+                    next_loggers::current_log_context(),
+                    next_loggers::LogContext::default()
+                );
             })
             .await;
             assert_eq!(current_request_id().as_deref(), Some("request-caller"));
