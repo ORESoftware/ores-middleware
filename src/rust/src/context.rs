@@ -246,15 +246,23 @@ mod tests {
     #[tokio::test]
     async fn nested_and_captured_scopes_restore_exact_request_identity() {
         run_with_context(test_context("outer"), async {
-            let captured = capture_request_context();
+            let captured = capture_request_context().expect("captured request context");
+            assert_eq!(
+                captured.baggage.get("otel.safe").map(String::as_str),
+                Some("outer")
+            );
+            assert!(!captured.baggage.contains_key("authorization"));
+
             run_with_context(test_context("inner"), async {
                 assert_eq!(current_request_id().as_deref(), Some("request-inner"));
             })
             .await;
             assert_eq!(current_request_id().as_deref(), Some("request-outer"));
 
-            run_with_captured_context(captured, async {
+            run_with_captured_context(Some(captured), async {
                 assert_eq!(current_request_id().as_deref(), Some("request-outer"));
+                let restored = current_context().expect("restored request context");
+                assert!(!restored.baggage.contains_key("authorization"));
             })
             .await;
         })
