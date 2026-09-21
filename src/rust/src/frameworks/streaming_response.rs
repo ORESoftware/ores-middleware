@@ -91,7 +91,9 @@ mod tests {
                 headers: BTreeMap::from([(request_id_header, "req-stream-parity".into())]),
                 remote_ip: None,
                 content_length: None,
-                transport_secure: false,
+                // Exercise the ordinary admitted production path. The parity
+                // assertion is about response projection, not HTTPS rejection.
+                transport_secure: true,
             })
             .await
             .expect("request admission");
