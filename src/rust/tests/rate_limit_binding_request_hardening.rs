@@ -1,6 +1,6 @@
 use ores_middleware::{
-    RouteRateLimitBindingRequest, RouteRateLimitBindingResolutionError, RouteRateLimitBindingSource,
-    RouteRateLimitBindingTable,
+    RouteRateLimitBindingRequest, RouteRateLimitBindingResolutionError,
+    RouteRateLimitBindingSource, RouteRateLimitBindingTable,
 };
 use serde::Deserialize;
 use serde_json::Value;

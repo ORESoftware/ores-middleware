@@ -131,7 +131,13 @@ stack_config = "config/middleware.json"
         .expect("admitted evidence");
 
         assert_eq!(evidence.schema, MANIFEST_ADMISSION_EVIDENCE_SCHEMA);
-        assert_eq!(evidence.path, path);
+        // Discovery canonicalises its start, and on macOS the temp dir is /var, a
+        // symlink to /private/var: compare canonical paths or this passes on
+        // Linux CI and fails on every developer Mac.
+        assert_eq!(
+            std::fs::canonicalize(&evidence.path).expect("canonical evidence path"),
+            std::fs::canonicalize(&path).expect("canonical expected path")
+        );
         assert_eq!(evidence.source_bytes, GOOD.len());
         assert!(evidence.at_repo_root);
         assert!(evidence.valid_digest());

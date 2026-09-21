@@ -1,0 +1,278 @@
+#!/usr/bin/env node
+import { createHash } from 'node:crypto';
+import { lstat, readFile, readdir } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '..');
+const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+const participantIdPattern = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
+const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const canonicalEvidenceDir = 'artifacts/conformance/evidence';
+
+function fail(message) {
+  console.error(`[conformance] ${message}`);
+  process.exitCode = 1;
+}
+
+function isWithin(relativePath, namespace) {
+  return relativePath === namespace || relativePath.startsWith(`${namespace}/`);
+}
+
+function repoPath(value, label) {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('\0') || isAbsolute(value)) {
+    throw new Error(`${label} must be a non-empty repository-relative path`);
+  }
+  const resolved = resolve(root, value);
+  const rel = relative(root, resolved);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`${label} escapes repository root: ${value}`);
+  }
+  return { resolved, rel: rel.split(sep).join('/') };
+}
+
+async function assertNoSymlinkSegments(resolved, label) {
+  const rel = relative(root, resolved);
+  if (!rel) return;
+  let cursor = root;
+  for (const segment of rel.split(sep)) {
+    cursor = resolve(cursor, segment);
+    const stat = await lstat(cursor);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`${label} traverses symlink: ${relative(root, cursor).split(sep).join('/')}`);
+    }
+  }
+}
+
+async function realFile(value, label) {
+  const file = repoPath(value, label);
+  await assertNoSymlinkSegments(file.resolved, label);
+  const stat = await lstat(file.resolved);
+  if (!stat.isFile()) throw new Error(`${label} must be a real file: ${value}`);
+  return file;
+}
+
+async function collectTree(value, label) {
+  const base = repoPath(value, label);
+  await assertNoSymlinkSegments(base.resolved, label);
+  const stat = await lstat(base.resolved);
+  if (!stat.isDirectory()) throw new Error(`${label} must be a real directory: ${value}`);
+
+  const out = [];
+  async function walk(dir) {
+    const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const full = resolve(dir, entry.name);
+      const childStat = await lstat(full);
+      const rel = relative(root, full).split(sep).join('/');
+      if (childStat.isSymbolicLink()) throw new Error(`symlink forbidden: ${rel}`);
+      if (childStat.isDirectory()) await walk(full);
+      else if (childStat.isFile()) out.push({ full, rel });
+    }
+  }
+  await walk(base.resolved);
+  return out;
+}
+
+function canonicalRoots(values, label) {
+  if (!Array.isArray(values) || values.length === 0) throw new Error(`${label} must be a non-empty array`);
+  const seen = new Set();
+  return values.map((value, index) => {
+    const path = repoPath(value, `${label}[${index}]`);
+    const key = path.rel.replace(/\/$/, '');
+    if (seen.has(key)) throw new Error(`duplicate ${label} entry: ${value}`);
+    seen.add(key);
+    return { value, rel: key };
+  });
+}
+
+function rootsOverlap(a, b) {
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+async function collectRoots(roots, label) {
+  const files = (await Promise.all(roots.map((entry, index) => collectTree(entry.value, `${label}[${index}]`)))).flat();
+  const seen = new Set();
+  for (const file of files) {
+    if (seen.has(file.rel)) throw new Error(`overlapping ${label} include file more than once: ${file.rel}`);
+    seen.add(file.rel);
+  }
+  return files;
+}
+
+async function digestFiles(files) {
+  const hash = createHash('sha256');
+  for (const file of [...files].sort((a, b) => a.rel.localeCompare(b.rel))) {
+    hash.update(file.rel);
+    hash.update('\0');
+    hash.update(await readFile(file.full));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+async function digestSpec(files) {
+  const hash = createHash('sha256');
+  for (const file of files) {
+    hash.update(file.rel);
+    hash.update('\0');
+    hash.update(await readFile(file.resolved));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
+async function readJsonRealFile(value, label) {
+  const file = await realFile(value, label);
+  return { file, value: JSON.parse(await readFile(file.resolved, 'utf8')) };
+}
+
+try {
+  const manifestInfo = await readJsonRealFile('conformance/manifest.v1.json', 'manifest');
+  const manifest = manifestInfo.value;
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || manifest.schema !== 'ores.conformance.manifest/v1') {
+    throw new Error('invalid manifest schema');
+  }
+  if (typeof manifest.repository !== 'string' || !repositoryPattern.test(manifest.repository)) {
+    throw new Error('manifest.repository must be owner/repository');
+  }
+  const [owner, repository] = manifest.repository.split('/');
+  if (owner === '.' || owner === '..' || repository === '.' || repository === '..') throw new Error('invalid manifest.repository');
+  if (process.env.GITHUB_REPOSITORY && manifest.repository !== process.env.GITHUB_REPOSITORY) {
+    throw new Error(`manifest.repository does not match CI repository: ${process.env.GITHUB_REPOSITORY}`);
+  }
+
+  if (!manifest.coverage || !['scaffold-only', 'behavioral'].includes(manifest.coverage.status)) {
+    throw new Error('coverage.status must be scaffold-only or behavioral');
+  }
+  if (typeof manifest.coverage.behavioralCasesRequired !== 'boolean') {
+    throw new Error('coverage.behavioralCasesRequired must be boolean');
+  }
+  if ((manifest.coverage.status === 'behavioral') !== manifest.coverage.behavioralCasesRequired) {
+    throw new Error('coverage.behavioralCasesRequired must be true exactly when coverage.status is behavioral');
+  }
+  if (!Array.isArray(manifest.requiredParticipants)) throw new Error('requiredParticipants must be an array');
+  for (const key of ['bindToContractDigests', 'bindToCaseDigests', 'missingRequiredEvidenceFails', 'staleEvidenceFails']) {
+    if (manifest.evidence?.[key] !== true) throw new Error(`evidence.${key} must be true`);
+  }
+  if (manifest.policy?.runtimeSpecificGoldensAllowed !== false || manifest.policy?.generatedEvidenceIsAuthority !== false) {
+    throw new Error('unsafe conformance policy');
+  }
+
+  const contractRoots = canonicalRoots(manifest.contractRoots, 'contractRoots');
+  const caseRoots = canonicalRoots(manifest.caseRoots, 'caseRoots');
+  for (const contractRoot of contractRoots) {
+    if (!isWithin(contractRoot.rel, 'contracts')) throw new Error(`contractRoots must stay under contracts/: ${contractRoot.value}`);
+  }
+  for (const caseRoot of caseRoots) {
+    if (!isWithin(caseRoot.rel, 'conformance')) throw new Error(`caseRoots must stay under conformance/: ${caseRoot.value}`);
+  }
+  for (const contractRoot of contractRoots) {
+    for (const caseRoot of caseRoots) {
+      if (rootsOverlap(contractRoot.rel, caseRoot.rel)) {
+        throw new Error(`contract and case roots overlap: ${contractRoot.value} / ${caseRoot.value}`);
+      }
+    }
+  }
+
+  const caseSchemaInfo = await readJsonRealFile(manifest.caseSchema, 'caseSchema');
+  if (!isWithin(caseSchemaInfo.file.rel, 'conformance')) throw new Error('caseSchema must stay under conformance/');
+  if (caseSchemaInfo.value?.$schema !== 'https://json-schema.org/draft/2020-12/schema') {
+    throw new Error('caseSchema must declare JSON Schema Draft 2020-12');
+  }
+  if (caseSchemaInfo.value?.$id !== 'https://ores.dev/schemas/conformance-case.v1.json') {
+    throw new Error('unexpected caseSchema $id');
+  }
+
+  const evidenceRoot = repoPath(manifest.evidenceDir, 'evidenceDir');
+  if (evidenceRoot.rel !== canonicalEvidenceDir) {
+    throw new Error(`evidenceDir must be ${canonicalEvidenceDir}`);
+  }
+  for (const rootEntry of [...contractRoots, ...caseRoots]) {
+    if (rootsOverlap(evidenceRoot.rel, rootEntry.rel)) {
+      throw new Error(`evidenceDir overlaps an authority/case root: ${rootEntry.value}`);
+    }
+  }
+
+  const contracts = await collectRoots(contractRoots, 'contractRoots');
+  if (contracts.length === 0) throw new Error('contract roots are empty');
+  const candidates = await collectRoots(caseRoots, 'caseRoots');
+  const behavior = [];
+  const caseIds = new Set();
+  let bootstrapMetadataCount = 0;
+
+  for (const file of candidates) {
+    if (!file.rel.endsWith('.json')) throw new Error(`case roots may contain only JSON: ${file.rel}`);
+    const value = JSON.parse(await readFile(file.full, 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`case must be a JSON object: ${file.rel}`);
+    if (value.schema === 'ores.conformance.bootstrap/v1') {
+      if (value.status !== 'bootstrap-only' || value.repository !== manifest.repository || typeof value.id !== 'string' || value.id.trim().length === 0) {
+        throw new Error(`invalid bootstrap metadata: ${file.rel}`);
+      }
+      bootstrapMetadataCount += 1;
+      if (bootstrapMetadataCount > 1) throw new Error('only one bootstrap metadata document is allowed');
+      continue;
+    }
+    if (value.schema !== 'ores.conformance.case/v1' || value.kind !== 'behavior') {
+      throw new Error(`unknown conformance case schema: ${file.rel}`);
+    }
+    if (typeof value.id !== 'string' || value.id.trim().length === 0 || value.id !== value.id.trim() || !Number.isInteger(value.version) || value.version < 1 || !own(value, 'input') || !own(value, 'expected')) {
+      throw new Error(`malformed behavior case: ${file.rel}`);
+    }
+    if (caseIds.has(value.id)) throw new Error(`duplicate behavior case id: ${value.id}`);
+    caseIds.add(value.id);
+    behavior.push(file);
+  }
+
+  const participantIds = new Set();
+  for (const participant of manifest.requiredParticipants) {
+    if (!participant || typeof participant !== 'object' || Array.isArray(participant) || typeof participant.id !== 'string' || !participantIdPattern.test(participant.id)) {
+      throw new Error('participant id must be a lowercase path-safe identifier');
+    }
+    if (participantIds.has(participant.id)) throw new Error(`duplicate participant: ${participant.id}`);
+    participantIds.add(participant.id);
+  }
+  if (manifest.coverage.status === 'behavioral') {
+    if (behavior.length === 0) throw new Error('behavioral coverage requires at least one real behavior case');
+    if (participantIds.size === 0) throw new Error('behavioral coverage requires at least one participant');
+  }
+
+  const contractsSha256 = await digestFiles(contracts);
+  const corpusSha256 = await digestFiles(behavior);
+  const conformanceSpecSha256 = await digestSpec([manifestInfo.file, caseSchemaInfo.file]);
+
+  if (manifest.coverage.status === 'behavioral') {
+    await assertNoSymlinkSegments(evidenceRoot.resolved, 'evidenceDir');
+    const evidenceDirStat = await lstat(evidenceRoot.resolved);
+    if (!evidenceDirStat.isDirectory()) throw new Error('evidenceDir must be a real directory in behavioral mode');
+    for (const participant of manifest.requiredParticipants) {
+      const evidencePath = resolve(evidenceRoot.resolved, `${participant.id}.json`);
+      const evidenceRelative = relative(evidenceRoot.resolved, evidencePath);
+      if (evidenceRelative === '..' || evidenceRelative.startsWith(`..${sep}`) || isAbsolute(evidenceRelative)) {
+        throw new Error(`evidence path escapes evidenceDir: ${participant.id}`);
+      }
+      const evidenceStat = await lstat(evidencePath);
+      if (evidenceStat.isSymbolicLink() || !evidenceStat.isFile()) throw new Error(`evidence must be a real file: ${participant.id}`);
+      const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
+      if (evidence?.schema !== 'ores.conformance.evidence/v1' || evidence.participant !== participant.id || evidence.status !== 'pass' || evidence.contractsSha256 !== contractsSha256 || evidence.corpusSha256 !== corpusSha256 || evidence.conformanceSpecSha256 !== conformanceSpecSha256 || evidence.behaviorCaseCount !== behavior.length) {
+        throw new Error(`missing, failed, or stale evidence: ${participant.id}`);
+      }
+    }
+  }
+
+  console.log(JSON.stringify({
+    schema: 'ores.conformance.check/v1',
+    repository: manifest.repository,
+    coverage: manifest.coverage.status,
+    contractFileCount: contracts.length,
+    behaviorCaseCount: behavior.length,
+    bootstrapMetadataCount,
+    contractsSha256,
+    corpusSha256,
+    conformanceSpecSha256,
+    requiredParticipants: [...participantIds],
+  }, null, 2));
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}

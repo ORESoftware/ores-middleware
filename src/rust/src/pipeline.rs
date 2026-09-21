@@ -58,10 +58,17 @@ pub struct ActiveRequest {
     request: RequestMetadata,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthErrorExposure {
+    SanitizeProviderDiagnostics,
+    PreserveTrustedPolicy,
+}
+
 #[derive(Clone)]
 pub struct MiddlewareStack {
     config: Arc<MiddlewareConfig>,
     auth: DynAuthVerifier,
+    auth_error_exposure: AuthErrorExposure,
     sync: DynSyncObserver,
     telemetry: DynTelemetrySink,
     rate_limiter: DynRateLimiter,
@@ -97,6 +104,7 @@ impl MiddlewareStack {
         Ok(Self {
             config: Arc::new(config),
             auth: Arc::new(AnonymousAuth),
+            auth_error_exposure: AuthErrorExposure::SanitizeProviderDiagnostics,
             sync: Arc::new(NoopSyncObserver),
             telemetry: Arc::new(TracingTelemetry),
             rate_limiter: local_rate_limiter.clone(),
@@ -108,6 +116,21 @@ impl MiddlewareStack {
 
     pub fn with_auth_verifier(mut self, verifier: DynAuthVerifier) -> Self {
         self.auth = verifier;
+        // Publicly supplied verifiers are an untrusted diagnostic boundary. A
+        // caller cannot opt out of redaction by choosing a special error code.
+        self.auth_error_exposure = AuthErrorExposure::SanitizeProviderDiagnostics;
+        self
+    }
+
+    /// Install a verifier whose errors are authored by this crate as stable
+    /// policy outcomes rather than by an SDK/provider integration.
+    ///
+    /// Crate-private by design: external `AuthVerifier` implementations cannot
+    /// request passthrough and therefore cannot spoof a trusted error code to
+    /// bypass the HTTP redaction boundary.
+    pub(crate) fn with_trusted_auth_policy_verifier(mut self, verifier: DynAuthVerifier) -> Self {
+        self.auth = verifier;
+        self.auth_error_exposure = AuthErrorExposure::PreserveTrustedPolicy;
         self
     }
 
@@ -178,10 +201,27 @@ impl MiddlewareStack {
             }
 
             enforce_transport_policy(&self.config, &request)?;
-            self.auth
-                .verify(&request)
-                .await
-                .map_err(|error| MiddlewareError::new(401, error.code, error.message))
+            self.auth.verify(&request).await.map_err(|error| {
+                match self.auth_error_exposure {
+                    AuthErrorExposure::PreserveTrustedPolicy => {
+                        MiddlewareError::new(401, error.code, error.message)
+                    }
+                    AuthErrorExposure::SanitizeProviderDiagnostics => {
+                        // Provider diagnostics can contain SDK payloads, token fragments, or
+                        // backend topology. Keep only the stable provider code in trusted logs;
+                        // the request/trace ids are already carried by the lifecycle span.
+                        tracing::warn!(
+                            code = error.code,
+                            "authentication provider rejected request"
+                        );
+                        MiddlewareError::new(
+                            401,
+                            "authentication_failed",
+                            "authentication failed",
+                        )
+                    }
+                }
+            })
         })
         .await
         .map_err(|error| correlate_error(&self.config, &base_context, error))?;

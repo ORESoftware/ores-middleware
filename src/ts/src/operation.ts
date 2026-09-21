@@ -11,7 +11,7 @@ import {
 } from "./context.js";
 import type { RequestContext } from "./index.js";
 
-export type OperationTransport = "http" | "tcp" | "websocket";
+export type OperationTransport = "http" | "lambda" | "tcp" | "websocket";
 export type OperationScope = "request" | "connection" | "message" | "callback";
 export type OperationFailureKind = "error" | "cancelled" | "deadline_exceeded";
 
@@ -191,7 +191,7 @@ async function reportSafely(
 }
 
 /**
- * Executes one HTTP request, TCP connection/callback, or WebSocket message as
+ * Executes one HTTP request, Lambda callback, TCP connection/callback, or WebSocket message as
  * an isolated failure domain. Exceptions become typed outcomes; they do not
  * reject the event-loop callback or terminate the listener.
  *

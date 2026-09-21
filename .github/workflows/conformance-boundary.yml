@@ -1,0 +1,47 @@
+name: conformance-boundary
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'conformance/**'
+      - 'governance/**'
+      - 'src/**'
+      - 'scripts/check-polyglot-governance.mjs'
+      - '.zpkg.toml'
+      - '.zpkg/hooks/**'
+      - '.githooks/**'
+      - '.github/workflows/contract-conformance.yml'
+      - 'artifacts/conformance/evidence/**'
+      - '.github/workflows/conformance-boundary.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'conformance/**'
+      - 'governance/**'
+      - 'src/**'
+      - 'scripts/check-polyglot-governance.mjs'
+      - '.zpkg.toml'
+      - '.zpkg/hooks/**'
+      - '.githooks/**'
+      - '.github/workflows/contract-conformance.yml'
+      - 'artifacts/conformance/evidence/**'
+      - '.github/workflows/conformance-boundary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check conformance, governance, contracts, and src participants
+        run: |
+          node --check scripts/check-polyglot-governance.mjs
+          node --check conformance/check.mjs
+          sh conformance/check.sh --full

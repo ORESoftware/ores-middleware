@@ -12,3 +12,4 @@ pub mod dioxus;
 pub mod leptos;
 #[cfg(feature = "mash")]
 pub mod mash;
+pub mod streaming_response;
