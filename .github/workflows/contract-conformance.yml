@@ -233,7 +233,13 @@ jobs:
       - run: cargo fmt --manifest-path tools/contract-parity/Cargo.toml -- --check
       - run: cargo test --manifest-path tools/contract-parity/Cargo.toml --all-targets
       - run: cargo test --manifest-path src/rust/Cargo.toml --all-features
-      - run: cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck | jq -e '.language == "rust"'
+      - name: Validate Rust runtime descriptor against shared contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/descriptors
+          cargo run --quiet --manifest-path src/rust/Cargo.toml --bin contractcheck > target/descriptors/rust.json
+          node scripts/check-runtime-descriptor.mjs --language rust target/descriptors/rust.json
 
   typescript:
     runs-on: ubuntu-24.04
@@ -255,7 +261,13 @@ jobs:
           node-version: 22.23.1
       - run: npm ci --prefix src/ts
       - run: npm --prefix src/ts test
-      - run: node src/ts/dist/contractcheck.js | jq -e '.language == "ts"'
+      - name: Validate TypeScript runtime descriptor against shared contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/descriptors
+          node src/ts/dist/contractcheck.js > target/descriptors/ts.json
+          node scripts/check-runtime-descriptor.mjs --language ts target/descriptors/ts.json
 
   golang:
     runs-on: ubuntu-24.04
@@ -280,7 +292,13 @@ jobs:
         run: cd src/golang && go mod tidy && git diff --exit-code -- go.mod go.sum
       - name: Run Go tests with race detector and randomized order
         run: cd src/golang && go test -race -shuffle=on -count=2 ./...
-      - run: cd src/golang && go run ./cmd/contractcheck | jq -e '.language == "golang"'
+      - name: Validate Go runtime descriptor against shared contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/descriptors
+          (cd src/golang && go run ./cmd/contractcheck) > target/descriptors/golang.json
+          node scripts/check-runtime-descriptor.mjs --language golang target/descriptors/golang.json
 
   beam:
     runs-on: ubuntu-24.04
@@ -304,8 +322,26 @@ jobs:
           gleam-version: '1.18.1'
           rebar3-version: 'latest'
       - run: cd src/gleam && gleam format --check src test && gleam test
-      - run: cd src/gleam && gleam run -m ores_middleware_contractcheck | jq -e '.language == "gleam"'
+      - name: Validate Gleam runtime descriptor against shared contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/descriptors
+          (cd src/gleam && gleam run -m ores_middleware_contractcheck) > target/descriptors/gleam.json
+          node scripts/check-runtime-descriptor.mjs --language gleam target/descriptors/gleam.json
       - run: cd src/elixir && mix deps.get && mix test
-      - run: cd src/elixir && MIX_ENV=test mix run --no-compile --no-deps-check --no-start -e 'IO.puts(OresMiddleware.descriptor_json())' | jq -e '.language == "elixir"'
+      - name: Validate Elixir runtime descriptor against shared contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/descriptors
+          (cd src/elixir && MIX_ENV=test mix run --no-compile --no-deps-check --no-start -e 'IO.puts(OresMiddleware.descriptor_json())') > target/descriptors/elixir.json
+          node scripts/check-runtime-descriptor.mjs --language elixir target/descriptors/elixir.json
       - run: cd src/erlang && rebar3 eunit
-      - run: cd src/erlang && escript escript/contractcheck.escript | jq -e '.language == "erlang"'
+      - name: Validate Erlang runtime descriptor against shared contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/descriptors
+          (cd src/erlang && escript escript/contractcheck.escript) > target/descriptors/erlang.json
+          node scripts/check-runtime-descriptor.mjs --language erlang target/descriptors/erlang.json

@@ -177,7 +177,6 @@ pub const CAPABILITIES: &[&str] = &[
     "fault-injection",
     "test-auth-bypass",
     "schema-capture",
-    "graceful-shutdown",
 ];
 
 pub fn capabilities() -> &'static [&'static str] {
