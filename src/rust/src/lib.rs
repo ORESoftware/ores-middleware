@@ -66,8 +66,10 @@ pub use config::{
 };
 pub use config_discovery::{Discovered, DiscoveryError, Origin, Start};
 pub use context::{
-    current_context, current_logged_in_user_id, current_request_id, current_tenant_id,
-    current_trace_id, current_user_id, run_with_context, ContextRegistry, RequestContext,
+    capture_request_context, current_context, current_correlation_id,
+    current_logged_in_user_id, current_request_id, current_session_id, current_tenant_id,
+    current_trace_id, current_user_id, run_with_captured_context, run_with_context,
+    spawn_with_current_context, ContextRegistry, RequestContext,
 };
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
