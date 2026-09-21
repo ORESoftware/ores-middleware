@@ -14,9 +14,11 @@ pub fn response_headers(stack: &MiddlewareStack, active: &ActiveRequest) -> BTre
     response_headers_from_context(stack, &active.context.request_id)
 }
 
-/// Pure projection used by streaming adapters and tests.
+/// Pure internal projection. Keep the externally supported streaming seam tied
+/// to an admitted `ActiveRequest` so callers cannot manufacture lifecycle
+/// headers for a request that never crossed middleware admission.
 #[must_use]
-pub fn response_headers_from_context(
+pub(crate) fn response_headers_from_context(
     stack: &MiddlewareStack,
     request_id: &str,
 ) -> BTreeMap<String, String> {
@@ -58,7 +60,7 @@ pub fn response_headers_from_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::default_config;
+    use crate::{RequestMetadata, default_config};
 
     #[test]
     fn headers_are_available_without_finishing_request() {
@@ -75,5 +77,28 @@ mod tests {
             headers.get("x-content-type-options").map(String::as_str),
             Some("nosniff")
         );
+    }
+
+    #[tokio::test]
+    async fn projected_headers_match_the_existing_finish_contract() {
+        let stack = MiddlewareStack::new(default_config("streaming-response-parity"))
+            .expect("middleware stack");
+        let request_id_header = stack.config().settings.request_id_header.clone();
+        let active = stack
+            .begin(RequestMetadata {
+                method: "GET".into(),
+                path: "/stream".into(),
+                headers: BTreeMap::from([(request_id_header, "req-stream-parity".into())]),
+                remote_ip: None,
+                content_length: None,
+                transport_secure: false,
+            })
+            .await
+            .expect("request admission");
+
+        let projected = response_headers(&stack, &active);
+        let finalized = stack.finish(active, 200, None).await;
+
+        assert_eq!(projected, finalized);
     }
 }
