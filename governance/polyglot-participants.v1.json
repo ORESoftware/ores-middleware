@@ -24,7 +24,8 @@
       "ciJob": "rust",
       "requiredCiTokens": [
         "cargo test --manifest-path src/rust/Cargo.toml --all-features",
-        "--bin contractcheck"
+        "--bin contractcheck",
+        "check-runtime-descriptor.mjs --language rust"
       ]
     },
     {
@@ -35,7 +36,8 @@
       "ciJob": "typescript",
       "requiredCiTokens": [
         "npm --prefix src/ts test",
-        "src/ts/dist/contractcheck.js"
+        "src/ts/dist/contractcheck.js",
+        "check-runtime-descriptor.mjs --language ts"
       ]
     },
     {
@@ -46,7 +48,8 @@
       "ciJob": "golang",
       "requiredCiTokens": [
         "go test -race",
-        "go run ./cmd/contractcheck"
+        "go run ./cmd/contractcheck",
+        "check-runtime-descriptor.mjs --language golang"
       ]
     },
     {
@@ -57,7 +60,8 @@
       "ciJob": "beam",
       "requiredCiTokens": [
         "gleam test",
-        "ores_middleware_contractcheck"
+        "ores_middleware_contractcheck",
+        "check-runtime-descriptor.mjs --language gleam"
       ]
     },
     {
@@ -68,7 +72,8 @@
       "ciJob": "beam",
       "requiredCiTokens": [
         "mix test",
-        "OresMiddleware.descriptor_json()"
+        "OresMiddleware.descriptor_json()",
+        "check-runtime-descriptor.mjs --language elixir"
       ]
     },
     {
@@ -79,7 +84,8 @@
       "ciJob": "beam",
       "requiredCiTokens": [
         "rebar3 eunit",
-        "escript/contractcheck.escript"
+        "escript/contractcheck.escript",
+        "check-runtime-descriptor.mjs --language erlang"
       ]
     }
   ],
