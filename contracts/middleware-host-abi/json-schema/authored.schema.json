@@ -38,6 +38,10 @@
       "minimum": 100,
       "maximum": 599
     },
+    "HeaderValue": {
+      "type": "string",
+      "pattern": "^[^\\r\\n\\u0000]*$"
+    },
     "CanonicalHeaders": {
       "type": "object",
       "maxProperties": 256,
@@ -45,10 +49,7 @@
         "type": "string",
         "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]+$"
       },
-      "additionalProperties": {
-        "type": "string",
-        "pattern": "^[^\\r\\n\\u0000]*$"
-      }
+      "additionalProperties": { "$ref": "#/$defs/HeaderValue" }
     },
     "MiddlewareHostKind": {
       "type": "string",
