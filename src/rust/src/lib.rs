@@ -122,9 +122,9 @@ pub use placement::{
 pub use provider_api::{
     edge_fetch_middleware_fn, edge_minimal_middleware_fn, EdgeFetchCallbackArgs,
     EdgeFetchMiddleware, EdgeMinimalCallbackArgs, EdgeMinimalDecision, EdgeMinimalMiddleware,
-    EdgeMiddlewareDependencies, EdgeNext, FnEdgeFetchMiddleware, FnEdgeMinimalMiddleware,
-    MiddlewareCacheProvider, MiddlewareFetchProvider, MiddlewareFetchRequest,
-    MiddlewareFetchResponse,
+    EdgeMinimalRequest, EdgeMiddlewareDependencies, EdgeNext, FnEdgeFetchMiddleware,
+    FnEdgeMinimalMiddleware, MiddlewareCacheProvider, MiddlewareFetchProvider,
+    MiddlewareFetchRequest, MiddlewareFetchResponse, MiddlewareResultFuture,
 };
 pub use rate_limit::{
     derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm,
