@@ -6,6 +6,7 @@
     {"typespec":"Ores.Middleware.Host.AbsolutePath","generated":"AbsolutePath","authored":"AbsolutePath"},
     {"typespec":"Ores.Middleware.Host.SessionId","generated":"SessionId","authored":"SessionId"},
     {"typespec":"Ores.Middleware.Host.HttpStatus","generated":"HttpStatus","authored":"HttpStatus"},
+    {"typespec":"Ores.Middleware.Host.NonNegativeUInt64","generated":"NonNegativeUInt64","authored":"NonNegativeUInt64"},
     {"typespec":"Ores.Middleware.Host.HeaderValue","generated":"HeaderValue","authored":"HeaderValue"},
     {"typespec":"Ores.Middleware.Host.CanonicalHeaders","generated":"CanonicalHeaders","authored":"CanonicalHeaders"},
     {"typespec":"Ores.Middleware.Host.MiddlewareHostKind","generated":"MiddlewareHostKind","authored":"MiddlewareHostKind"},
