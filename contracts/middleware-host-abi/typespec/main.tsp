@@ -33,6 +33,9 @@ scalar SessionId extends string;
 @maxValue(599)
 scalar HttpStatus extends uint16;
 
+@minValue(0)
+scalar NonNegativeUInt64 extends uint64;
+
 @pattern("^[^\\r\\n\\u0000]*$")
 scalar HeaderValue extends string;
 
@@ -74,7 +77,7 @@ model MiddlewareHostRequest {
   path: AbsolutePath;
   headers: CanonicalHeaders;
   trustedRemoteIp?: string | null;
-  contentLength?: uint64 | null;
+  contentLength?: NonNegativeUInt64 | null;
   trustedTransportSecure: boolean;
 }
 
@@ -113,7 +116,7 @@ model MiddlewareHostFinishRequest {
   schema: "ores.middleware.host/v1";
   sessionId: SessionId;
   status: HttpStatus;
-  responseBytes?: uint64 | null;
+  responseBytes?: NonNegativeUInt64 | null;
   outcome: MiddlewareHostOutcome;
 }
 
