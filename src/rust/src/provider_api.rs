@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::{
     AuthVerifier, IntegrationError, RateLimiter, RequestContext, RequestMetadata, StageResponse,
@@ -46,11 +41,7 @@ pub trait MiddlewareFetchProvider: Send + Sync {
     fn fetch<'a>(
         &'a self,
         request: MiddlewareFetchRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a>>;
 }
 
 /// Bounded key/value cache surface that can be backed by a Worker cache, KV,
@@ -136,9 +127,7 @@ pub trait EdgeMinimalMiddleware: Send + Sync {
     fn call<'a>(
         &'a self,
         args: EdgeMinimalCallbackArgs,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>>;
 }
 
 /// Closure adapter so consumers normally provide a callback rather than define
@@ -171,9 +160,8 @@ where
     fn call<'a>(
         &'a self,
         args: EdgeMinimalCallbackArgs,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>>
+    {
         Box::pin((self.callback)(args))
     }
 }
@@ -244,9 +232,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        AuthDecision, InMemoryTokenBucket, RateLimiter, ResponseMetadata, TelemetrySink,
-    };
+    use crate::{AuthDecision, InMemoryTokenBucket, RateLimiter, ResponseMetadata, TelemetrySink};
 
     struct TestFetch;
 
@@ -255,9 +241,7 @@ mod tests {
             &'a self,
             request: MiddlewareFetchRequest,
         ) -> Pin<
-            Box<
-                dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a,
-            >,
+            Box<dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a>,
         > {
             Box::pin(async move {
                 Ok(MiddlewareFetchResponse {
@@ -275,7 +259,8 @@ mod tests {
         fn verify<'a>(
             &'a self,
             _request: &'a RequestMetadata,
-        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>>
+        {
             Box::pin(async {
                 Ok(AuthDecision {
                     user_id: Some("user-1".into()),
@@ -292,7 +277,8 @@ mod tests {
         fn get<'a>(
             &'a self,
             _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>>
+        {
             Box::pin(async { Ok(None) })
         }
 
@@ -371,17 +357,18 @@ mod tests {
 
     #[tokio::test]
     async fn edge_minimal_callback_receives_dependencies_without_runtime_sdk_types() {
-        let middleware = edge_minimal_middleware_fn(|mut args: EdgeMinimalCallbackArgs| async move {
-            let response = args
-                .deps
-                .fetch
-                .fetch(MiddlewareFetchRequest::get("https://example.test/auth"))
-                .await?;
-            assert_eq!(response.status, 200);
-            let auth = args.deps.auth.verify(&args.request).await?;
-            args.set_request_header("x-user-id", auth.user_id.unwrap_or_default());
-            Ok(EdgeMinimalDecision::Continue(args.request))
-        });
+        let middleware =
+            edge_minimal_middleware_fn(|mut args: EdgeMinimalCallbackArgs| async move {
+                let response = args
+                    .deps
+                    .fetch
+                    .fetch(MiddlewareFetchRequest::get("https://example.test/auth"))
+                    .await?;
+                assert_eq!(response.status, 200);
+                let auth = args.deps.auth.verify(&args.request).await?;
+                args.set_request_header("x-user-id", auth.user_id.unwrap_or_default());
+                Ok(EdgeMinimalDecision::Continue(args.request))
+            });
 
         let result = middleware
             .call(EdgeMinimalCallbackArgs {
@@ -395,6 +382,9 @@ mod tests {
         let EdgeMinimalDecision::Continue(request) = result else {
             panic!("expected continue");
         };
-        assert_eq!(request.headers.get("x-user-id").map(String::as_str), Some("user-1"));
+        assert_eq!(
+            request.headers.get("x-user-id").map(String::as_str),
+            Some("user-1")
+        );
     }
 }
