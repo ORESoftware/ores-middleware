@@ -17,6 +17,45 @@ pub enum LocalEdgeMinimalResult {
     Respond(StageResponse),
 }
 
+/// Ingress-owned request facts that authored `edge_minimal` middleware may
+/// observe but must not rewrite. The profile's mutable request surface is the
+/// canonical header map; P1 remains authoritative for these values.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct EdgeMinimalTrustedFacts {
+    method: String,
+    path: String,
+    remote_ip: Option<String>,
+    content_length: Option<u64>,
+    transport_secure: bool,
+}
+
+impl EdgeMinimalTrustedFacts {
+    fn capture(request: &RequestMetadata) -> Self {
+        Self {
+            method: request.method.clone(),
+            path: request.path.clone(),
+            remote_ip: request.remote_ip.clone(),
+            content_length: request.content_length,
+            transport_secure: request.transport_secure,
+        }
+    }
+
+    fn validate_unchanged(&self, request: &RequestMetadata) -> Result<(), IntegrationError> {
+        if self.method != request.method
+            || self.path != request.path
+            || self.remote_ip != request.remote_ip
+            || self.content_length != request.content_length
+            || self.transport_secure != request.transport_secure
+        {
+            return Err(IntegrationError {
+                code: "edge_request_trusted_fact_mutation",
+                message: "edge_minimal middleware may mutate request headers but not method, path, content length, remote IP, or transport security facts".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Local-process host for the provider-neutral `edge_minimal` callback ABI.
 ///
 /// This host deliberately has no response-finalization/session API. An
@@ -50,8 +89,9 @@ where
     /// dependency bundle. Provider-specific SDK values never cross this API.
     ///
     /// The host validates both the inbound normalized request and any mutated
-    /// request returned by authored middleware, so a callback cannot smuggle an
-    /// uppercase/invalid header or framing byte into the P3 handoff.
+    /// request returned by authored middleware. Canonical header mutations are
+    /// admitted; ingress-owned routing/body metadata and trusted remote/TLS facts
+    /// must remain unchanged before the request is handed to P3.
     pub async fn execute(
         &self,
         request: MiddlewareHostRequest,
@@ -60,6 +100,7 @@ where
         let request = request
             .into_request_metadata()
             .map_err(host_abi_error_as_integration)?;
+        let trusted_facts = EdgeMinimalTrustedFacts::capture(&request);
         let result = self
             .middleware
             .call(EdgeMinimalCallbackArgs {
@@ -71,7 +112,7 @@ where
 
         match result {
             EdgeMinimalDecision::Continue(request) => {
-                let request = revalidate_request(request)?;
+                let request = revalidate_request(request, &trusted_facts)?;
                 Ok(LocalEdgeMinimalResult::Continue(request))
             }
             EdgeMinimalDecision::Respond(response) => {
@@ -82,7 +123,11 @@ where
     }
 }
 
-fn revalidate_request(request: RequestMetadata) -> Result<RequestMetadata, IntegrationError> {
+fn revalidate_request(
+    request: RequestMetadata,
+    trusted_facts: &EdgeMinimalTrustedFacts,
+) -> Result<RequestMetadata, IntegrationError> {
+    trusted_facts.validate_unchanged(&request)?;
     MiddlewareHostRequest {
         schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
         method: request.method,
@@ -315,6 +360,28 @@ mod tests {
             .await
             .expect_err("uppercase header must fail closed");
         assert_eq!(error.code, "invalid_header_name");
+    }
+
+    #[tokio::test]
+    async fn middleware_cannot_rewrite_ingress_owned_request_facts() {
+        let middleware = edge_minimal_middleware_fn(|mut args| async move {
+            args.request.method = "POST".to_owned();
+            args.request.path = "/rewritten".to_owned();
+            args.request.remote_ip = Some("203.0.113.99".to_owned());
+            args.request.content_length = Some(999);
+            args.request.transport_secure = false;
+            Ok(EdgeMinimalDecision::Continue(args.request))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("GET", "/original");
+        request.trusted_remote_ip = Some("127.0.0.1".to_owned());
+        request.content_length = Some(4);
+        request.trusted_transport_secure = true;
+        let error = host
+            .execute(request, context())
+            .await
+            .expect_err("ingress-owned request facts must be immutable");
+        assert_eq!(error.code, "edge_request_trusted_fact_mutation");
     }
 
     #[tokio::test]
