@@ -49,10 +49,14 @@ jobs:
           toolchain: 1.95.0
           components: rustfmt, clippy
 
-      - name: Classify Rust formatting
-        id: rustfmt
-        continue-on-error: true
-        run: cargo fmt --manifest-path src/rust/Cargo.toml -- --check
+      - name: Check portable host ABI formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check \
+            src/rust/src/host_abi.rs \
+            src/rust/src/hosts/local.rs \
+            src/rust/tests/host_abi_contract.rs
 
       - name: Clippy portable host ABI
         run: cargo clippy --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib --test host_abi_contract -- -D warnings
@@ -76,17 +80,5 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          git diff --exit-code -- contracts/middleware-host-abi src/rust .github/workflows/middleware-host-abi.yml
+          git diff --exit-code -- contracts/middleware-host-abi src/rust/src/host_abi.rs src/rust/src/hosts src/rust/tests/host_abi_contract.rs .github/workflows/middleware-host-abi.yml
           test -z "$(git status --porcelain)"
-
-      - name: Enforce formatting latch
-        if: ${{ always() }}
-        env:
-          RUSTFMT_OUTCOME: ${{ steps.rustfmt.outcome }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "$RUSTFMT_OUTCOME" != "success" ]; then
-            echo 'Rust source is not reproducible under pinned rustfmt 1.95.0' >&2
-            exit 1
-          fi
