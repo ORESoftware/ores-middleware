@@ -9,7 +9,7 @@ use std::{collections::BTreeMap, fmt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{MiddlewareConfig, RequestMetadata, CONTRACT_VERSION};
+use crate::{CONTRACT_VERSION, MiddlewareConfig, RequestMetadata};
 
 pub const MIDDLEWARE_HOST_ABI_SCHEMA: &str = "ores.middleware.host/v1";
 pub const MIDDLEWARE_HOST_ABI_VERSION: &str = "1";
@@ -83,7 +83,10 @@ impl fmt::Debug for MiddlewareHostRequest {
             .field("method", &self.method)
             .field("path_bytes", &self.path.len())
             .field("header_count", &self.headers.len())
-            .field("trusted_remote_ip_present", &self.trusted_remote_ip.is_some())
+            .field(
+                "trusted_remote_ip_present",
+                &self.trusted_remote_ip.is_some(),
+            )
             .field("content_length", &self.content_length)
             .field("trusted_transport_secure", &self.trusted_transport_secure)
             .finish()
@@ -324,7 +327,23 @@ fn valid_header_name(name: &str) -> bool {
         && name.bytes().all(|byte| {
             byte.is_ascii_lowercase()
                 || byte.is_ascii_digit()
-                || matches!(byte, b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~')
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
         })
 }
 
@@ -336,7 +355,9 @@ mod tests {
     #[test]
     fn host_request_debug_never_prints_header_or_remote_ip_values() {
         let mut request = MiddlewareHostRequest::new("GET", "/secret?token=redacted-by-host");
-        request.headers.insert("authorization".into(), "Bearer top-secret".into());
+        request
+            .headers
+            .insert("authorization".into(), "Bearer top-secret".into());
         request.trusted_remote_ip = Some("203.0.113.19".into());
         let debug = format!("{request:?}");
         assert!(!debug.contains("top-secret"));
@@ -347,7 +368,9 @@ mod tests {
     #[test]
     fn canonical_lowercase_headers_are_required() {
         let mut request = MiddlewareHostRequest::new("GET", "/");
-        request.headers.insert("Authorization".into(), "redacted".into());
+        request
+            .headers
+            .insert("Authorization".into(), "redacted".into());
         assert_eq!(request.validate().unwrap_err().code, "invalid_header_name");
     }
 
@@ -371,8 +394,9 @@ mod tests {
         let config = default_config("host-abi");
         let local = MiddlewareHostDescriptor::for_config(MiddlewareHostKind::LocalProcess, &config)
             .unwrap();
-        let edge = MiddlewareHostDescriptor::for_config(MiddlewareHostKind::CloudflareWorker, &config)
-            .unwrap();
+        let edge =
+            MiddlewareHostDescriptor::for_config(MiddlewareHostKind::CloudflareWorker, &config)
+                .unwrap();
         assert_eq!(local.config_sha256, edge.config_sha256);
         assert_ne!(local.host_kind, edge.host_kind);
     }

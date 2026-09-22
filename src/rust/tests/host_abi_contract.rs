@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use ores_middleware::{
-    default_config, LocalMiddlewareHost, MiddlewareHostBeginResult, MiddlewareHostDescriptor,
-    MiddlewareHostFinishRequest, MiddlewareHostKind, MiddlewareHostOutcome, MiddlewareHostRequest,
-    MiddlewareStack, MIDDLEWARE_HOST_ABI_SCHEMA,
+    LocalMiddlewareHost, MIDDLEWARE_HOST_ABI_SCHEMA, MiddlewareHostBeginResult,
+    MiddlewareHostDescriptor, MiddlewareHostFinishRequest, MiddlewareHostKind,
+    MiddlewareHostOutcome, MiddlewareHostRequest, MiddlewareStack, default_config,
 };
 
 fn local_host() -> LocalMiddlewareHost {

@@ -6,13 +6,13 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
+    ActiveRequest, MiddlewareStack,
     frameworks::streaming_response::response_headers,
     host_abi::{
         MIDDLEWARE_HOST_ABI_SCHEMA, MiddlewareHostAbiError, MiddlewareHostBeginResult,
         MiddlewareHostDescriptor, MiddlewareHostFinishRequest, MiddlewareHostFinishResult,
         MiddlewareHostKind, MiddlewareHostRequest,
     },
-    ActiveRequest, MiddlewareStack,
 };
 
 /// Native/local host adapter for an isolated middleware deployment unit.
