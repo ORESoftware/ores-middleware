@@ -7,6 +7,13 @@ using TypeSpec.JsonSchema;
  *
  * Host/process/provider lifecycle is deliberately outside this contract. Local
  * P2 and edge adapters normalize trusted transport facts into these frames.
+ *
+ * The response lifecycle deliberately separates three facts that Fetch-style
+ * middleware APIs often collapse: a response head can become available, the
+ * transport may later commit that head, and the body/transport reaches a final
+ * terminal boundary after that. Hosts must report only observations they can
+ * actually make; a Fetch/worker host must not claim transport commitment merely
+ * because a Response object exists.
  */
 namespace Ores.Middleware.Host;
 
@@ -49,6 +56,20 @@ model CanonicalHeaders is Record<HeaderValue>;
 enum MiddlewareHostKind {
   local_process,
   cloudflare_worker,
+}
+
+enum MiddlewareHostResponseHeadPhase {
+  /** Status/headers exist and are available to the host, but need not be on the wire. */
+  available,
+  /** The adapter observed the downstream transport commit the response head. */
+  committed,
+}
+
+enum MiddlewareHostCompletionBoundary {
+  /** The response body stream reached its terminal state; transport flush is not claimed. */
+  body_stream,
+  /** The adapter observed the downstream server transport reach its terminal write/disconnect boundary. */
+  transport,
 }
 
 enum MiddlewareHostOutcome {
@@ -112,12 +133,30 @@ union MiddlewareHostBeginResult {
 
 @jsonSchema
 @TypeSpec.JsonSchema.extension("additionalProperties", false)
-model MiddlewareHostFinishRequest {
+model MiddlewareHostResponseHeadRequest {
   schema: "ores.middleware.host/v1";
   sessionId: SessionId;
   status: HttpStatus;
+  phase: MiddlewareHostResponseHeadPhase;
+}
+
+@jsonSchema
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model MiddlewareHostResponseHeadResult {
+  schema: "ores.middleware.host/v1";
+  status: HttpStatus;
+  phase: MiddlewareHostResponseHeadPhase;
+  elapsedMs: NonNegativeUInt64;
+}
+
+@jsonSchema
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model MiddlewareHostFinishRequest {
+  schema: "ores.middleware.host/v1";
+  sessionId: SessionId;
   responseBytes?: NonNegativeUInt64 | null;
   outcome: MiddlewareHostOutcome;
+  completionBoundary: MiddlewareHostCompletionBoundary;
 }
 
 @jsonSchema
@@ -125,5 +164,10 @@ model MiddlewareHostFinishRequest {
 model MiddlewareHostFinishResult {
   schema: "ores.middleware.host/v1";
   outcome: MiddlewareHostOutcome;
+  completionBoundary: MiddlewareHostCompletionBoundary;
+  effectiveStatus: HttpStatus;
+  timeToResponseHeadAvailableMs?: NonNegativeUInt64 | null;
+  timeToResponseHeadCommittedMs?: NonNegativeUInt64 | null;
+  totalDurationMs: NonNegativeUInt64;
   responseHeaders: CanonicalHeaders;
 }
