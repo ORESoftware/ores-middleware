@@ -2,10 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.oresoftware.com/middleware/host/v1/authored.schema.json",
   "title": "ORES middleware host ABI",
+  "description": "Provider-neutral middleware host ABI with distinct response-head availability, transport commitment, and terminal completion observations. Hosts must report only lifecycle boundaries they can actually observe.",
   "oneOf": [
     { "$ref": "#/$defs/MiddlewareHostDescriptor" },
     { "$ref": "#/$defs/MiddlewareHostRequest" },
     { "$ref": "#/$defs/MiddlewareHostBeginResult" },
+    { "$ref": "#/$defs/MiddlewareHostResponseHeadRequest" },
+    { "$ref": "#/$defs/MiddlewareHostResponseHeadResult" },
     { "$ref": "#/$defs/MiddlewareHostFinishRequest" },
     { "$ref": "#/$defs/MiddlewareHostFinishResult" }
   ],
@@ -59,6 +62,14 @@
     "MiddlewareHostKind": {
       "type": "string",
       "enum": ["local_process", "cloudflare_worker"]
+    },
+    "MiddlewareHostResponseHeadPhase": {
+      "type": "string",
+      "enum": ["available", "committed"]
+    },
+    "MiddlewareHostCompletionBoundary": {
+      "type": "string",
+      "enum": ["body_stream", "transport"]
     },
     "MiddlewareHostOutcome": {
       "type": "string",
@@ -151,30 +162,74 @@
         { "$ref": "#/$defs/MiddlewareHostReject" }
       ]
     },
-    "MiddlewareHostFinishRequest": {
+    "MiddlewareHostResponseHeadRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "sessionId", "status", "outcome"],
+      "required": ["schema", "sessionId", "status", "phase"],
       "properties": {
         "schema": { "type": "string", "const": "ores.middleware.host/v1" },
         "sessionId": { "$ref": "#/$defs/SessionId" },
         "status": { "$ref": "#/$defs/HttpStatus" },
+        "phase": { "$ref": "#/$defs/MiddlewareHostResponseHeadPhase" }
+      }
+    },
+    "MiddlewareHostResponseHeadResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "status", "phase", "elapsedMs"],
+      "properties": {
+        "schema": { "type": "string", "const": "ores.middleware.host/v1" },
+        "status": { "$ref": "#/$defs/HttpStatus" },
+        "phase": { "$ref": "#/$defs/MiddlewareHostResponseHeadPhase" },
+        "elapsedMs": { "$ref": "#/$defs/NonNegativeUInt64" }
+      }
+    },
+    "MiddlewareHostFinishRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "sessionId", "outcome", "completionBoundary"],
+      "properties": {
+        "schema": { "type": "string", "const": "ores.middleware.host/v1" },
+        "sessionId": { "$ref": "#/$defs/SessionId" },
         "responseBytes": {
           "anyOf": [
             { "$ref": "#/$defs/NonNegativeUInt64" },
             { "type": "null" }
           ]
         },
-        "outcome": { "$ref": "#/$defs/MiddlewareHostOutcome" }
+        "outcome": { "$ref": "#/$defs/MiddlewareHostOutcome" },
+        "completionBoundary": { "$ref": "#/$defs/MiddlewareHostCompletionBoundary" }
       }
     },
     "MiddlewareHostFinishResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "outcome", "responseHeaders"],
+      "required": [
+        "schema",
+        "outcome",
+        "completionBoundary",
+        "effectiveStatus",
+        "totalDurationMs",
+        "responseHeaders"
+      ],
       "properties": {
         "schema": { "type": "string", "const": "ores.middleware.host/v1" },
         "outcome": { "$ref": "#/$defs/MiddlewareHostOutcome" },
+        "completionBoundary": { "$ref": "#/$defs/MiddlewareHostCompletionBoundary" },
+        "effectiveStatus": { "$ref": "#/$defs/HttpStatus" },
+        "timeToResponseHeadAvailableMs": {
+          "anyOf": [
+            { "$ref": "#/$defs/NonNegativeUInt64" },
+            { "type": "null" }
+          ]
+        },
+        "timeToResponseHeadCommittedMs": {
+          "anyOf": [
+            { "$ref": "#/$defs/NonNegativeUInt64" },
+            { "type": "null" }
+          ]
+        },
+        "totalDurationMs": { "$ref": "#/$defs/NonNegativeUInt64" },
         "responseHeaders": { "$ref": "#/$defs/CanonicalHeaders" }
       }
     }
