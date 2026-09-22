@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     EdgeMiddlewareDependencies, EdgeMinimalCallbackArgs, EdgeMinimalDecision,
-    EdgeMinimalMiddleware, IntegrationError, MIDDLEWARE_HOST_ABI_SCHEMA,
+    EdgeMinimalMiddleware, EdgeMinimalRequest, IntegrationError, MIDDLEWARE_HOST_ABI_SCHEMA,
     MiddlewareExecutionProfile, MiddlewareHostRequest, RequestContext, RequestMetadata,
     StageResponse,
 };
@@ -18,8 +18,9 @@ pub enum LocalEdgeMinimalResult {
 }
 
 /// Immutable request fields owned by the ingress host rather than authored
-/// `edge_minimal` middleware. The portable callback may mutate request headers,
-/// but it may not rewrite routing/body metadata or trusted transport facts.
+/// `edge_minimal` middleware. The public callback request type already prevents
+/// ordinary consumers from mutating these facts; this snapshot remains a
+/// defense-in-depth check for crate-internal adapters and future refactors.
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct EdgeMinimalTrustedFacts {
     method: String,
@@ -88,10 +89,9 @@ where
     /// Execute one request-side middleware callback with only the approved edge
     /// dependency bundle. Provider-specific SDK values never cross this API.
     ///
-    /// The host validates both the inbound normalized request and any mutated
-    /// request returned by authored middleware. Header mutations are admitted;
-    /// ingress-owned method/path/body metadata and trusted remote/TLS facts must
-    /// remain byte-for-byte unchanged before the request is handed to P3.
+    /// The callback receives a constrained `EdgeMinimalRequest`: headers are the
+    /// only writable request surface. The host then revalidates the normalized
+    /// request and independently verifies all ingress-owned facts are unchanged.
     pub async fn execute(
         &self,
         request: MiddlewareHostRequest,
@@ -104,7 +104,7 @@ where
         let result = self
             .middleware
             .call(EdgeMinimalCallbackArgs {
-                request,
+                request: EdgeMinimalRequest::from_metadata(request),
                 context,
                 deps: self.deps.clone(),
             })
@@ -112,7 +112,7 @@ where
 
         match result {
             EdgeMinimalDecision::Continue(request) => {
-                let request = revalidate_request(request, &trusted_facts)?;
+                let request = revalidate_request(request.into_metadata(), &trusted_facts)?;
                 Ok(LocalEdgeMinimalResult::Continue(request))
             }
             EdgeMinimalDecision::Respond(response) => {
@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_edge_minimal_host_injects_dependencies_and_returns_mutated_request() {
+    async fn local_edge_minimal_host_injects_dependencies_and_returns_mutated_headers() {
         let middleware = edge_minimal_middleware_fn(|mut args| async move {
             let fetched = args
                 .deps
@@ -333,6 +333,11 @@ mod tests {
                 ))
                 .await?;
             assert_eq!(fetched.status, 204);
+            assert_eq!(args.request.method(), "GET");
+            assert_eq!(args.request.path(), "/v1/rpc");
+            assert_eq!(args.request.remote_ip(), Some("127.0.0.1"));
+            assert_eq!(args.request.content_length(), Some(42));
+            assert!(args.request.transport_secure());
             args.set_request_header("x-ores-edge", "admitted");
             Ok(EdgeMinimalDecision::Continue(args.request))
         });
@@ -359,7 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mutated_request_is_revalidated_before_handoff() {
+    async fn mutated_request_headers_are_revalidated_before_handoff() {
         let middleware = edge_minimal_middleware_fn(|mut args| async move {
             args.set_request_header("Authorization", "not-canonical");
             Ok(EdgeMinimalDecision::Continue(args.request))
@@ -375,24 +380,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn middleware_cannot_rewrite_ingress_owned_request_facts() {
-        let middleware = edge_minimal_middleware_fn(|mut args| async move {
-            args.request.method = "POST".to_owned();
-            args.request.path = "/rewritten".to_owned();
-            args.request.remote_ip = Some("203.0.113.99".to_owned());
-            args.request.content_length = Some(999);
-            args.request.transport_secure = false;
-            Ok(EdgeMinimalDecision::Continue(args.request))
-        });
-        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+    async fn internal_adapter_cannot_bypass_ingress_fact_recheck() {
+        struct InternalMutation;
+
+        impl EdgeMinimalMiddleware for InternalMutation {
+            fn call<'a>(
+                &'a self,
+                args: EdgeMinimalCallbackArgs,
+            ) -> crate::MiddlewareResultFuture<'a, EdgeMinimalDecision> {
+                Box::pin(async move {
+                    let mut request = args.request.into_metadata();
+                    request.method = "POST".to_owned();
+                    Ok(EdgeMinimalDecision::Continue(EdgeMinimalRequest::from_metadata(
+                        request,
+                    )))
+                })
+            }
+        }
+
+        let host = LocalEdgeMinimalHost::from_middleware(InternalMutation, deps());
         let mut request = MiddlewareHostRequest::new("GET", "/original");
-        request.trusted_remote_ip = Some("127.0.0.1".to_owned());
-        request.content_length = Some(4);
         request.trusted_transport_secure = true;
         let error = host
             .execute(request, context())
             .await
-            .expect_err("trusted ingress facts must be immutable");
+            .expect_err("host defense must reject crate-internal trusted-fact mutation");
         assert_eq!(error.code, "edge_request_trusted_fact_mutation");
     }
 
