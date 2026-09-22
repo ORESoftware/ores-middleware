@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    EdgeMinimalCallbackArgs, EdgeMinimalDecision, EdgeMinimalMiddleware,
-    EdgeMiddlewareDependencies, IntegrationError, MiddlewareExecutionProfile,
-    MiddlewareHostRequest, RequestContext, RequestMetadata, StageResponse,
-    MIDDLEWARE_HOST_ABI_SCHEMA,
+    EdgeMiddlewareDependencies, EdgeMinimalCallbackArgs, EdgeMinimalDecision,
+    EdgeMinimalMiddleware, IntegrationError, MIDDLEWARE_HOST_ABI_SCHEMA,
+    MiddlewareExecutionProfile, MiddlewareHostRequest, RequestContext, RequestMetadata,
+    StageResponse,
 };
 
 /// Result of one request-side `edge_minimal` middleware invocation.
@@ -212,9 +212,7 @@ mod tests {
             &'a self,
             _request: MiddlewareFetchRequest,
         ) -> Pin<
-            Box<
-                dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a,
-            >,
+            Box<dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a>,
         > {
             Box::pin(async {
                 Ok(MiddlewareFetchResponse {
@@ -232,7 +230,8 @@ mod tests {
         fn verify<'a>(
             &'a self,
             _request: &'a RequestMetadata,
-        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>>
+        {
             Box::pin(async { Ok(AuthDecision::default()) })
         }
     }
@@ -256,7 +255,8 @@ mod tests {
         fn get<'a>(
             &'a self,
             _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>>
+        {
             Box::pin(async { Ok(None) })
         }
 
@@ -328,7 +328,9 @@ mod tests {
             let fetched = args
                 .deps
                 .fetch
-                .fetch(MiddlewareFetchRequest::get("https://example.invalid/health"))
+                .fetch(MiddlewareFetchRequest::get(
+                    "https://example.invalid/health",
+                ))
                 .await?;
             assert_eq!(fetched.status, 204);
             args.set_request_header("x-ores-edge", "admitted");
