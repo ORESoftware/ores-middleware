@@ -117,7 +117,7 @@ jobs:
             --int64-strategy=number \
             --polymorphic-models-strategy=oneOf \
             --format-assertion=true \
-            --quiet=true
+            --quiet=false
 
       - name: Prove validation is source-immutable
         if: ${{ always() }}
