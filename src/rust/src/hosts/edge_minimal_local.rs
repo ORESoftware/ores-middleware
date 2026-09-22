@@ -105,6 +105,29 @@ fn validate_short_circuit_response(response: &StageResponse) -> Result<(), Integ
         });
     }
 
+    // P1 owns HTTP framing. P2 may author semantic response headers, but it must
+    // not choose transport body framing or hop-by-hop connection semantics.
+    for name in response.headers.keys() {
+        if matches!(
+            name.as_str(),
+            "content-length"
+                | "transfer-encoding"
+                | "connection"
+                | "keep-alive"
+                | "proxy-connection"
+                | "upgrade"
+                | "te"
+                | "trailer"
+        ) {
+            return Err(IntegrationError {
+                code: "edge_response_framing_header_forbidden",
+                message: format!(
+                    "edge_minimal short-circuit response may not author transport framing header {name:?}"
+                ),
+            });
+        }
+    }
+
     // Reuse the host ABI's canonical header-name/value admission rather than
     // maintaining a second edge header validator.
     MiddlewareHostRequest {
@@ -331,5 +354,24 @@ mod tests {
             .await
             .expect_err("informational response is not terminal");
         assert_eq!(error.code, "invalid_edge_response_status");
+    }
+
+    #[tokio::test]
+    async fn transport_framing_headers_in_short_circuit_response_fail_closed() {
+        let middleware = edge_minimal_middleware_fn(|_args| async move {
+            Ok(EdgeMinimalDecision::Respond(StageResponse {
+                status: 200,
+                headers: BTreeMap::from([("content-length".to_owned(), "999".to_owned())]),
+                body: b"ok".to_vec(),
+            }))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("GET", "/framing");
+        request.trusted_transport_secure = true;
+        let error = host
+            .execute(request, context())
+            .await
+            .expect_err("P2 must not author transport response framing");
+        assert_eq!(error.code, "edge_response_framing_header_forbidden");
     }
 }
