@@ -13,6 +13,7 @@ mod config;
 pub mod config_discovery;
 mod context;
 pub mod docs_serving;
+pub mod edge_callback;
 pub mod fallthrough;
 pub mod frameworks;
 pub mod hardening;
@@ -72,6 +73,11 @@ pub use context::{
     current_logged_in_user_id, current_request_id, current_session_id, current_tenant_id,
     current_trace_id, current_user_id, run_with_captured_context, run_with_context,
     spawn_with_current_context, ContextRegistry, RequestContext,
+};
+pub use edge_callback::{
+    EdgeCallbackFuture, EdgeFetchClient, EdgeFetchRequest, EdgeFetchResponse, EdgeLogLevel,
+    EdgeLogger, EdgeMinimalDecision, EdgeMinimalDependencies, EdgeMinimalInvocation,
+    EdgeMinimalMiddleware, EdgeMinimalRequest, NoopEdgeLogger,
 };
 pub use host_abi::{
     middleware_config_sha256, MiddlewareHostAbiError, MiddlewareHostBeginResult,
