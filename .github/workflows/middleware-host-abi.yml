@@ -6,6 +6,7 @@ on:
       - contracts/middleware-host-abi/**
       - src/rust/src/host_abi.rs
       - src/rust/src/hosts/**
+      - src/rust/src/provider_api.rs
       - src/rust/src/lib.rs
       - src/rust/tests/host_abi_contract.rs
       - src/rust/Cargo.toml
@@ -56,6 +57,8 @@ jobs:
           rustfmt --edition 2024 --check \
             src/rust/src/host_abi.rs \
             src/rust/src/hosts/local.rs \
+            src/rust/src/hosts/edge_minimal_local.rs \
+            src/rust/src/provider_api.rs \
             src/rust/tests/host_abi_contract.rs
 
       - name: Clippy portable host ABI
@@ -63,6 +66,12 @@ jobs:
 
       - name: Test portable host ABI internals
         run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib host_abi
+
+      - name: Test portable provider callback API
+        run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib provider_api
+
+      - name: Test local edge-minimal host
+        run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib edge_minimal_local
 
       - name: Test public portable host ABI
         run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --test host_abi_contract
@@ -126,7 +135,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(git -C tmp/tjsv-middleware-host-abi rev-parse HEAD)" = "733bc1b6b4b45433a38625fc4dd9ddb108b60519"
-          git diff --exit-code -- contracts/middleware-host-abi src/rust/src/host_abi.rs src/rust/src/hosts src/rust/tests/host_abi_contract.rs .github/workflows/middleware-host-abi.yml
+          git diff --exit-code -- contracts/middleware-host-abi src/rust/src/host_abi.rs src/rust/src/hosts src/rust/src/provider_api.rs src/rust/tests/host_abi_contract.rs .github/workflows/middleware-host-abi.yml
           test -z "$(git status --porcelain)"
 
       - name: Retain peer-authority parity evidence
