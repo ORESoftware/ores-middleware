@@ -10,6 +10,9 @@ using TypeSpec.JsonSchema;
  */
 namespace Ores.Middleware.Host;
 
+@minLength(64)
+@maxLength(64)
+@pattern("^[0-9a-f]{64}$")
 scalar Sha256 extends string;
 
 @minLength(1)
@@ -30,12 +33,15 @@ scalar SessionId extends string;
 @maxValue(599)
 scalar HttpStatus extends uint16;
 
+@pattern("^[^\\r\\n\\u0000]*$")
+scalar HeaderValue extends string;
+
 @TypeSpec.JsonSchema.extension("maxProperties", 256)
 @TypeSpec.JsonSchema.extension("propertyNames", #{
   `type`: "string",
   `pattern`: "^[a-z0-9!#$%&'*+.^_`|~-]+$"
 })
-model CanonicalHeaders is Record<string>;
+model CanonicalHeaders is Record<HeaderValue>;
 
 enum MiddlewareHostKind {
   local_process,
@@ -54,6 +60,7 @@ enum MiddlewareHostOutcome {
 model MiddlewareHostDescriptor {
   schema: "ores.middleware.host/v1";
   abiVersion: "1";
+  @minLength(1)
   middlewareContractVersion: string;
   hostKind: MiddlewareHostKind;
   configSha256: Sha256;
@@ -66,8 +73,8 @@ model MiddlewareHostRequest {
   method: HttpMethod;
   path: AbsolutePath;
   headers: CanonicalHeaders;
-  trustedRemoteIp?: string;
-  contentLength?: uint64;
+  trustedRemoteIp?: string | null;
+  contentLength?: uint64 | null;
   trustedTransportSecure: boolean;
 }
 
@@ -76,7 +83,9 @@ model MiddlewareHostPermit {
   decision: "permit";
   schema: "ores.middleware.host/v1";
   sessionId: SessionId;
+  @minLength(1)
   requestId: string;
+  @minLength(1)
   traceId: string;
   responseHeaders: CanonicalHeaders;
 }
@@ -86,6 +95,7 @@ model MiddlewareHostReject {
   decision: "reject";
   schema: "ores.middleware.host/v1";
   status: HttpStatus;
+  @minLength(1)
   code: string;
   message: string;
   headers: CanonicalHeaders;
@@ -103,7 +113,7 @@ model MiddlewareHostFinishRequest {
   schema: "ores.middleware.host/v1";
   sessionId: SessionId;
   status: HttpStatus;
-  responseBytes?: uint64;
+  responseBytes?: uint64 | null;
   outcome: MiddlewareHostOutcome;
 }
 
