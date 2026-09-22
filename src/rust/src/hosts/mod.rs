@@ -4,4 +4,5 @@
 //! `MiddlewareStack`; request/finish data crosses the provider-neutral
 //! `host_abi` contract.
 
+pub mod edge_minimal_local;
 pub mod local;
