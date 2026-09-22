@@ -17,6 +17,45 @@ pub enum LocalEdgeMinimalResult {
     Respond(StageResponse),
 }
 
+/// Ingress-owned request facts that authored `edge_minimal` middleware may
+/// observe but must not rewrite. Canonical request headers are the mutable
+/// request-side surface; P1 remains authoritative for these values.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct EdgeMinimalTrustedFacts {
+    method: String,
+    path: String,
+    remote_ip: Option<String>,
+    content_length: Option<u64>,
+    transport_secure: bool,
+}
+
+impl EdgeMinimalTrustedFacts {
+    fn capture(request: &RequestMetadata) -> Self {
+        Self {
+            method: request.method.clone(),
+            path: request.path.clone(),
+            remote_ip: request.remote_ip.clone(),
+            content_length: request.content_length,
+            transport_secure: request.transport_secure,
+        }
+    }
+
+    fn validate_unchanged(&self, request: &RequestMetadata) -> Result<(), IntegrationError> {
+        if self.method != request.method
+            || self.path != request.path
+            || self.remote_ip != request.remote_ip
+            || self.content_length != request.content_length
+            || self.transport_secure != request.transport_secure
+        {
+            return Err(IntegrationError {
+                code: "edge_request_trusted_fact_mutation",
+                message: "edge_minimal middleware may mutate request headers but not method, path, content length, remote IP, or transport security facts".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Local-process host for the provider-neutral `edge_minimal` callback ABI.
 ///
 /// This host deliberately has no response-finalization/session API. An
@@ -50,8 +89,9 @@ where
     /// dependency bundle. Provider-specific SDK values never cross this API.
     ///
     /// The host validates both the inbound normalized request and any mutated
-    /// request returned by authored middleware, so a callback cannot smuggle an
-    /// uppercase/invalid header or framing byte into the P3 handoff.
+    /// request returned by authored middleware. Canonical header mutations are
+    /// admitted; ingress-owned routing/body metadata and trusted remote/TLS facts
+    /// must remain unchanged before the request is handed to P3.
     pub async fn execute(
         &self,
         request: MiddlewareHostRequest,
@@ -60,6 +100,7 @@ where
         let request = request
             .into_request_metadata()
             .map_err(host_abi_error_as_integration)?;
+        let trusted_facts = EdgeMinimalTrustedFacts::capture(&request);
         let result = self
             .middleware
             .call(EdgeMinimalCallbackArgs {
@@ -71,7 +112,7 @@ where
 
         match result {
             EdgeMinimalDecision::Continue(request) => {
-                let request = revalidate_request(request)?;
+                let request = revalidate_request(request, &trusted_facts)?;
                 Ok(LocalEdgeMinimalResult::Continue(request))
             }
             EdgeMinimalDecision::Respond(response) => {
@@ -82,7 +123,11 @@ where
     }
 }
 
-fn revalidate_request(request: RequestMetadata) -> Result<RequestMetadata, IntegrationError> {
+fn revalidate_request(
+    request: RequestMetadata,
+    trusted_facts: &EdgeMinimalTrustedFacts,
+) -> Result<RequestMetadata, IntegrationError> {
+    trusted_facts.validate_unchanged(&request)?;
     MiddlewareHostRequest {
         schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
         method: request.method,
@@ -155,8 +200,8 @@ mod tests {
     use super::*;
     use crate::{
         AuthDecision, AuthVerifier, MiddlewareCacheProvider, MiddlewareFetchProvider,
-        MiddlewareFetchRequest, MiddlewareFetchResponse, RateLimiter, TelemetrySink,
-        edge_minimal_middleware_fn,
+        MiddlewareFetchRequest, MiddlewareFetchResponse, MiddlewareResultFuture, RateLimiter,
+        TelemetrySink, edge_minimal_middleware_fn,
     };
     use std::{collections::BTreeMap, future::Future, pin::Pin};
 
@@ -166,11 +211,7 @@ mod tests {
         fn fetch<'a>(
             &'a self,
             _request: MiddlewareFetchRequest,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a,
-            >,
-        > {
+        ) -> MiddlewareResultFuture<'a, MiddlewareFetchResponse> {
             Box::pin(async {
                 Ok(MiddlewareFetchResponse {
                     status: 204,
@@ -187,7 +228,7 @@ mod tests {
         fn verify<'a>(
             &'a self,
             _request: &'a RequestMetadata,
-        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        ) -> MiddlewareResultFuture<'a, AuthDecision> {
             Box::pin(async { Ok(AuthDecision::default()) })
         }
     }
@@ -208,10 +249,7 @@ mod tests {
     struct TestCache;
 
     impl MiddlewareCacheProvider for TestCache {
-        fn get<'a>(
-            &'a self,
-            _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>> {
+        fn get<'a>(&'a self, _key: &'a str) -> MiddlewareResultFuture<'a, Option<Vec<u8>>> {
             Box::pin(async { Ok(None) })
         }
 
@@ -220,14 +258,11 @@ mod tests {
             _key: &'a str,
             _value: Vec<u8>,
             _ttl_ms: Option<u64>,
-        ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>> {
+        ) -> MiddlewareResultFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
 
-        fn delete<'a>(
-            &'a self,
-            _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>> {
+        fn delete<'a>(&'a self, _key: &'a str) -> MiddlewareResultFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
     }
@@ -293,12 +328,22 @@ mod tests {
         assert_eq!(host.profile(), MiddlewareExecutionProfile::EdgeMinimal);
 
         let mut request = MiddlewareHostRequest::new("GET", "/v1/rpc");
+        request.trusted_remote_ip = Some("127.0.0.1".to_owned());
+        request.content_length = Some(42);
         request.trusted_transport_secure = true;
         let result = host.execute(request, context()).await.expect("execute");
         let LocalEdgeMinimalResult::Continue(request) = result else {
             panic!("expected continue");
         };
-        assert_eq!(request.headers.get("x-ores-edge").map(String::as_str), Some("admitted"));
+        assert_eq!(
+            request.headers.get("x-ores-edge").map(String::as_str),
+            Some("admitted")
+        );
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/v1/rpc");
+        assert_eq!(request.remote_ip.as_deref(), Some("127.0.0.1"));
+        assert_eq!(request.content_length, Some(42));
+        assert!(request.transport_secure);
     }
 
     #[tokio::test]
@@ -315,6 +360,28 @@ mod tests {
             .await
             .expect_err("uppercase header must fail closed");
         assert_eq!(error.code, "invalid_header_name");
+    }
+
+    #[tokio::test]
+    async fn middleware_cannot_rewrite_ingress_owned_request_facts() {
+        let middleware = edge_minimal_middleware_fn(|mut args| async move {
+            args.request.method = "POST".to_owned();
+            args.request.path = "/rewritten".to_owned();
+            args.request.remote_ip = Some("203.0.113.99".to_owned());
+            args.request.content_length = Some(999);
+            args.request.transport_secure = false;
+            Ok(EdgeMinimalDecision::Continue(args.request))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("GET", "/original");
+        request.trusted_remote_ip = Some("127.0.0.1".to_owned());
+        request.content_length = Some(4);
+        request.trusted_transport_secure = true;
+        let error = host
+            .execute(request, context())
+            .await
+            .expect_err("ingress-owned request facts must be immutable");
+        assert_eq!(error.code, "edge_request_trusted_fact_mutation");
     }
 
     #[tokio::test]
