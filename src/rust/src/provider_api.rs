@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::{
     AuthVerifier, IntegrationError, RateLimiter, RequestContext, RequestMetadata, StageResponse,
@@ -234,9 +229,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        AuthDecision, InMemoryTokenBucket, RateLimiter, ResponseMetadata, TelemetrySink,
-    };
+    use crate::{AuthDecision, InMemoryTokenBucket, RateLimiter, ResponseMetadata, TelemetrySink};
 
     struct TestFetch;
 
@@ -351,17 +344,18 @@ mod tests {
 
     #[tokio::test]
     async fn edge_minimal_callback_receives_dependencies_without_runtime_sdk_types() {
-        let middleware = edge_minimal_middleware_fn(|mut args: EdgeMinimalCallbackArgs| async move {
-            let response = args
-                .deps
-                .fetch
-                .fetch(MiddlewareFetchRequest::get("https://example.test/auth"))
-                .await?;
-            assert_eq!(response.status, 200);
-            let auth = args.deps.auth.verify(&args.request).await?;
-            args.set_request_header("x-user-id", auth.user_id.unwrap_or_default());
-            Ok(EdgeMinimalDecision::Continue(args.request))
-        });
+        let middleware =
+            edge_minimal_middleware_fn(|mut args: EdgeMinimalCallbackArgs| async move {
+                let response = args
+                    .deps
+                    .fetch
+                    .fetch(MiddlewareFetchRequest::get("https://example.test/auth"))
+                    .await?;
+                assert_eq!(response.status, 200);
+                let auth = args.deps.auth.verify(&args.request).await?;
+                args.set_request_header("x-user-id", auth.user_id.unwrap_or_default());
+                Ok(EdgeMinimalDecision::Continue(args.request))
+            });
 
         let result = middleware
             .call(EdgeMinimalCallbackArgs {
