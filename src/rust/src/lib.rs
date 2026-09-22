@@ -81,6 +81,11 @@ pub use host_abi::{
     MAX_HOST_HEADER_COUNT, MAX_HOST_METHOD_BYTES, MAX_HOST_PATH_BYTES,
     MIDDLEWARE_HOST_ABI_SCHEMA, MIDDLEWARE_HOST_ABI_VERSION,
 };
+pub use hosts::edge_minimal_lifecycle::{
+    edge_minimal_finalizer_fn, EdgeMinimalFinalizer, EdgeMinimalFinishArgs,
+    EdgeMinimalTerminalReport, FnEdgeMinimalFinalizer, LocalEdgeMinimalBeginResult,
+    LocalEdgeMinimalLifecycleHost, NoopEdgeMinimalFinalizer,
+};
 pub use hosts::edge_minimal_local::{LocalEdgeMinimalHost, LocalEdgeMinimalResult};
 pub use hosts::local::LocalMiddlewareHost;
 pub use integrations::{

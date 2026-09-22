@@ -58,6 +58,7 @@ jobs:
             src/rust/src/host_abi.rs \
             src/rust/src/hosts/local.rs \
             src/rust/src/hosts/edge_minimal_local.rs \
+            src/rust/src/hosts/edge_minimal_lifecycle.rs \
             src/rust/src/provider_api.rs \
             src/rust/tests/host_abi_contract.rs
 
@@ -72,6 +73,9 @@ jobs:
 
       - name: Test local edge-minimal host
         run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib edge_minimal_local
+
+      - name: Test deferred edge-minimal lifecycle host
+        run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib edge_minimal_lifecycle
 
       - name: Test public portable host ABI
         run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --test host_abi_contract
