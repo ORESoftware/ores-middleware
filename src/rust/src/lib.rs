@@ -16,6 +16,8 @@ pub mod docs_serving;
 pub mod fallthrough;
 pub mod frameworks;
 pub mod hardening;
+pub mod host_abi;
+pub mod hosts;
 mod integrations;
 pub mod lambda;
 pub mod lambda_capabilities;
@@ -71,6 +73,14 @@ pub use context::{
     current_trace_id, current_user_id, run_with_captured_context, run_with_context,
     spawn_with_current_context, ContextRegistry, RequestContext,
 };
+pub use host_abi::{
+    middleware_config_sha256, MiddlewareHostAbiError, MiddlewareHostBeginResult,
+    MiddlewareHostDescriptor, MiddlewareHostFinishRequest, MiddlewareHostFinishResult,
+    MiddlewareHostKind, MiddlewareHostOutcome, MiddlewareHostRequest, MAX_HOST_HEADER_BYTES,
+    MAX_HOST_HEADER_COUNT, MAX_HOST_METHOD_BYTES, MAX_HOST_PATH_BYTES,
+    MIDDLEWARE_HOST_ABI_SCHEMA, MIDDLEWARE_HOST_ABI_VERSION,
+};
+pub use hosts::local::LocalMiddlewareHost;
 pub use integrations::{
     AuthDecision, AuthVerifier, InMemoryTokenBucket, IntegrationError, RateLimiter,
     RequestMetadata, ResponseMetadata, SyncObserver, TelemetrySink, TransportSecurity,
@@ -99,8 +109,8 @@ pub use otel::{
 };
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use placement::{
-    MiddlewareCapabilities, MiddlewareExecutionTarget, MiddlewarePlacement,
-    MiddlewarePlacementViolation,
+    MiddlewareCapabilities, MiddlewareExecutionProfile, MiddlewareExecutionTarget,
+    MiddlewarePlacement, MiddlewarePlacementViolation,
 };
 pub use rate_limit::{
     derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm,
