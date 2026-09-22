@@ -5,6 +5,8 @@ use crate::{
     TelemetrySink,
 };
 
+pub type MiddlewareFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 /// Provider-neutral outbound HTTP request used by edge-compatible middleware.
 ///
 /// Host adapters translate this value to their native Fetch/HTTP client. The
@@ -41,7 +43,7 @@ pub trait MiddlewareFetchProvider: Send + Sync {
     fn fetch<'a>(
         &'a self,
         request: MiddlewareFetchRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<MiddlewareFetchResponse, IntegrationError>>;
 }
 
 /// Bounded key/value cache surface that can be backed by a Worker cache, KV,
@@ -51,19 +53,19 @@ pub trait MiddlewareCacheProvider: Send + Sync {
     fn get<'a>(
         &'a self,
         key: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<Option<Vec<u8>>, IntegrationError>>;
 
     fn set<'a>(
         &'a self,
         key: &'a str,
         value: Vec<u8>,
         ttl_ms: Option<u64>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<(), IntegrationError>>;
 
     fn delete<'a>(
         &'a self,
         key: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<(), IntegrationError>>;
 }
 
 /// The complete dependency bundle approved for portable P2 middleware.
@@ -127,7 +129,7 @@ pub trait EdgeMinimalMiddleware: Send + Sync {
     fn call<'a>(
         &'a self,
         args: EdgeMinimalCallbackArgs,
-    ) -> Pin<Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<EdgeMinimalDecision, IntegrationError>>;
 }
 
 /// Closure adapter so consumers normally provide a callback rather than define
@@ -160,8 +162,7 @@ where
     fn call<'a>(
         &'a self,
         args: EdgeMinimalCallbackArgs,
-    ) -> Pin<Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>>
-    {
+    ) -> MiddlewareFuture<'a, Result<EdgeMinimalDecision, IntegrationError>> {
         Box::pin((self.callback)(args))
     }
 }
@@ -172,7 +173,7 @@ pub trait EdgeNext: Send + Sync {
     fn call<'a>(
         &'a self,
         request: RequestMetadata,
-    ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<StageResponse, IntegrationError>>;
 }
 
 #[derive(Clone)]
@@ -193,7 +194,7 @@ pub trait EdgeFetchMiddleware: Send + Sync {
     fn call<'a>(
         &'a self,
         args: EdgeFetchCallbackArgs,
-    ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareFuture<'a, Result<StageResponse, IntegrationError>>;
 }
 
 pub struct FnEdgeFetchMiddleware<F> {
@@ -224,7 +225,7 @@ where
     fn call<'a>(
         &'a self,
         args: EdgeFetchCallbackArgs,
-    ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>> {
+    ) -> MiddlewareFuture<'a, Result<StageResponse, IntegrationError>> {
         Box::pin((self.callback)(args))
     }
 }
@@ -240,9 +241,7 @@ mod tests {
         fn fetch<'a>(
             &'a self,
             request: MiddlewareFetchRequest,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a>,
-        > {
+        ) -> MiddlewareFuture<'a, Result<MiddlewareFetchResponse, IntegrationError>> {
             Box::pin(async move {
                 Ok(MiddlewareFetchResponse {
                     status: 200,
@@ -277,8 +276,7 @@ mod tests {
         fn get<'a>(
             &'a self,
             _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>>
-        {
+        ) -> MiddlewareFuture<'a, Result<Option<Vec<u8>>, IntegrationError>> {
             Box::pin(async { Ok(None) })
         }
 
@@ -287,14 +285,14 @@ mod tests {
             _key: &'a str,
             _value: Vec<u8>,
             _ttl_ms: Option<u64>,
-        ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>> {
+        ) -> MiddlewareFuture<'a, Result<(), IntegrationError>> {
             Box::pin(async { Ok(()) })
         }
 
         fn delete<'a>(
             &'a self,
             _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>> {
+        ) -> MiddlewareFuture<'a, Result<(), IntegrationError>> {
             Box::pin(async { Ok(()) })
         }
     }
