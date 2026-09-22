@@ -2,7 +2,8 @@
 //!
 //! The ABI deliberately contains no process, socket, filesystem, Axum, or edge
 //! provider types. A local P2 process and an edge worker adapter can therefore
-//! normalize their trusted host facts into the same request/finish contract.
+//! normalize their trusted host facts into the same request/response lifecycle
+//! contract.
 
 use std::{collections::BTreeMap, fmt};
 
@@ -17,12 +18,61 @@ pub const MAX_HOST_HEADER_COUNT: usize = 256;
 pub const MAX_HOST_HEADER_BYTES: usize = 64 * 1024;
 pub const MAX_HOST_METHOD_BYTES: usize = 32;
 pub const MAX_HOST_PATH_BYTES: usize = 8 * 1024;
+pub const MAX_HOST_SHORT_CIRCUIT_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MiddlewareHostKind {
+pub enum MiddlewareHostExecutionModel {
     LocalProcess,
-    CloudflareWorker,
+    FetchHandler,
+    EventHooks,
+    LambdaEvents,
+    WasiHttp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MiddlewareHostCapabilities {
+    pub streaming_response: bool,
+    pub response_head_available_observation: bool,
+    pub response_head_commit_observation: bool,
+    pub body_stream_completion_observation: bool,
+    pub transport_completion_observation: bool,
+    pub client_disconnect_observation: bool,
+    pub background_wait_until: bool,
+    pub wasm_module: bool,
+}
+
+impl MiddlewareHostCapabilities {
+    /// Capabilities of the native local P1/P2 host when its owning transport
+    /// adapter reports observations through this ABI.
+    #[must_use]
+    pub const fn local_process() -> Self {
+        Self {
+            streaming_response: true,
+            response_head_available_observation: true,
+            response_head_commit_observation: true,
+            body_stream_completion_observation: true,
+            transport_completion_observation: true,
+            client_disconnect_observation: true,
+            background_wait_until: false,
+            wasm_module: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MiddlewareHostResponseHeadPhase {
+    Available,
+    Committed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MiddlewareHostCompletionBoundary {
+    BodyStream,
+    Transport,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -40,20 +90,33 @@ pub struct MiddlewareHostDescriptor {
     pub schema: String,
     pub abi_version: String,
     pub middleware_contract_version: String,
-    pub host_kind: MiddlewareHostKind,
+    pub adapter_id: String,
+    pub execution_model: MiddlewareHostExecutionModel,
+    pub capabilities: MiddlewareHostCapabilities,
     pub config_sha256: String,
 }
 
 impl MiddlewareHostDescriptor {
     pub fn for_config(
-        host_kind: MiddlewareHostKind,
+        adapter_id: impl Into<String>,
+        execution_model: MiddlewareHostExecutionModel,
+        capabilities: MiddlewareHostCapabilities,
         config: &MiddlewareConfig,
     ) -> Result<Self, MiddlewareHostAbiError> {
+        let adapter_id = adapter_id.into();
+        if !valid_adapter_id(&adapter_id) {
+            return Err(MiddlewareHostAbiError::new(
+                "invalid_adapter_id",
+                "middleware host adapter id is outside the bounded canonical identifier contract",
+            ));
+        }
         Ok(Self {
             schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
             abi_version: MIDDLEWARE_HOST_ABI_VERSION.to_owned(),
             middleware_contract_version: CONTRACT_VERSION.to_owned(),
-            host_kind,
+            adapter_id,
+            execution_model,
+            capabilities,
             config_sha256: middleware_config_sha256(config)?,
         })
     }
@@ -133,42 +196,7 @@ impl MiddlewareHostRequest {
                 "middleware host path is not a bounded normalized absolute path",
             ));
         }
-        if self.headers.len() > MAX_HOST_HEADER_COUNT {
-            return Err(MiddlewareHostAbiError::new(
-                "too_many_headers",
-                "middleware host request exceeds the header-count limit",
-            ));
-        }
-        let mut total = 0usize;
-        for (name, value) in &self.headers {
-            if !valid_header_name(name) {
-                return Err(MiddlewareHostAbiError::new(
-                    "invalid_header_name",
-                    "middleware host headers must use canonical lowercase ASCII names",
-                ));
-            }
-            if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
-                return Err(MiddlewareHostAbiError::new(
-                    "invalid_header_value",
-                    "middleware host header values may not contain framing bytes",
-                ));
-            }
-            total = total
-                .checked_add(name.len())
-                .and_then(|value_bytes| value_bytes.checked_add(value.len()))
-                .ok_or_else(|| {
-                    MiddlewareHostAbiError::new(
-                        "headers_too_large",
-                        "middleware host header size overflowed",
-                    )
-                })?;
-        }
-        if total > MAX_HOST_HEADER_BYTES {
-            return Err(MiddlewareHostAbiError::new(
-                "headers_too_large",
-                "middleware host request exceeds the aggregate header-byte limit",
-            ));
-        }
+        validate_headers(&self.headers)?;
         Ok(())
     }
 
@@ -183,16 +211,45 @@ impl MiddlewareHostRequest {
             transport_secure: self.trusted_transport_secure,
         })
     }
+
+    /// Convert portable middleware continuation metadata back to the host ABI
+    /// while retaining transport facts admitted by the original host.
+    ///
+    /// Portable middleware may route by changing method/path and may mutate
+    /// headers, but it cannot manufacture a different peer address, TLS state,
+    /// or body length simply because `RequestMetadata` is a reusable core type.
+    pub fn continued_from(
+        &self,
+        continued: RequestMetadata,
+    ) -> Result<Self, MiddlewareHostAbiError> {
+        self.validate()?;
+        let request = Self {
+            schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+            method: continued.method,
+            path: continued.path,
+            headers: continued.headers,
+            trusted_remote_ip: self.trusted_remote_ip.clone(),
+            content_length: self.content_length,
+            trusted_transport_secure: self.trusted_transport_secure,
+        };
+        request.validate()?;
+        Ok(request)
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "decision", rename_all = "snake_case")]
+#[serde(
+    tag = "decision",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum MiddlewareHostBeginResult {
     Permit {
         schema: String,
         session_id: String,
         request_id: String,
         trace_id: String,
+        request: MiddlewareHostRequest,
         response_headers: BTreeMap<String, String>,
     },
     Reject {
@@ -202,6 +259,72 @@ pub enum MiddlewareHostBeginResult {
         message: String,
         headers: BTreeMap<String, String>,
     },
+    Respond {
+        schema: String,
+        status: u16,
+        headers: BTreeMap<String, String>,
+        body: Vec<u8>,
+    },
+}
+
+impl MiddlewareHostBeginResult {
+    pub fn validate(&self) -> Result<(), MiddlewareHostAbiError> {
+        match self {
+            Self::Permit {
+                schema,
+                session_id,
+                request_id,
+                trace_id,
+                request,
+                response_headers,
+            } => {
+                validate_schema(schema)?;
+                validate_session_id(session_id)?;
+                if request_id.is_empty() || trace_id.is_empty() {
+                    return Err(MiddlewareHostAbiError::new(
+                        "invalid_correlation_id",
+                        "middleware host permit requires non-empty request and trace ids",
+                    ));
+                }
+                request.validate()?;
+                validate_headers(response_headers)
+            }
+            Self::Reject {
+                schema,
+                status,
+                code,
+                headers,
+                ..
+            } => {
+                validate_schema(schema)?;
+                validate_status(*status)?;
+                if code.is_empty() {
+                    return Err(MiddlewareHostAbiError::new(
+                        "invalid_rejection_code",
+                        "middleware host rejection code must be non-empty",
+                    ));
+                }
+                validate_headers(headers)
+            }
+            Self::Respond {
+                schema,
+                status,
+                headers,
+                body,
+            } => {
+                validate_schema(schema)?;
+                validate_status(*status)?;
+                validate_headers(headers)?;
+                if body.len() > MAX_HOST_SHORT_CIRCUIT_BODY_BYTES {
+                    return Err(MiddlewareHostAbiError::new(
+                        "short_circuit_body_too_large",
+                        "middleware short-circuit response exceeds the bounded host ABI body limit",
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 impl fmt::Debug for MiddlewareHostBeginResult {
@@ -212,6 +335,7 @@ impl fmt::Debug for MiddlewareHostBeginResult {
                 session_id,
                 request_id,
                 trace_id,
+                request,
                 response_headers,
             } => formatter
                 .debug_struct("MiddlewareHostBeginResult::Permit")
@@ -219,6 +343,7 @@ impl fmt::Debug for MiddlewareHostBeginResult {
                 .field("session_id", session_id)
                 .field("request_id", request_id)
                 .field("trace_id", trace_id)
+                .field("request", request)
                 .field("response_header_count", &response_headers.len())
                 .finish(),
             Self::Reject {
@@ -234,8 +359,46 @@ impl fmt::Debug for MiddlewareHostBeginResult {
                 .field("code", code)
                 .field("header_count", &headers.len())
                 .finish(),
+            Self::Respond {
+                schema,
+                status,
+                headers,
+                body,
+            } => formatter
+                .debug_struct("MiddlewareHostBeginResult::Respond")
+                .field("schema", schema)
+                .field("status", status)
+                .field("header_count", &headers.len())
+                .field("body_bytes", &body.len())
+                .finish(),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MiddlewareHostResponseHeadRequest {
+    pub schema: String,
+    pub session_id: String,
+    pub status: u16,
+    pub phase: MiddlewareHostResponseHeadPhase,
+}
+
+impl MiddlewareHostResponseHeadRequest {
+    pub fn validate(&self) -> Result<(), MiddlewareHostAbiError> {
+        validate_schema(&self.schema)?;
+        validate_session_id(&self.session_id)?;
+        validate_status(self.status)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MiddlewareHostResponseHeadResult {
+    pub schema: String,
+    pub status: u16,
+    pub phase: MiddlewareHostResponseHeadPhase,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -246,24 +409,14 @@ pub struct MiddlewareHostFinishRequest {
     pub status: u16,
     pub response_bytes: Option<u64>,
     pub outcome: MiddlewareHostOutcome,
+    pub completion_boundary: MiddlewareHostCompletionBoundary,
 }
 
 impl MiddlewareHostFinishRequest {
     pub fn validate(&self) -> Result<(), MiddlewareHostAbiError> {
         validate_schema(&self.schema)?;
-        if self.session_id.is_empty() || self.session_id.len() > 128 {
-            return Err(MiddlewareHostAbiError::new(
-                "invalid_session_id",
-                "middleware host session id is empty or too long",
-            ));
-        }
-        if !(100..=599).contains(&self.status) {
-            return Err(MiddlewareHostAbiError::new(
-                "invalid_status",
-                "middleware host final status must be an HTTP status code",
-            ));
-        }
-        Ok(())
+        validate_session_id(&self.session_id)?;
+        validate_status(self.status)
     }
 }
 
@@ -272,6 +425,11 @@ impl MiddlewareHostFinishRequest {
 pub struct MiddlewareHostFinishResult {
     pub schema: String,
     pub outcome: MiddlewareHostOutcome,
+    pub completion_boundary: MiddlewareHostCompletionBoundary,
+    pub status: u16,
+    pub time_to_response_head_available_ms: Option<u64>,
+    pub time_to_response_head_committed_ms: Option<u64>,
+    pub total_duration_ms: u64,
     pub response_headers: BTreeMap<String, String>,
 }
 
@@ -320,6 +478,80 @@ fn validate_schema(schema: &str) -> Result<(), MiddlewareHostAbiError> {
             "middleware host frame uses an unsupported ABI schema",
         ))
     }
+}
+
+fn validate_status(status: u16) -> Result<(), MiddlewareHostAbiError> {
+    if (100..=599).contains(&status) {
+        Ok(())
+    } else {
+        Err(MiddlewareHostAbiError::new(
+            "invalid_status",
+            "middleware host status must be an HTTP status code",
+        ))
+    }
+}
+
+fn validate_session_id(session_id: &str) -> Result<(), MiddlewareHostAbiError> {
+    if session_id.is_empty() || session_id.len() > 128 {
+        Err(MiddlewareHostAbiError::new(
+            "invalid_session_id",
+            "middleware host session id is empty or too long",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_headers(headers: &BTreeMap<String, String>) -> Result<(), MiddlewareHostAbiError> {
+    if headers.len() > MAX_HOST_HEADER_COUNT {
+        return Err(MiddlewareHostAbiError::new(
+            "too_many_headers",
+            "middleware host request exceeds the header-count limit",
+        ));
+    }
+    let mut total = 0usize;
+    for (name, value) in headers {
+        if !valid_header_name(name) {
+            return Err(MiddlewareHostAbiError::new(
+                "invalid_header_name",
+                "middleware host headers must use canonical lowercase ASCII names",
+            ));
+        }
+        if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
+            return Err(MiddlewareHostAbiError::new(
+                "invalid_header_value",
+                "middleware host header values may not contain framing bytes",
+            ));
+        }
+        total = total
+            .checked_add(name.len())
+            .and_then(|value_bytes| value_bytes.checked_add(value.len()))
+            .ok_or_else(|| {
+                MiddlewareHostAbiError::new(
+                    "headers_too_large",
+                    "middleware host header size overflowed",
+                )
+            })?;
+    }
+    if total > MAX_HOST_HEADER_BYTES {
+        return Err(MiddlewareHostAbiError::new(
+            "headers_too_large",
+            "middleware host request exceeds the aggregate header-byte limit",
+        ));
+    }
+    Ok(())
+}
+
+fn valid_adapter_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 128
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes.iter().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'.' | b'_' | b'/' | b'-')
+        })
 }
 
 fn valid_header_name(name: &str) -> bool {
@@ -375,6 +607,46 @@ mod tests {
     }
 
     #[test]
+    fn continuation_preserves_host_trusted_facts() {
+        let mut original = MiddlewareHostRequest::new("GET", "/before");
+        original.trusted_remote_ip = Some("203.0.113.19".into());
+        original.trusted_transport_secure = true;
+        original.content_length = Some(12);
+        let mut continued = original
+            .clone()
+            .into_request_metadata()
+            .expect("normalized request");
+        continued.method = "POST".into();
+        continued.path = "/after".into();
+        continued.remote_ip = Some("198.51.100.99".into());
+        continued.transport_secure = false;
+        continued.content_length = Some(999);
+        continued.headers.insert("x-routed-by".into(), "middleware".into());
+
+        let admitted = original.continued_from(continued).expect("continuation");
+        assert_eq!(admitted.method, "POST");
+        assert_eq!(admitted.path, "/after");
+        assert_eq!(admitted.headers.get("x-routed-by").map(String::as_str), Some("middleware"));
+        assert_eq!(admitted.trusted_remote_ip.as_deref(), Some("203.0.113.19"));
+        assert!(admitted.trusted_transport_secure);
+        assert_eq!(admitted.content_length, Some(12));
+    }
+
+    #[test]
+    fn short_circuit_response_body_is_bounded() {
+        let result = MiddlewareHostBeginResult::Respond {
+            schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+            status: 200,
+            headers: BTreeMap::new(),
+            body: vec![0; MAX_HOST_SHORT_CIRCUIT_BODY_BYTES + 1],
+        };
+        assert_eq!(
+            result.validate().expect_err("oversized response").code,
+            "short_circuit_body_too_large"
+        );
+    }
+
+    #[test]
     fn config_identity_is_deterministic_and_semantic() {
         let first = default_config("host-abi");
         let mut second = first.clone();
@@ -390,14 +662,28 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_separates_host_adapter_from_config_identity() {
+    fn descriptor_separates_adapter_from_config_identity() {
         let config = default_config("host-abi");
-        let local = MiddlewareHostDescriptor::for_config(MiddlewareHostKind::LocalProcess, &config)
-            .unwrap();
-        let edge =
-            MiddlewareHostDescriptor::for_config(MiddlewareHostKind::CloudflareWorker, &config)
-                .unwrap();
+        let local = MiddlewareHostDescriptor::for_config(
+            "ores-middleware/local-process",
+            MiddlewareHostExecutionModel::LocalProcess,
+            MiddlewareHostCapabilities::local_process(),
+            &config,
+        )
+        .unwrap();
+        let edge = MiddlewareHostDescriptor::for_config(
+            "ores-middleware/cloudflare-worker",
+            MiddlewareHostExecutionModel::FetchHandler,
+            MiddlewareHostCapabilities {
+                wasm_module: true,
+                background_wait_until: true,
+                ..MiddlewareHostCapabilities::local_process()
+            },
+            &config,
+        )
+        .unwrap();
         assert_eq!(local.config_sha256, edge.config_sha256);
-        assert_ne!(local.host_kind, edge.host_kind);
+        assert_ne!(local.adapter_id, edge.adapter_id);
+        assert_ne!(local.execution_model, edge.execution_model);
     }
 }

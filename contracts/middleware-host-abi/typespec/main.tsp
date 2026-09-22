@@ -136,6 +136,8 @@ model MiddlewareHostPermit {
   requestId: string;
   @minLength(1)
   traceId: string;
+  /** Normalized request admitted for downstream P3 execution after portable middleware mutation. */
+  request: MiddlewareHostRequest;
   responseHeaders: CanonicalHeaders;
 }
 
@@ -150,10 +152,22 @@ model MiddlewareHostReject {
   headers: CanonicalHeaders;
 }
 
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model MiddlewareHostRespond {
+  decision: "respond";
+  schema: "ores.middleware.host/v1";
+  status: HttpStatus;
+  headers: CanonicalHeaders;
+  /** Small edge/P2 short-circuit body. Large/application streaming bodies belong downstream. */
+  @maxItems(65536)
+  body: uint8[];
+}
+
 @jsonSchema
 union MiddlewareHostBeginResult {
   permit: MiddlewareHostPermit,
   reject: MiddlewareHostReject,
+  respond: MiddlewareHostRespond,
 }
 
 @jsonSchema

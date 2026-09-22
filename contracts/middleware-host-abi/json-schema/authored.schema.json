@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.oresoftware.com/middleware/host/v1/authored.schema.json",
   "title": "ORES middleware host ABI",
-  "description": "Provider-neutral middleware host ABI with adapter capability profiles and distinct response-head availability, transport commitment, and terminal completion observations.",
+  "description": "Provider-neutral middleware host ABI with adapter capability profiles, admitted downstream request continuation, bounded short-circuit responses, and distinct response-head availability, transport commitment, and terminal completion observations.",
   "oneOf": [
     { "$ref": "#/$defs/MiddlewareHostDescriptor" },
     { "$ref": "#/$defs/MiddlewareHostRequest" },
@@ -99,13 +99,14 @@
     "MiddlewareHostPermit": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decision", "schema", "sessionId", "requestId", "traceId", "responseHeaders"],
+      "required": ["decision", "schema", "sessionId", "requestId", "traceId", "request", "responseHeaders"],
       "properties": {
         "decision": { "type": "string", "const": "permit" },
         "schema": { "type": "string", "const": "ores.middleware.host/v1" },
         "sessionId": { "$ref": "#/$defs/SessionId" },
         "requestId": { "type": "string", "minLength": 1 },
         "traceId": { "type": "string", "minLength": 1 },
+        "request": { "$ref": "#/$defs/MiddlewareHostRequest" },
         "responseHeaders": { "$ref": "#/$defs/CanonicalHeaders" }
       }
     },
@@ -122,8 +123,28 @@
         "headers": { "$ref": "#/$defs/CanonicalHeaders" }
       }
     },
+    "MiddlewareHostRespond": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "schema", "status", "headers", "body"],
+      "properties": {
+        "decision": { "type": "string", "const": "respond" },
+        "schema": { "type": "string", "const": "ores.middleware.host/v1" },
+        "status": { "$ref": "#/$defs/HttpStatus" },
+        "headers": { "$ref": "#/$defs/CanonicalHeaders" },
+        "body": {
+          "type": "array",
+          "maxItems": 65536,
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+        }
+      }
+    },
     "MiddlewareHostBeginResult": {
-      "anyOf": [{ "$ref": "#/$defs/MiddlewareHostPermit" }, { "$ref": "#/$defs/MiddlewareHostReject" }]
+      "anyOf": [
+        { "$ref": "#/$defs/MiddlewareHostPermit" },
+        { "$ref": "#/$defs/MiddlewareHostReject" },
+        { "$ref": "#/$defs/MiddlewareHostRespond" }
+      ]
     },
     "MiddlewareHostResponseHeadRequest": {
       "type": "object",

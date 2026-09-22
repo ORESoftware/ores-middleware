@@ -76,10 +76,12 @@ pub use context::{
 };
 pub use host_abi::{
     middleware_config_sha256, MiddlewareHostAbiError, MiddlewareHostBeginResult,
-    MiddlewareHostDescriptor, MiddlewareHostFinishRequest, MiddlewareHostFinishResult,
-    MiddlewareHostKind, MiddlewareHostOutcome, MiddlewareHostRequest, MAX_HOST_HEADER_BYTES,
+    MiddlewareHostCapabilities, MiddlewareHostCompletionBoundary, MiddlewareHostDescriptor,
+    MiddlewareHostExecutionModel, MiddlewareHostFinishRequest, MiddlewareHostFinishResult,
+    MiddlewareHostOutcome, MiddlewareHostRequest, MiddlewareHostResponseHeadPhase,
+    MiddlewareHostResponseHeadRequest, MiddlewareHostResponseHeadResult, MAX_HOST_HEADER_BYTES,
     MAX_HOST_HEADER_COUNT, MAX_HOST_METHOD_BYTES, MAX_HOST_PATH_BYTES,
-    MIDDLEWARE_HOST_ABI_SCHEMA, MIDDLEWARE_HOST_ABI_VERSION,
+    MAX_HOST_SHORT_CIRCUIT_BODY_BYTES, MIDDLEWARE_HOST_ABI_SCHEMA, MIDDLEWARE_HOST_ABI_VERSION,
 };
 pub use hosts::edge_minimal_local::{LocalEdgeMinimalHost, LocalEdgeMinimalResult};
 pub use hosts::local::LocalMiddlewareHost;

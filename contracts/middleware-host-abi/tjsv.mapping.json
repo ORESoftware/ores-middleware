@@ -19,6 +19,7 @@
     {"typespec":"Ores.Middleware.Host.MiddlewareHostRequest","generated":"MiddlewareHostRequest","authored":"MiddlewareHostRequest"},
     {"typespec":"Ores.Middleware.Host.MiddlewareHostPermit","generated":"MiddlewareHostPermit","authored":"MiddlewareHostPermit"},
     {"typespec":"Ores.Middleware.Host.MiddlewareHostReject","generated":"MiddlewareHostReject","authored":"MiddlewareHostReject"},
+    {"typespec":"Ores.Middleware.Host.MiddlewareHostRespond","generated":"MiddlewareHostRespond","authored":"MiddlewareHostRespond"},
     {"typespec":"Ores.Middleware.Host.MiddlewareHostBeginResult","generated":"MiddlewareHostBeginResult","authored":"MiddlewareHostBeginResult"},
     {"typespec":"Ores.Middleware.Host.MiddlewareHostResponseHeadRequest","generated":"MiddlewareHostResponseHeadRequest","authored":"MiddlewareHostResponseHeadRequest"},
     {"typespec":"Ores.Middleware.Host.MiddlewareHostResponseHeadResult","generated":"MiddlewareHostResponseHeadResult","authored":"MiddlewareHostResponseHeadResult"},
