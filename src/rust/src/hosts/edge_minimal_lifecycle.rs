@@ -43,11 +43,13 @@ impl EdgeMinimalTerminalReport {
                 message: "edge_minimal terminal report session id is empty or too long".to_owned(),
             });
         }
-        if self.status.is_some_and(|status| !(200..=599).contains(&status)) {
+        if self
+            .status
+            .is_some_and(|status| !(200..=599).contains(&status))
+        {
             return Err(IntegrationError {
                 code: "invalid_edge_minimal_terminal_status",
-                message: "edge_minimal terminal status must be a final HTTP status code"
-                    .to_owned(),
+                message: "edge_minimal terminal status must be a final HTTP status code".to_owned(),
             });
         }
         if self.outcome == MiddlewareHostOutcome::Completed && self.status.is_none() {
@@ -409,7 +411,10 @@ mod tests {
             Arc::new(finalizer),
         );
 
-        let begin = host.begin(secure_request(), context()).await.expect("begin");
+        let begin = host
+            .begin(secure_request(), context())
+            .await
+            .expect("begin");
         assert!(matches!(begin.result, LocalEdgeMinimalResult::Continue(_)));
         assert_eq!(host.active_count().unwrap(), 1);
 
@@ -454,7 +459,10 @@ mod tests {
                 deps(),
                 Arc::new(finalizer),
             );
-            let begin = host.begin(secure_request(), context()).await.expect("begin");
+            let begin = host
+                .begin(secure_request(), context())
+                .await
+                .expect("begin");
             host.finish(EdgeMinimalTerminalReport {
                 session_id: begin.session_id,
                 outcome,
@@ -475,7 +483,10 @@ mod tests {
             Ok(EdgeMinimalDecision::Continue(args.request))
         });
         let host = LocalEdgeMinimalLifecycleHost::from_middleware(middleware, deps());
-        let begin = host.begin(secure_request(), context()).await.expect("begin");
+        let begin = host
+            .begin(secure_request(), context())
+            .await
+            .expect("begin");
         let error = host
             .finish(EdgeMinimalTerminalReport {
                 session_id: begin.session_id.clone(),
@@ -507,7 +518,10 @@ mod tests {
             Ok(EdgeMinimalDecision::Continue(args.request))
         });
         let host = LocalEdgeMinimalLifecycleHost::from_middleware(middleware, deps());
-        let begin = host.begin(secure_request(), context()).await.expect("begin");
+        let begin = host
+            .begin(secure_request(), context())
+            .await
+            .expect("begin");
         let report = EdgeMinimalTerminalReport {
             session_id: begin.session_id,
             outcome: MiddlewareHostOutcome::Completed,
@@ -530,7 +544,10 @@ mod tests {
             }))
         });
         let host = LocalEdgeMinimalLifecycleHost::from_middleware(middleware, deps());
-        let begin = host.begin(secure_request(), context()).await.expect("begin");
+        let begin = host
+            .begin(secure_request(), context())
+            .await
+            .expect("begin");
         assert!(matches!(begin.result, LocalEdgeMinimalResult::Respond(_)));
         assert_eq!(host.active_count().unwrap(), 1);
         host.finish(EdgeMinimalTerminalReport {
