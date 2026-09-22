@@ -187,10 +187,8 @@ impl EdgeFetchCallbackArgs {
 }
 
 pub trait EdgeFetchMiddleware: Send + Sync {
-    fn call<'a>(
-        &'a self,
-        args: EdgeFetchCallbackArgs,
-    ) -> MiddlewareResultFuture<'a, StageResponse>;
+    fn call<'a>(&'a self, args: EdgeFetchCallbackArgs)
+    -> MiddlewareResultFuture<'a, StageResponse>;
 }
 
 pub struct FnEdgeFetchMiddleware<F> {
