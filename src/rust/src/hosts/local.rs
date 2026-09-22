@@ -10,10 +10,17 @@ use crate::{
     frameworks::streaming_response::response_headers,
     host_abi::{
         MIDDLEWARE_HOST_ABI_SCHEMA, MiddlewareHostAbiError, MiddlewareHostBeginResult,
-        MiddlewareHostDescriptor, MiddlewareHostFinishRequest, MiddlewareHostFinishResult,
-        MiddlewareHostKind, MiddlewareHostRequest,
+        MiddlewareHostCapabilities, MiddlewareHostDescriptor, MiddlewareHostExecutionModel,
+        MiddlewareHostFinishRequest, MiddlewareHostFinishResult, MiddlewareHostResponseHeadPhase,
+        MiddlewareHostResponseHeadRequest, MiddlewareHostResponseHeadResult, MiddlewareHostRequest,
     },
 };
+
+struct LocalHostSession {
+    active: ActiveRequest,
+    time_to_response_head_available_ms: Option<u64>,
+    time_to_response_head_committed_ms: Option<u64>,
+}
 
 /// Native/local host adapter for an isolated middleware deployment unit.
 ///
@@ -24,7 +31,7 @@ use crate::{
 #[derive(Clone)]
 pub struct LocalMiddlewareHost {
     stack: MiddlewareStack,
-    active: Arc<Mutex<BTreeMap<String, ActiveRequest>>>,
+    active: Arc<Mutex<BTreeMap<String, LocalHostSession>>>,
 }
 
 impl LocalMiddlewareHost {
@@ -37,14 +44,21 @@ impl LocalMiddlewareHost {
     }
 
     pub fn descriptor(&self) -> Result<MiddlewareHostDescriptor, MiddlewareHostAbiError> {
-        MiddlewareHostDescriptor::for_config(MiddlewareHostKind::LocalProcess, self.stack.config())
+        MiddlewareHostDescriptor::for_adapter_config(
+            "ores.local-process",
+            MiddlewareHostExecutionModel::LocalProcess,
+            MiddlewareHostCapabilities::local_process(),
+            self.stack.config(),
+        )
     }
 
     /// Admit one normalized host request and retain the middleware lifecycle
     /// state under an opaque session id until `finish` is called.
     ///
     /// A successful permit includes middleware-owned response headers so a
-    /// streaming host can send its response head before the body completes.
+    /// streaming host can make the response head available before the body
+    /// completes. Availability and actual transport commitment are recorded
+    /// separately through `observe_response_head`.
     pub async fn begin(
         &self,
         request: MiddlewareHostRequest,
@@ -56,7 +70,14 @@ impl LocalMiddlewareHost {
                 let request_id = active.context.request_id.clone();
                 let trace_id = active.context.trace_id.clone();
                 let session_id = Uuid::new_v4().to_string();
-                let previous = self.lock_active()?.insert(session_id.clone(), active);
+                let previous = self.lock_active()?.insert(
+                    session_id.clone(),
+                    LocalHostSession {
+                        active,
+                        time_to_response_head_available_ms: None,
+                        time_to_response_head_committed_ms: None,
+                    },
+                );
                 if previous.is_some() {
                     return Err(MiddlewareHostAbiError::new(
                         "session_collision",
@@ -81,6 +102,51 @@ impl LocalMiddlewareHost {
         }
     }
 
+    /// Record a truthful response-head observation for one admitted request.
+    ///
+    /// `available` means the status/headers exist and can be consumed by the
+    /// downstream host. `committed` is stronger: the caller must have observed
+    /// the downstream transport actually commit that response head. The local
+    /// adapter refuses to fabricate `committed` before `available` was reported.
+    pub fn observe_response_head(
+        &self,
+        request: MiddlewareHostResponseHeadRequest,
+    ) -> Result<MiddlewareHostResponseHeadResult, MiddlewareHostAbiError> {
+        request.validate()?;
+        let mut active = self.lock_active()?;
+        let session = active.get_mut(&request.session_id).ok_or_else(|| {
+            MiddlewareHostAbiError::new(
+                "unknown_session",
+                "middleware host session is unknown or already finalized",
+            )
+        })?;
+        let elapsed_ms = elapsed_ms(&session.active);
+
+        let observed_ms = match request.phase {
+            MiddlewareHostResponseHeadPhase::Available => *session
+                .time_to_response_head_available_ms
+                .get_or_insert(elapsed_ms),
+            MiddlewareHostResponseHeadPhase::Committed => {
+                if session.time_to_response_head_available_ms.is_none() {
+                    return Err(MiddlewareHostAbiError::new(
+                        "response_head_not_available",
+                        "middleware host cannot record transport commitment before response-head availability",
+                    ));
+                }
+                *session
+                    .time_to_response_head_committed_ms
+                    .get_or_insert(elapsed_ms)
+            }
+        };
+
+        Ok(MiddlewareHostResponseHeadResult {
+            schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+            status: request.status,
+            phase: request.phase,
+            elapsed_ms: observed_ms,
+        })
+    }
+
     /// Finalize exactly one admitted request.
     ///
     /// The session is removed from the host table before any async finalization
@@ -91,7 +157,7 @@ impl LocalMiddlewareHost {
         request: MiddlewareHostFinishRequest,
     ) -> Result<MiddlewareHostFinishResult, MiddlewareHostAbiError> {
         request.validate()?;
-        let active = self
+        let session = self
             .lock_active()?
             .remove(&request.session_id)
             .ok_or_else(|| {
@@ -100,13 +166,20 @@ impl LocalMiddlewareHost {
                     "middleware host session is unknown or already finalized",
                 )
             })?;
+
+        let total_duration_ms = elapsed_ms(&session.active);
         let headers = self
             .stack
-            .finish(active, request.status, request.response_bytes)
+            .finish(session.active, request.status, request.response_bytes)
             .await;
         Ok(MiddlewareHostFinishResult {
             schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
             outcome: request.outcome,
+            completion_boundary: request.completion_boundary,
+            status: request.status,
+            time_to_response_head_available_ms: session.time_to_response_head_available_ms,
+            time_to_response_head_committed_ms: session.time_to_response_head_committed_ms,
+            total_duration_ms,
             response_headers: headers,
         })
     }
@@ -118,7 +191,7 @@ impl LocalMiddlewareHost {
 
     fn lock_active(
         &self,
-    ) -> Result<MutexGuard<'_, BTreeMap<String, ActiveRequest>>, MiddlewareHostAbiError> {
+    ) -> Result<MutexGuard<'_, BTreeMap<String, LocalHostSession>>, MiddlewareHostAbiError> {
         self.active.lock().map_err(|_| {
             MiddlewareHostAbiError::new(
                 "host_state_poisoned",
@@ -128,12 +201,19 @@ impl LocalMiddlewareHost {
     }
 }
 
+fn elapsed_ms(active: &ActiveRequest) -> u64 {
+    u64::try_from(active.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         default_config,
-        host_abi::{MiddlewareHostOutcome, MiddlewareHostRequest},
+        host_abi::{
+            MiddlewareHostCompletionBoundary, MiddlewareHostOutcome, MiddlewareHostRequest,
+            MiddlewareHostResponseHeadPhase, MiddlewareHostResponseHeadRequest,
+        },
     };
 
     fn host() -> LocalMiddlewareHost {
@@ -149,7 +229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permit_keeps_request_active_until_explicit_finish() {
+    async fn permit_tracks_head_observations_until_explicit_finish() {
         let host = host();
         let result = host.begin(secure_request("/stream")).await.expect("begin");
         let MiddlewareHostBeginResult::Permit {
@@ -163,6 +243,26 @@ mod tests {
         assert_eq!(host.active_count().unwrap(), 1);
         assert!(response_headers.contains_key("x-content-type-options"));
 
+        let available = host
+            .observe_response_head(MiddlewareHostResponseHeadRequest {
+                schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+                session_id: session_id.clone(),
+                status: 200,
+                phase: MiddlewareHostResponseHeadPhase::Available,
+            })
+            .expect("available");
+        assert_eq!(available.phase, MiddlewareHostResponseHeadPhase::Available);
+
+        let committed = host
+            .observe_response_head(MiddlewareHostResponseHeadRequest {
+                schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+                session_id: session_id.clone(),
+                status: 200,
+                phase: MiddlewareHostResponseHeadPhase::Committed,
+            })
+            .expect("committed");
+        assert!(committed.elapsed_ms >= available.elapsed_ms);
+
         let finish = host
             .finish(MiddlewareHostFinishRequest {
                 schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
@@ -170,10 +270,17 @@ mod tests {
                 status: 200,
                 response_bytes: None,
                 outcome: MiddlewareHostOutcome::Completed,
+                completion_boundary: MiddlewareHostCompletionBoundary::Transport,
             })
             .await
             .expect("finish");
         assert_eq!(finish.outcome, MiddlewareHostOutcome::Completed);
+        assert_eq!(
+            finish.completion_boundary,
+            MiddlewareHostCompletionBoundary::Transport
+        );
+        assert!(finish.time_to_response_head_available_ms.is_some());
+        assert!(finish.time_to_response_head_committed_ms.is_some());
         assert_eq!(host.active_count().unwrap(), 0);
     }
 
@@ -195,12 +302,43 @@ mod tests {
                     status,
                     response_bytes: None,
                     outcome,
+                    completion_boundary: MiddlewareHostCompletionBoundary::Transport,
                 })
                 .await
                 .expect("finish");
             assert_eq!(finish.outcome, outcome);
             assert_eq!(host.active_count().unwrap(), 0);
         }
+    }
+
+    #[tokio::test]
+    async fn committed_head_without_available_head_fails_closed() {
+        let host = host();
+        let result = host.begin(secure_request("/stream")).await.expect("begin");
+        let MiddlewareHostBeginResult::Permit { session_id, .. } = result else {
+            panic!("expected permit");
+        };
+        let error = host
+            .observe_response_head(MiddlewareHostResponseHeadRequest {
+                schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+                session_id: session_id.clone(),
+                status: 200,
+                phase: MiddlewareHostResponseHeadPhase::Committed,
+            })
+            .expect_err("commit without availability must fail");
+        assert_eq!(error.code, "response_head_not_available");
+        assert_eq!(host.active_count().unwrap(), 1);
+
+        host.finish(MiddlewareHostFinishRequest {
+            schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
+            session_id,
+            status: 500,
+            response_bytes: None,
+            outcome: MiddlewareHostOutcome::ChildFailed,
+            completion_boundary: MiddlewareHostCompletionBoundary::BodyStream,
+        })
+        .await
+        .expect("cleanup");
     }
 
     #[tokio::test]
@@ -216,6 +354,7 @@ mod tests {
             status: 200,
             response_bytes: Some(0),
             outcome: MiddlewareHostOutcome::Completed,
+            completion_boundary: MiddlewareHostCompletionBoundary::BodyStream,
         };
         host.finish(finish.clone()).await.expect("first finish");
         let error = host.finish(finish).await.expect_err("double finish");
