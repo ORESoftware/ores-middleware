@@ -11,8 +11,9 @@ use crate::{
     host_abi::{
         MIDDLEWARE_HOST_ABI_SCHEMA, MiddlewareHostAbiError, MiddlewareHostBeginResult,
         MiddlewareHostCapabilities, MiddlewareHostDescriptor, MiddlewareHostExecutionModel,
-        MiddlewareHostFinishRequest, MiddlewareHostFinishResult, MiddlewareHostResponseHeadPhase,
-        MiddlewareHostResponseHeadRequest, MiddlewareHostResponseHeadResult, MiddlewareHostRequest,
+        MiddlewareHostFinishRequest, MiddlewareHostFinishResult, MiddlewareHostRequest,
+        MiddlewareHostResponseHeadPhase, MiddlewareHostResponseHeadRequest,
+        MiddlewareHostResponseHeadResult,
     },
 };
 
