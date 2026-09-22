@@ -174,7 +174,7 @@ where
     ) -> Pin<
         Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>,
     > {
-        Box::pin((self.callback)(args))
+        Box::pin(async move { (self.callback)(args).await })
     }
 }
 
@@ -237,7 +237,7 @@ where
         &'a self,
         args: EdgeFetchCallbackArgs,
     ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>> {
-        Box::pin((self.callback)(args))
+        Box::pin(async move { (self.callback)(args).await })
     }
 }
 
