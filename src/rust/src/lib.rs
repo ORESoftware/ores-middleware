@@ -27,6 +27,7 @@ pub mod operation;
 pub mod otel;
 pub mod placement;
 mod pipeline;
+pub mod provider_api;
 pub mod rate_limit;
 pub mod rate_limit_bindings;
 pub mod rate_limit_routes;
@@ -111,6 +112,13 @@ pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use placement::{
     MiddlewareCapabilities, MiddlewareExecutionProfile, MiddlewareExecutionTarget,
     MiddlewarePlacement, MiddlewarePlacementViolation,
+};
+pub use provider_api::{
+    edge_fetch_middleware_fn, edge_minimal_middleware_fn, EdgeFetchCallbackArgs,
+    EdgeFetchMiddleware, EdgeMiddlewareDependencies, EdgeMinimalCallbackArgs, EdgeMinimalDecision,
+    EdgeMinimalMiddleware, EdgeNext, FnEdgeFetchMiddleware, FnEdgeMinimalMiddleware,
+    MiddlewareCacheProvider, MiddlewareFetchProvider, MiddlewareFetchRequest,
+    MiddlewareFetchResponse,
 };
 pub use rate_limit::{
     derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm,
