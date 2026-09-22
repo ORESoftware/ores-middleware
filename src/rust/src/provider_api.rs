@@ -100,27 +100,104 @@ impl EdgeMiddlewareDependencies {
     }
 }
 
+/// Request surface admitted to default `edge_minimal` middleware.
+///
+/// Routing/body/transport facts are readable but cannot be rewritten through
+/// this type. Authored middleware may mutate only request headers. The local
+/// host still revalidates all ingress-owned facts after callback completion as
+/// defense-in-depth, but ordinary consumers no longer discover this boundary by
+/// tripping a runtime error after mutating a public `RequestMetadata` field.
+#[derive(Debug, Clone)]
+pub struct EdgeMinimalRequest {
+    inner: RequestMetadata,
+}
+
+impl EdgeMinimalRequest {
+    pub(crate) fn from_metadata(inner: RequestMetadata) -> Self {
+        Self { inner }
+    }
+
+    pub(crate) fn into_metadata(self) -> RequestMetadata {
+        self.inner
+    }
+
+    #[must_use]
+    pub fn method(&self) -> &str {
+        &self.inner.method
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.inner.path
+    }
+
+    #[must_use]
+    pub fn headers(&self) -> &BTreeMap<String, String> {
+        &self.inner.headers
+    }
+
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.inner.headers.get(name).map(String::as_str)
+    }
+
+    #[must_use]
+    pub fn remote_ip(&self) -> Option<&str> {
+        self.inner.remote_ip.as_deref()
+    }
+
+    #[must_use]
+    pub const fn content_length(&self) -> Option<u64> {
+        self.inner.content_length
+    }
+
+    #[must_use]
+    pub const fn transport_secure(&self) -> bool {
+        self.inner.transport_secure
+    }
+
+    /// Read-only compatibility view for approved providers such as auth and
+    /// telemetry adapters whose portable trait already accepts RequestMetadata.
+    #[must_use]
+    pub const fn as_metadata(&self) -> &RequestMetadata {
+        &self.inner
+    }
+
+    pub fn set_header(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.inner.headers.insert(name.into(), value.into());
+    }
+
+    pub fn remove_header(&mut self, name: &str) -> Option<String> {
+        self.inner.headers.remove(name)
+    }
+}
+
 /// Parameters injected into an `edge_minimal` callback.
 ///
 /// There is deliberately no `next`, response, filesystem, socket, process, DB,
-/// or raw-handle field. The callback may mutate request metadata, use approved
-/// providers, short-circuit, or return the request for handoff to P3.
+/// or raw-handle field. The callback may read ingress-owned request facts,
+/// mutate request headers, use approved providers, short-circuit, or return the
+/// constrained request for handoff to P3.
 #[derive(Clone)]
 pub struct EdgeMinimalCallbackArgs {
-    pub request: RequestMetadata,
+    pub request: EdgeMinimalRequest,
     pub context: RequestContext,
     pub deps: EdgeMiddlewareDependencies,
 }
 
 impl EdgeMinimalCallbackArgs {
     pub fn set_request_header(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.request.headers.insert(name.into(), value.into());
+        self.request.set_header(name, value);
+    }
+
+    pub fn remove_request_header(&mut self, name: &str) -> Option<String> {
+        self.request.remove_header(name)
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum EdgeMinimalDecision {
-    Continue(RequestMetadata),
+    Continue(EdgeMinimalRequest),
     Respond(StageResponse),
 }
 
@@ -341,23 +418,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn edge_minimal_callback_receives_dependencies_without_runtime_sdk_types() {
+    async fn edge_minimal_callback_receives_dependencies_and_constrained_request() {
         let middleware =
             edge_minimal_middleware_fn(|mut args: EdgeMinimalCallbackArgs| async move {
+                assert_eq!(args.request.method(), "GET");
+                assert_eq!(args.request.path(), "/");
+                assert!(args.request.transport_secure());
                 let response = args
                     .deps
                     .fetch
                     .fetch(MiddlewareFetchRequest::get("https://example.test/auth"))
                     .await?;
                 assert_eq!(response.status, 200);
-                let auth = args.deps.auth.verify(&args.request).await?;
+                let auth = args.deps.auth.verify(args.request.as_metadata()).await?;
                 args.set_request_header("x-user-id", auth.user_id.unwrap_or_default());
                 Ok(EdgeMinimalDecision::Continue(args.request))
             });
 
         let result = middleware
             .call(EdgeMinimalCallbackArgs {
-                request: request(),
+                request: EdgeMinimalRequest::from_metadata(request()),
                 context: context(),
                 deps: deps(),
             })
@@ -367,9 +447,6 @@ mod tests {
         let EdgeMinimalDecision::Continue(request) = result else {
             panic!("expected continue");
         };
-        assert_eq!(
-            request.headers.get("x-user-id").map(String::as_str),
-            Some("user-1")
-        );
+        assert_eq!(request.header("x-user-id"), Some("user-1"));
     }
 }
