@@ -51,7 +51,9 @@ where
     ///
     /// The host validates both the inbound normalized request and any mutated
     /// request returned by authored middleware, so a callback cannot smuggle an
-    /// uppercase/invalid header or framing byte into the P3 handoff.
+    /// uppercase/invalid header or framing byte into the P3 handoff. Host-trusted
+    /// transport facts are restored after the callback and cannot be rewritten
+    /// by authored middleware.
     pub async fn execute(
         &self,
         request: MiddlewareHostRequest,
@@ -60,6 +62,10 @@ where
         let request = request
             .into_request_metadata()
             .map_err(host_abi_error_as_integration)?;
+        let trusted_remote_ip = request.remote_ip.clone();
+        let trusted_content_length = request.content_length;
+        let trusted_transport_secure = request.transport_secure;
+
         let result = self
             .middleware
             .call(EdgeMinimalCallbackArgs {
@@ -70,7 +76,10 @@ where
             .await?;
 
         match result {
-            EdgeMinimalDecision::Continue(request) => {
+            EdgeMinimalDecision::Continue(mut request) => {
+                request.remote_ip = trusted_remote_ip;
+                request.content_length = trusted_content_length;
+                request.transport_secure = trusted_transport_secure;
                 let request = revalidate_request(request)?;
                 Ok(LocalEdgeMinimalResult::Continue(request))
             }
@@ -299,6 +308,29 @@ mod tests {
             panic!("expected continue");
         };
         assert_eq!(request.headers.get("x-ores-edge").map(String::as_str), Some("admitted"));
+    }
+
+    #[tokio::test]
+    async fn callback_cannot_rewrite_host_trusted_transport_facts() {
+        let middleware = edge_minimal_middleware_fn(|mut args| async move {
+            args.request.remote_ip = Some("203.0.113.99".to_owned());
+            args.request.content_length = Some(999);
+            args.request.transport_secure = false;
+            Ok(EdgeMinimalDecision::Continue(args.request))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("POST", "/trusted");
+        request.trusted_remote_ip = Some("127.0.0.1".to_owned());
+        request.content_length = Some(12);
+        request.trusted_transport_secure = true;
+
+        let result = host.execute(request, context()).await.expect("execute");
+        let LocalEdgeMinimalResult::Continue(request) = result else {
+            panic!("expected continue");
+        };
+        assert_eq!(request.remote_ip.as_deref(), Some("127.0.0.1"));
+        assert_eq!(request.content_length, Some(12));
+        assert!(request.transport_secure);
     }
 
     #[tokio::test]
