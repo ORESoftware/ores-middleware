@@ -109,8 +109,8 @@ pub use otel::{
 };
 pub use pipeline::{ActiveRequest, MiddlewareError, MiddlewareStack};
 pub use placement::{
-    MiddlewareCapabilities, MiddlewareExecutionTarget, MiddlewarePlacement,
-    MiddlewarePlacementViolation,
+    MiddlewareCapabilities, MiddlewareExecutionProfile, MiddlewareExecutionTarget,
+    MiddlewarePlacement, MiddlewarePlacementViolation,
 };
 pub use rate_limit::{
     derive_rate_limit_principal, DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitAlgorithm,
