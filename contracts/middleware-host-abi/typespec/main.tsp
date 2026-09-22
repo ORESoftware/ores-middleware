@@ -6,7 +6,7 @@ using TypeSpec.JsonSchema;
  * Independently authored provider-neutral middleware host ABI.
  *
  * Host/process/provider lifecycle is deliberately outside this contract. Local
- * P2 and edge adapters normalize trusted transport facts into these frames.
+ * P2 and edge adapters normalize trusted host facts into these frames.
  *
  * The response lifecycle deliberately separates three facts that Fetch-style
  * middleware APIs often collapse: a response head can become available, the
@@ -14,6 +14,9 @@ using TypeSpec.JsonSchema;
  * terminal boundary after that. Hosts must report only observations they can
  * actually make; a Fetch/worker host must not claim transport commitment merely
  * because a Response object exists.
+ *
+ * Provider names are intentionally not an ABI enum. New edge providers can be
+ * added by publishing a new adapter id plus its truthful capability profile.
  */
 namespace Ores.Middleware.Host;
 
@@ -21,6 +24,11 @@ namespace Ores.Middleware.Host;
 @maxLength(64)
 @pattern("^[0-9a-f]{64}$")
 scalar Sha256 extends string;
+
+@minLength(1)
+@maxLength(128)
+@pattern("^[a-z0-9][a-z0-9._/-]*$")
+scalar AdapterId extends string;
 
 @minLength(1)
 @maxLength(32)
@@ -53,9 +61,24 @@ scalar HeaderValue extends string;
 })
 model CanonicalHeaders is Record<HeaderValue>;
 
-enum MiddlewareHostKind {
+enum MiddlewareHostExecutionModel {
   local_process,
-  cloudflare_worker,
+  fetch_handler,
+  event_hooks,
+  lambda_events,
+  wasi_http,
+}
+
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model MiddlewareHostCapabilities {
+  streamingResponse: boolean;
+  responseHeadAvailableObservation: boolean;
+  responseHeadCommitObservation: boolean;
+  bodyStreamCompletionObservation: boolean;
+  transportCompletionObservation: boolean;
+  clientDisconnectObservation: boolean;
+  backgroundWaitUntil: boolean;
+  wasmModule: boolean;
 }
 
 enum MiddlewareHostResponseHeadPhase {
@@ -86,7 +109,9 @@ model MiddlewareHostDescriptor {
   abiVersion: "1";
   @minLength(1)
   middlewareContractVersion: string;
-  hostKind: MiddlewareHostKind;
+  adapterId: AdapterId;
+  executionModel: MiddlewareHostExecutionModel;
+  capabilities: MiddlewareHostCapabilities;
   configSha256: Sha256;
 }
 
@@ -154,6 +179,8 @@ model MiddlewareHostResponseHeadResult {
 model MiddlewareHostFinishRequest {
   schema: "ores.middleware.host/v1";
   sessionId: SessionId;
+  /** Logical final HTTP status. It does not by itself claim that the status was committed to a client. */
+  status: HttpStatus;
   responseBytes?: NonNegativeUInt64 | null;
   outcome: MiddlewareHostOutcome;
   completionBoundary: MiddlewareHostCompletionBoundary;
@@ -165,7 +192,7 @@ model MiddlewareHostFinishResult {
   schema: "ores.middleware.host/v1";
   outcome: MiddlewareHostOutcome;
   completionBoundary: MiddlewareHostCompletionBoundary;
-  effectiveStatus: HttpStatus;
+  status: HttpStatus;
   timeToResponseHeadAvailableMs?: NonNegativeUInt64 | null;
   timeToResponseHeadCommittedMs?: NonNegativeUInt64 | null;
   totalDurationMs: NonNegativeUInt64;
