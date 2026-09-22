@@ -158,7 +158,7 @@ impl<F> FnEdgeMinimalMiddleware<F> {
 pub fn edge_minimal_middleware_fn<F, Fut>(callback: F) -> FnEdgeMinimalMiddleware<F>
 where
     F: Fn(EdgeMinimalCallbackArgs) -> Fut + Send + Sync,
-    Fut: Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send,
+    Fut: Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'static,
 {
     FnEdgeMinimalMiddleware::new(callback)
 }
@@ -166,7 +166,7 @@ where
 impl<F, Fut> EdgeMinimalMiddleware for FnEdgeMinimalMiddleware<F>
 where
     F: Fn(EdgeMinimalCallbackArgs) -> Fut + Send + Sync,
-    Fut: Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send,
+    Fut: Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'static,
 {
     fn call<'a>(
         &'a self,
@@ -223,7 +223,7 @@ impl<F> FnEdgeFetchMiddleware<F> {
 pub fn edge_fetch_middleware_fn<F, Fut>(callback: F) -> FnEdgeFetchMiddleware<F>
 where
     F: Fn(EdgeFetchCallbackArgs) -> Fut + Send + Sync,
-    Fut: Future<Output = Result<StageResponse, IntegrationError>> + Send,
+    Fut: Future<Output = Result<StageResponse, IntegrationError>> + Send + 'static,
 {
     FnEdgeFetchMiddleware::new(callback)
 }
@@ -231,7 +231,7 @@ where
 impl<F, Fut> EdgeFetchMiddleware for FnEdgeFetchMiddleware<F>
 where
     F: Fn(EdgeFetchCallbackArgs) -> Fut + Send + Sync,
-    Fut: Future<Output = Result<StageResponse, IntegrationError>> + Send,
+    Fut: Future<Output = Result<StageResponse, IntegrationError>> + Send + 'static,
 {
     fn call<'a>(
         &'a self,
