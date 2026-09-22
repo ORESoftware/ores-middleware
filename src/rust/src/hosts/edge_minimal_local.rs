@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     EdgeMiddlewareDependencies, EdgeMinimalCallbackArgs, EdgeMinimalDecision,
@@ -6,6 +6,17 @@ use crate::{
     MiddlewareExecutionProfile, MiddlewareHostRequest, RequestContext, RequestMetadata,
     StageResponse,
 };
+
+/// Request headers whose values participate in ingress authority or request
+/// framing. P2 may mutate semantic application headers, but it must not rewrite
+/// these P1-owned facts before the request is handed to P3.
+const INGRESS_OWNED_REQUEST_HEADERS: &[&str] = &[
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "trailer",
+    "expect",
+];
 
 /// Result of one request-side `edge_minimal` middleware invocation.
 ///
@@ -17,39 +28,52 @@ pub enum LocalEdgeMinimalResult {
     Respond(StageResponse),
 }
 
-/// Immutable request fields owned by the ingress host rather than authored
-/// `edge_minimal` middleware. The portable callback may mutate request headers,
-/// but it may not rewrite routing/body metadata or trusted transport facts.
+/// Immutable request facts owned by P1 rather than authored `edge_minimal`
+/// middleware. Ordinary application headers remain mutable, while route/body,
+/// trusted transport, authority, and framing facts must survive byte-for-byte.
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct EdgeMinimalTrustedFacts {
+struct EdgeMinimalIngressFacts {
     method: String,
     path: String,
     remote_ip: Option<String>,
     content_length: Option<u64>,
     transport_secure: bool,
+    headers: BTreeMap<&'static str, Option<String>>,
 }
 
-impl EdgeMinimalTrustedFacts {
+impl EdgeMinimalIngressFacts {
     fn capture(request: &RequestMetadata) -> Self {
+        let headers = INGRESS_OWNED_REQUEST_HEADERS
+            .iter()
+            .copied()
+            .map(|name| (name, request.headers.get(name).cloned()))
+            .collect();
         Self {
             method: request.method.clone(),
             path: request.path.clone(),
             remote_ip: request.remote_ip.clone(),
             content_length: request.content_length,
             transport_secure: request.transport_secure,
+            headers,
         }
     }
 
     fn validate_unchanged(&self, request: &RequestMetadata) -> Result<(), IntegrationError> {
+        let header_changed = self
+            .headers
+            .iter()
+            .any(|(name, value)| request.headers.get(*name) != value.as_ref());
         if self.method != request.method
             || self.path != request.path
             || self.remote_ip != request.remote_ip
             || self.content_length != request.content_length
             || self.transport_secure != request.transport_secure
+            || header_changed
         {
             return Err(IntegrationError {
-                code: "edge_request_trusted_fact_mutation",
-                message: "edge_minimal middleware may mutate request headers but not method, path, content length, remote IP, or transport security facts".to_owned(),
+                code: "edge_request_ingress_fact_mutation",
+                message: "edge_minimal middleware may mutate semantic request headers but not P1-owned method, path, body length, remote IP, TLS, host, or request-framing facts"
+                    .to_owned(),
             });
         }
         Ok(())
@@ -89,9 +113,9 @@ where
     /// dependency bundle. Provider-specific SDK values never cross this API.
     ///
     /// The host validates both the inbound normalized request and any mutated
-    /// request returned by authored middleware. Header mutations are admitted;
-    /// ingress-owned method/path/body metadata and trusted remote/TLS facts must
-    /// remain byte-for-byte unchanged before the request is handed to P3.
+    /// request returned by authored middleware. Semantic header mutations are
+    /// admitted, while P1-owned route/body/transport/framing facts are immutable
+    /// before the request is handed to P3.
     pub async fn execute(
         &self,
         request: MiddlewareHostRequest,
@@ -100,7 +124,7 @@ where
         let request = request
             .into_request_metadata()
             .map_err(host_abi_error_as_integration)?;
-        let trusted_facts = EdgeMinimalTrustedFacts::capture(&request);
+        let ingress_facts = EdgeMinimalIngressFacts::capture(&request);
         let result = self
             .middleware
             .call(EdgeMinimalCallbackArgs {
@@ -112,7 +136,7 @@ where
 
         match result {
             EdgeMinimalDecision::Continue(request) => {
-                let request = revalidate_request(request, &trusted_facts)?;
+                let request = revalidate_request(request, &ingress_facts)?;
                 Ok(LocalEdgeMinimalResult::Continue(request))
             }
             EdgeMinimalDecision::Respond(response) => {
@@ -125,9 +149,9 @@ where
 
 fn revalidate_request(
     request: RequestMetadata,
-    trusted_facts: &EdgeMinimalTrustedFacts,
+    ingress_facts: &EdgeMinimalIngressFacts,
 ) -> Result<RequestMetadata, IntegrationError> {
-    trusted_facts.validate_unchanged(&request)?;
+    ingress_facts.validate_unchanged(&request)?;
     MiddlewareHostRequest {
         schema: MIDDLEWARE_HOST_ABI_SCHEMA.to_owned(),
         method: request.method,
@@ -150,8 +174,8 @@ fn validate_short_circuit_response(response: &StageResponse) -> Result<(), Integ
         });
     }
 
-    // P2 owns application response metadata, not transport framing. P1/provider
-    // adapters remain the sole authority for body framing and connection state.
+    // P1 owns HTTP framing. P2 may author semantic response headers, but it must
+    // not choose transport body framing or hop-by-hop connection semantics.
     for name in response.headers.keys() {
         if matches!(
             name.as_str(),
@@ -343,6 +367,9 @@ mod tests {
         request.trusted_remote_ip = Some("127.0.0.1".to_owned());
         request.content_length = Some(42);
         request.trusted_transport_secure = true;
+        request
+            .headers
+            .insert("host".to_owned(), "example.test".to_owned());
         let result = host.execute(request, context()).await.expect("execute");
         let LocalEdgeMinimalResult::Continue(request) = result else {
             panic!("expected continue");
@@ -356,6 +383,10 @@ mod tests {
         assert_eq!(request.remote_ip.as_deref(), Some("127.0.0.1"));
         assert_eq!(request.content_length, Some(42));
         assert!(request.transport_secure);
+        assert_eq!(
+            request.headers.get("host").map(String::as_str),
+            Some("example.test")
+        );
     }
 
     #[tokio::test]
@@ -375,7 +406,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn middleware_cannot_rewrite_ingress_owned_request_facts() {
+    async fn middleware_cannot_rewrite_ingress_owned_struct_facts() {
         let middleware = edge_minimal_middleware_fn(|mut args| async move {
             args.request.method = "POST".to_owned();
             args.request.path = "/rewritten".to_owned();
@@ -392,8 +423,51 @@ mod tests {
         let error = host
             .execute(request, context())
             .await
-            .expect_err("trusted ingress facts must be immutable");
-        assert_eq!(error.code, "edge_request_trusted_fact_mutation");
+            .expect_err("P1-owned request facts must be immutable");
+        assert_eq!(error.code, "edge_request_ingress_fact_mutation");
+    }
+
+    #[tokio::test]
+    async fn middleware_cannot_rewrite_ingress_owned_framing_headers() {
+        let middleware = edge_minimal_middleware_fn(|mut args| async move {
+            args.set_request_header("content-length", "999");
+            Ok(EdgeMinimalDecision::Continue(args.request))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("POST", "/upload");
+        request.content_length = Some(4);
+        request.trusted_transport_secure = true;
+        request
+            .headers
+            .insert("host".to_owned(), "example.test".to_owned());
+        request
+            .headers
+            .insert("content-length".to_owned(), "4".to_owned());
+        let error = host
+            .execute(request, context())
+            .await
+            .expect_err("P2 must not rewrite P1-owned request framing");
+        assert_eq!(error.code, "edge_request_ingress_fact_mutation");
+    }
+
+    #[tokio::test]
+    async fn middleware_cannot_insert_or_rewrite_ingress_authority_headers() {
+        let middleware = edge_minimal_middleware_fn(|mut args| async move {
+            args.set_request_header("host", "attacker.invalid");
+            args.set_request_header("transfer-encoding", "chunked");
+            Ok(EdgeMinimalDecision::Continue(args.request))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("GET", "/");
+        request.trusted_transport_secure = true;
+        request
+            .headers
+            .insert("host".to_owned(), "example.test".to_owned());
+        let error = host
+            .execute(request, context())
+            .await
+            .expect_err("P2 must not rewrite host or insert request framing");
+        assert_eq!(error.code, "edge_request_ingress_fact_mutation");
     }
 
     #[tokio::test]
@@ -417,15 +491,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn informational_and_framing_control_short_circuits_fail_closed() {
-        let informational = edge_minimal_middleware_fn(|_args| async move {
+    async fn informational_short_circuit_response_fails_closed() {
+        let middleware = edge_minimal_middleware_fn(|_args| async move {
             Ok(EdgeMinimalDecision::Respond(StageResponse {
                 status: 103,
                 headers: BTreeMap::new(),
                 body: Vec::new(),
             }))
         });
-        let host = LocalEdgeMinimalHost::from_middleware(informational, deps());
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
         let mut request = MiddlewareHostRequest::new("GET", "/hints");
         request.trusted_transport_secure = true;
         let error = host
@@ -433,21 +507,24 @@ mod tests {
             .await
             .expect_err("informational response is not terminal");
         assert_eq!(error.code, "invalid_edge_response_status");
+    }
 
-        let framing = edge_minimal_middleware_fn(|_args| async move {
+    #[tokio::test]
+    async fn transport_framing_headers_in_short_circuit_response_fail_closed() {
+        let middleware = edge_minimal_middleware_fn(|_args| async move {
             Ok(EdgeMinimalDecision::Respond(StageResponse {
                 status: 200,
                 headers: BTreeMap::from([("content-length".to_owned(), "999".to_owned())]),
                 body: b"ok".to_vec(),
             }))
         });
-        let host = LocalEdgeMinimalHost::from_middleware(framing, deps());
-        let mut request = MiddlewareHostRequest::new("GET", "/");
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("GET", "/framing");
         request.trusted_transport_secure = true;
         let error = host
             .execute(request, context())
             .await
-            .expect_err("P2 must not author transport body framing");
+            .expect_err("P2 must not author transport response framing");
         assert_eq!(error.code, "edge_response_framing_header_forbidden");
     }
 }
