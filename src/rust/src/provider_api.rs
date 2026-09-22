@@ -10,6 +10,13 @@ use crate::{
     TelemetrySink,
 };
 
+/// Boxed async result used by provider-neutral middleware contracts.
+///
+/// Naming this shape keeps public provider/callback signatures readable without
+/// weakening the Send/lifetime requirements that host adapters depend on.
+pub type MiddlewareResultFuture<'a, T> =
+    Pin<Box<dyn Future<Output = Result<T, IntegrationError>> + Send + 'a>>;
+
 /// Provider-neutral outbound HTTP request used by edge-compatible middleware.
 ///
 /// Host adapters translate this value to their native Fetch/HTTP client. The
@@ -46,33 +53,23 @@ pub trait MiddlewareFetchProvider: Send + Sync {
     fn fetch<'a>(
         &'a self,
         request: MiddlewareFetchRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a,
-        >,
-    >;
+    ) -> MiddlewareResultFuture<'a, MiddlewareFetchResponse>;
 }
 
 /// Bounded key/value cache surface that can be backed by a Worker cache, KV,
 /// Redis/LRU provider, or an in-process implementation without changing the
 /// middleware callback API.
 pub trait MiddlewareCacheProvider: Send + Sync {
-    fn get<'a>(
-        &'a self,
-        key: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>>;
+    fn get<'a>(&'a self, key: &'a str) -> MiddlewareResultFuture<'a, Option<Vec<u8>>>;
 
     fn set<'a>(
         &'a self,
         key: &'a str,
         value: Vec<u8>,
         ttl_ms: Option<u64>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareResultFuture<'a, ()>;
 
-    fn delete<'a>(
-        &'a self,
-        key: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>>;
+    fn delete<'a>(&'a self, key: &'a str) -> MiddlewareResultFuture<'a, ()>;
 }
 
 /// The complete dependency bundle approved for portable P2 middleware.
@@ -136,9 +133,7 @@ pub trait EdgeMinimalMiddleware: Send + Sync {
     fn call<'a>(
         &'a self,
         args: EdgeMinimalCallbackArgs,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>,
-    >;
+    ) -> MiddlewareResultFuture<'a, EdgeMinimalDecision>;
 }
 
 /// Closure adapter so consumers normally provide a callback rather than define
@@ -171,9 +166,7 @@ where
     fn call<'a>(
         &'a self,
         args: EdgeMinimalCallbackArgs,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<EdgeMinimalDecision, IntegrationError>> + Send + 'a>,
-    > {
+    ) -> MiddlewareResultFuture<'a, EdgeMinimalDecision> {
         Box::pin(async move { (self.callback)(args).await })
     }
 }
@@ -181,10 +174,7 @@ where
 /// Abstract downstream continuation used only by `edge_fetch`. Host adapters
 /// implement this using their native Fetch-style `next(request)` mechanism.
 pub trait EdgeNext: Send + Sync {
-    fn call<'a>(
-        &'a self,
-        request: RequestMetadata,
-    ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>>;
+    fn call<'a>(&'a self, request: RequestMetadata) -> MiddlewareResultFuture<'a, StageResponse>;
 }
 
 #[derive(Clone)]
@@ -205,7 +195,7 @@ pub trait EdgeFetchMiddleware: Send + Sync {
     fn call<'a>(
         &'a self,
         args: EdgeFetchCallbackArgs,
-    ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>>;
+    ) -> MiddlewareResultFuture<'a, StageResponse>;
 }
 
 pub struct FnEdgeFetchMiddleware<F> {
@@ -236,7 +226,7 @@ where
     fn call<'a>(
         &'a self,
         args: EdgeFetchCallbackArgs,
-    ) -> Pin<Box<dyn Future<Output = Result<StageResponse, IntegrationError>> + Send + 'a>> {
+    ) -> MiddlewareResultFuture<'a, StageResponse> {
         Box::pin(async move { (self.callback)(args).await })
     }
 }
@@ -254,11 +244,7 @@ mod tests {
         fn fetch<'a>(
             &'a self,
             request: MiddlewareFetchRequest,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<MiddlewareFetchResponse, IntegrationError>> + Send + 'a,
-            >,
-        > {
+        ) -> MiddlewareResultFuture<'a, MiddlewareFetchResponse> {
             Box::pin(async move {
                 Ok(MiddlewareFetchResponse {
                     status: 200,
@@ -275,7 +261,7 @@ mod tests {
         fn verify<'a>(
             &'a self,
             _request: &'a RequestMetadata,
-        ) -> Pin<Box<dyn Future<Output = Result<AuthDecision, IntegrationError>> + Send + 'a>> {
+        ) -> MiddlewareResultFuture<'a, AuthDecision> {
             Box::pin(async {
                 Ok(AuthDecision {
                     user_id: Some("user-1".into()),
@@ -289,10 +275,7 @@ mod tests {
     struct TestCache;
 
     impl MiddlewareCacheProvider for TestCache {
-        fn get<'a>(
-            &'a self,
-            _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, IntegrationError>> + Send + 'a>> {
+        fn get<'a>(&'a self, _key: &'a str) -> MiddlewareResultFuture<'a, Option<Vec<u8>>> {
             Box::pin(async { Ok(None) })
         }
 
@@ -301,14 +284,11 @@ mod tests {
             _key: &'a str,
             _value: Vec<u8>,
             _ttl_ms: Option<u64>,
-        ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>> {
+        ) -> MiddlewareResultFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
 
-        fn delete<'a>(
-            &'a self,
-            _key: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<(), IntegrationError>> + Send + 'a>> {
+        fn delete<'a>(&'a self, _key: &'a str) -> MiddlewareResultFuture<'a, ()> {
             Box::pin(async { Ok(()) })
         }
     }
@@ -395,6 +375,9 @@ mod tests {
         let EdgeMinimalDecision::Continue(request) = result else {
             panic!("expected continue");
         };
-        assert_eq!(request.headers.get("x-user-id").map(String::as_str), Some("user-1"));
+        assert_eq!(
+            request.headers.get("x-user-id").map(String::as_str),
+            Some("user-1")
+        );
     }
 }
