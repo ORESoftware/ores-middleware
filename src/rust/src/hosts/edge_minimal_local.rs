@@ -97,10 +97,11 @@ fn revalidate_request(request: RequestMetadata) -> Result<RequestMetadata, Integ
 }
 
 fn validate_short_circuit_response(response: &StageResponse) -> Result<(), IntegrationError> {
-    if !(100..=599).contains(&response.status) {
+    if !(200..=599).contains(&response.status) {
         return Err(IntegrationError {
             code: "invalid_edge_response_status",
-            message: "edge_minimal short-circuit response must use an HTTP status code".to_owned(),
+            message: "edge_minimal short-circuit response must use a final HTTP status code"
+                .to_owned(),
         });
     }
 
@@ -311,5 +312,24 @@ mod tests {
         };
         assert_eq!(response.status, 403);
         assert_eq!(response.body, b"forbidden");
+    }
+
+    #[tokio::test]
+    async fn informational_short_circuit_response_fails_closed() {
+        let middleware = edge_minimal_middleware_fn(|_args| async move {
+            Ok(EdgeMinimalDecision::Respond(StageResponse {
+                status: 103,
+                headers: BTreeMap::new(),
+                body: Vec::new(),
+            }))
+        });
+        let host = LocalEdgeMinimalHost::from_middleware(middleware, deps());
+        let mut request = MiddlewareHostRequest::new("GET", "/hints");
+        request.trusted_transport_secure = true;
+        let error = host
+            .execute(request, context())
+            .await
+            .expect_err("informational response is not terminal");
+        assert_eq!(error.code, "invalid_edge_response_status");
     }
 }
