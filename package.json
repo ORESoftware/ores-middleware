@@ -18,6 +18,10 @@
       "types": "./src/ts/dist/adapters.d.ts",
       "import": "./src/ts/dist/adapters.js"
     },
+    "./edge-provider-api": {
+      "types": "./src/ts/dist/edge-provider-api.d.ts",
+      "import": "./src/ts/dist/edge-provider-api.js"
+    },
     "./bun": {
       "types": "./src/ts/dist/bun.d.ts",
       "import": "./src/ts/dist/bun.js"
