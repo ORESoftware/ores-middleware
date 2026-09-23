@@ -122,7 +122,7 @@ export class EdgeMinimalRequest {
 
   /** Host-adapter projection used for handoff after admission. */
   toRequestHeaders(): Headers {
-    return new Headers(this.#headers);
+    return new Headers([...this.#headers.entries()]);
   }
 }
 
