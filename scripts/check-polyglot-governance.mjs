@@ -77,6 +77,7 @@ for (const key of [
   "zpkgTargetsMustMatchGovernedLanguages",
   "contractConformanceCiMustExerciseEveryLanguage",
   "missingOrExtraParticipantFailsClosed",
+  "scaffoldCoverageMustDeclareDelegatedBehavioralAuthority",
 ]) {
   assert.equal(registry.policy?.[key], true, `policy.${key} must be true`);
 }
@@ -210,6 +211,20 @@ for (const participant of registry.participants) {
     if (!block.includes(token)) {
       fail(`${participant.id} contract-conformance job ${participant.ciJob} is missing required token: ${token}`);
     }
+  }
+}
+
+if (conformance.coverage?.status === "scaffold-only") {
+  const delegated = registry.delegatedBehavioralConformance;
+  if (!delegated || delegated.mode !== "workflow" || delegated.failClosed !== true) {
+    fail("scaffold-only coverage requires an explicit fail-closed delegated behavioral workflow");
+  }
+  const delegatedWorkflow = normalizeRepoPath(delegated.workflow, "delegatedBehavioralConformance.workflow");
+  assert.equal(delegatedWorkflow, workflowPath, "delegated behavioral workflow must be the governed contract-conformance workflow");
+  assert.equal(conformance.coverage.authorityMode, "delegated-workflow", "scaffold coverage must declare delegated-workflow authority");
+  assert.equal(conformance.coverage.authorityWorkflow, delegated.workflow, "conformance manifest authority workflow drifted from governance");
+  if (typeof delegated.reason !== "string" || delegated.reason.trim().length === 0) {
+    fail("delegated behavioral conformance requires a non-empty reason");
   }
 }
 
