@@ -98,6 +98,13 @@
     "contractConformanceCiMustExerciseEveryLanguage": true,
     "generatedArtifactsAreAuthority": false,
     "runtimeSpecificGoldensAllowed": false,
-    "missingOrExtraParticipantFailsClosed": true
+    "missingOrExtraParticipantFailsClosed": true,
+    "scaffoldCoverageMustDeclareDelegatedBehavioralAuthority": true
+  },
+  "delegatedBehavioralConformance": {
+    "mode": "workflow",
+    "workflow": ".github/workflows/contract-conformance.yml",
+    "failClosed": true,
+    "reason": "Exact-head language jobs and contractcheck/runtime-descriptor gates are the behavioral authority while the generic conformance manifest remains bootstrap metadata."
   }
 }

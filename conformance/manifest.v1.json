@@ -1,20 +1,49 @@
 {
   "schema": "ores.conformance.manifest/v1",
   "repository": "ORESoftware/ores-middleware",
-  "contractRoots": ["contracts/"],
-  "caseRoots": ["conformance/cases"],
+  "contractRoots": [
+    "contracts/"
+  ],
+  "caseRoots": [
+    "conformance/cases"
+  ],
   "caseSchema": "conformance/case.schema.json",
   "governanceRegistry": "governance/polyglot-participants.v1.json",
   "evidenceDir": "artifacts/conformance/evidence",
   "requiredParticipants": [
-    {"id": "rust"},
-    {"id": "ts"},
-    {"id": "golang"},
-    {"id": "gleam"},
-    {"id": "elixir"},
-    {"id": "erlang"}
+    {
+      "id": "rust"
+    },
+    {
+      "id": "ts"
+    },
+    {
+      "id": "golang"
+    },
+    {
+      "id": "gleam"
+    },
+    {
+      "id": "elixir"
+    },
+    {
+      "id": "erlang"
+    }
   ],
-  "coverage": {"status": "scaffold-only", "behavioralCasesRequired": false},
-  "evidence": {"bindToContractDigests": true, "bindToCaseDigests": true, "missingRequiredEvidenceFails": true, "staleEvidenceFails": true},
-  "policy": {"runtimeSpecificGoldensAllowed": false, "generatedEvidenceIsAuthority": false}
+  "coverage": {
+    "status": "scaffold-only",
+    "behavioralCasesRequired": false,
+    "authorityMode": "delegated-workflow",
+    "authorityWorkflow": ".github/workflows/contract-conformance.yml"
+  },
+  "evidence": {
+    "bindToContractDigests": true,
+    "bindToCaseDigests": true,
+    "missingRequiredEvidenceFails": true,
+    "staleEvidenceFails": true
+  },
+  "policy": {
+    "runtimeSpecificGoldensAllowed": false,
+    "generatedEvidenceIsAuthority": false
+  }
 }
