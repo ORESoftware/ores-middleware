@@ -8,6 +8,7 @@ pub mod axum_composable;
 pub mod axum_shutdown;
 #[cfg(feature = "dioxus")]
 pub mod dioxus;
+pub mod ingress;
 #[cfg(feature = "leptos")]
 pub mod leptos;
 #[cfg(feature = "mash")]
