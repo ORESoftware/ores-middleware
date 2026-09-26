@@ -1,0 +1,31 @@
+name: ingress-contract
+
+on:
+  pull_request:
+    paths:
+      - "src/rust/src/frameworks/ingress.rs"
+      - "src/rust/src/frameworks/mod.rs"
+      - ".github/workflows/ingress-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-ingress-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+      - name: Format ingress contract
+        run: rustfmt --edition 2024 --check src/rust/src/frameworks/ingress.rs src/rust/src/frameworks/mod.rs
+      - name: Clippy Rust middleware
+        run: cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
+      - name: Test Rust middleware
+        run: cargo test --manifest-path src/rust/Cargo.toml --all-features
