@@ -3,9 +3,7 @@ use std::{collections::BTreeMap, net::IpAddr};
 use serde::Serialize;
 
 use crate::{
-    hardening::{
-        MAX_HEADER_BYTES, MAX_HEADER_NAME_BYTES, MAX_HEADER_VALUE_BYTES, MAX_RAW_HEADERS,
-    },
+    hardening::{MAX_HEADER_BYTES, MAX_HEADER_NAME_BYTES, MAX_HEADER_VALUE_BYTES, MAX_RAW_HEADERS},
     net::cidr_contains,
 };
 
@@ -567,10 +565,7 @@ mod tests {
             .expect("trusted proxy metadata");
         assert_eq!(trusted.host, "api.example.com");
         assert_eq!(trusted.scheme, "https");
-        assert_eq!(
-            trusted.client_ip,
-            "198.51.100.9".parse::<IpAddr>().unwrap()
-        );
+        assert_eq!(trusted.client_ip, "198.51.100.9".parse::<IpAddr>().unwrap());
         assert!(trusted.used_forwarded_metadata);
     }
 
