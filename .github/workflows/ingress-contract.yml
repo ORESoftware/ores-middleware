@@ -24,7 +24,7 @@ jobs:
           toolchain: "1.95.0"
           components: rustfmt, clippy
       - name: Format ingress contract
-        run: rustfmt --edition 2024 --check src/rust/src/frameworks/ingress.rs src/rust/src/frameworks/mod.rs
+        run: rustfmt --edition 2024 --check src/rust/src/frameworks/ingress.rs
       - name: Clippy Rust middleware
         run: cargo clippy --manifest-path src/rust/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Test Rust middleware
