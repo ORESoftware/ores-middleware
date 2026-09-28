@@ -1,3 +1,5 @@
+#![allow(clippy::needless_return)]
+
 use std::{collections::BTreeMap, net::IpAddr};
 
 use serde::Serialize;
@@ -463,7 +465,7 @@ mod tests {
 
     #[test]
     fn oversized_heads_and_declared_bodies_fail_before_buffering() {
-        let large = "b".repeat(80);
+        let large = "b".repeat(MAX_HEADER_VALUE_BYTES + 1);
         assert_eq!(
             preflight_request_buffers(
                 limits(),
