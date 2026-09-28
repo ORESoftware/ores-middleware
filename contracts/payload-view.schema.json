@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-middleware/raw/main/contracts/payload-view.schema.json",
+  "title": "ORES middleware payload view v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "codec",
+    "opaque",
+    "encoded_bytes",
+    "decoded_bytes",
+    "transformed"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.middleware.payload-view/v1"
+    },
+    "codec": {
+      "enum": [
+        "json",
+        "messagepack",
+        "cbor",
+        "protobuf",
+        "raw"
+      ]
+    },
+    "opaque": {
+      "type": "boolean"
+    },
+    "encoded_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 16777216
+    },
+    "decoded_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 67108864
+    },
+    "transformed": {
+      "type": "boolean"
+    }
+  }
+}
