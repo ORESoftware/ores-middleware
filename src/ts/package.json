@@ -21,6 +21,10 @@
       "types": "./dist/edge-provider-api.d.ts",
       "import": "./dist/edge-provider-api.js"
     },
+    "./providers/cloudflare": {
+      "types": "./dist/providers/cloudflare.d.ts",
+      "import": "./dist/providers/cloudflare.js"
+    },
     "./bun": {
       "types": "./dist/bun.d.ts",
       "import": "./dist/bun.js"
