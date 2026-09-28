@@ -1,7 +1,0 @@
-{
-  "name": "edge",
-  "role": "worker",
-  "roots": ["src"],
-  "enabled": true,
-  "middleware": "disabled"
-}
