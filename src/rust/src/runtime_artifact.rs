@@ -281,7 +281,10 @@ mod tests {
             .expect("cloudflare artifact");
 
         assert_eq!(selected.id, "cloudflare-native");
-        assert_eq!(selected.semantic_contract_sha256, manifest.semantic_contract_sha256);
+        assert_eq!(
+            selected.semantic_contract_sha256,
+            manifest.semantic_contract_sha256
+        );
     }
 
     #[test]
