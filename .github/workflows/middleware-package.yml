@@ -1,0 +1,157 @@
+name: middleware-package
+
+on:
+  pull_request:
+    paths:
+      - contracts/middleware-package/**
+      - src/rust/src/runtime_artifact.rs
+      - src/rust/src/edge_proxy.rs
+      - src/rust/src/lib.rs
+      - src/ts/src/providers/cloudflare.ts
+      - src/ts/test/cloudflare-provider.test.mjs
+      - src/ts/package.json
+      - package.json
+      - docs/portable-middleware-runtime-profiles.md
+      - .github/workflows/middleware-package.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: middleware-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      CARGO_TERM_COLOR: never
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+          git diff --check
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+
+      - name: Check Rust runtime profile formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2024 --check \
+            src/rust/src/runtime_artifact.rs \
+            src/rust/src/edge_proxy.rs \
+            src/rust/src/lib.rs
+
+      - name: Clippy portable runtime selection
+        run: cargo clippy --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib -- -D warnings
+
+      - name: Test runtime artifact selection
+        run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib runtime_artifact
+
+      - name: Test swappable edge proxy contract
+        run: cargo test --locked --manifest-path src/rust/Cargo.toml --no-default-features --lib edge_proxy
+
+      - name: Install repository-standard Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.23.1'
+          package-manager-cache: false
+
+      - name: Install TypeScript and TypeSpec dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm ci --prefix src/ts --ignore-scripts --no-audit --no-fund
+
+      - name: Compile package TypeSpec authority
+        run: ./node_modules/.bin/tsp compile contracts/middleware-package/typespec/main.tsp --no-emit
+
+      - name: Test Cloudflare portable adapter
+        run: npm --prefix src/ts test
+
+      - name: Check out immutable hardened TJSV
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/typespec-json-schema-validator
+          ref: 733bc1b6b4b45433a38625fc4dd9ddb108b60519
+          path: tmp/tjsv-middleware-package
+          persist-credentials: false
+          show-progress: false
+
+      - name: Install locked TJSV compiler dependencies
+        run: npm ci --prefix tmp/tjsv-middleware-package --ignore-scripts --no-audit --no-fund
+
+      - name: Build reviewed TJSV native dependency
+        working-directory: tmp/tjsv-middleware-package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm rebuild @oresoftware/f2e --ignore-scripts=false --no-audit --no-fund
+          test -s node_modules/@oresoftware/f2e/clients/nodejs/build/Release/flags2env.node
+
+      - name: Enforce TypeSpec and authored JSON Schema peer parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/middleware-package-tjsv
+          node tmp/tjsv-middleware-package/bin/typespec-json-schema-validator.mjs check \
+            --typespec=contracts/middleware-package/typespec/main.tsp \
+            --schema=contracts/middleware-package/json-schema \
+            --mapping=contracts/middleware-package/tjsv.mapping.json \
+            --tsp-bin="${GITHUB_WORKSPACE}/tmp/tjsv-middleware-package/node_modules/.bin/tsp" \
+            --report=target/middleware-package-tjsv/report.json \
+            --output-dir=target/middleware-package-tjsv/generated \
+            --probes=true \
+            --max-probes=128 \
+            --seal-object-schemas=false \
+            --int64-strategy=number \
+            --polymorphic-models-strategy=oneOf \
+            --format-assertion=true \
+            --quiet=false
+
+      - name: Prove validation is source-immutable
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C tmp/tjsv-middleware-package rev-parse HEAD)" = "733bc1b6b4b45433a38625fc4dd9ddb108b60519"
+          git diff --exit-code -- \
+            contracts/middleware-package \
+            src/rust/src/runtime_artifact.rs \
+            src/rust/src/edge_proxy.rs \
+            src/rust/src/lib.rs \
+            src/ts/src/providers/cloudflare.ts \
+            src/ts/test/cloudflare-provider.test.mjs \
+            src/ts/package.json \
+            package.json \
+            .github/workflows/middleware-package.yml
+          test -z "$(git status --porcelain)"
+
+      - name: Retain peer-authority parity evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: middleware-package-tjsv-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/middleware-package-tjsv/
+          if-no-files-found: warn
+          retention-days: 30
