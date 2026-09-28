@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-middleware/raw/main/contracts/operation-boundary.schema.json",
+  "title": "ORES middleware operation boundary",
+  "$ref": "#/$defs/OperationDescriptor",
+  "$defs": {
+    "OperationTransport": {
+      "type": "string",
+      "enum": [
+        "http",
+        "lambda",
+        "tcp",
+        "websocket"
+      ]
+    },
+    "OperationScope": {
+      "type": "string",
+      "enum": [
+        "request",
+        "connection",
+        "message",
+        "callback"
+      ]
+    },
+    "OperationName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "OperationDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport",
+        "scope",
+        "name"
+      ],
+      "properties": {
+        "transport": {
+          "$ref": "#/$defs/OperationTransport"
+        },
+        "scope": {
+          "$ref": "#/$defs/OperationScope"
+        },
+        "name": {
+          "$ref": "#/$defs/OperationName"
+        }
+      }
+    }
+  }
+}
