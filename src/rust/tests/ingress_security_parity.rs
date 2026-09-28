@@ -1,3 +1,5 @@
+#![allow(clippy::needless_return)]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use ores_middleware::{
