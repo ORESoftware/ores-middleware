@@ -13,11 +13,11 @@ pub enum EdgeProxyKind {
 impl EdgeProxyKind {
     #[must_use]
     pub const fn middleware_provider(self) -> MiddlewareProvider {
-        return match self {
+        match self {
             Self::Caddy => MiddlewareProvider::Caddy,
             Self::Nginx => MiddlewareProvider::Nginx,
             Self::Haproxy => MiddlewareProvider::Haproxy,
-        };
+        }
     }
 }
 
@@ -67,7 +67,7 @@ pub struct EdgeProxyAdapterError {
 
 impl std::fmt::Display for EdgeProxyAdapterError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        return write!(formatter, "{} ({})", self.message, self.code);
+        write!(formatter, "{} ({})", self.message, self.code)
     }
 }
 
@@ -130,7 +130,7 @@ pub fn require_phase(
         });
     }
 
-    return Ok(());
+    Ok(())
 }
 
 pub fn require_same_application_generation(
@@ -147,7 +147,7 @@ pub fn require_same_application_generation(
         });
     }
 
-    return Ok(());
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -182,7 +182,7 @@ pub const fn edge_proxy_descriptor(kind: EdgeProxyKind) -> EdgeProxyDescriptor {
         },
     };
 
-    return EdgeProxyDescriptor { kind, capabilities };
+    EdgeProxyDescriptor { kind, capabilities }
 }
 
 #[cfg(test)]
