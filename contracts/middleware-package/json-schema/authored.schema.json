@@ -5,6 +5,10 @@
   "description": "Independent JSON Schema authority for portable/provider-specific middleware artifact packaging. TypeSpec is a peer authority, not a generator source for this file.",
   "$ref": "#/$defs/MiddlewarePackageManifest",
   "$defs": {
+    "NonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
     "Sha256Hex": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -22,8 +26,8 @@
         "semantic_contract_sha256"
       ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "language": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "#/$defs/NonEmptyString" },
+        "language": { "$ref": "#/$defs/NonEmptyString" },
         "kind": {
           "enum": [
             "javascript_module",
@@ -44,7 +48,7 @@
         "provider": {
           "enum": ["generic", "cloudflare", "caddy", "nginx", "haproxy"]
         },
-        "path": { "type": "string", "minLength": 1 },
+        "path": { "$ref": "#/$defs/NonEmptyString" },
         "semantic_contract_sha256": { "$ref": "#/$defs/Sha256Hex" }
       }
     },
@@ -62,18 +66,16 @@
       ],
       "properties": {
         "spec_version": { "type": "integer", "const": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "version": { "type": "string", "minLength": 1 },
+        "name": { "$ref": "#/$defs/NonEmptyString" },
+        "version": { "$ref": "#/$defs/NonEmptyString" },
         "semantic_contract_sha256": { "$ref": "#/$defs/Sha256Hex" },
         "phases": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "uniqueItems": true
+          "items": { "$ref": "#/$defs/NonEmptyString" }
         },
         "capabilities": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "uniqueItems": true
+          "items": { "$ref": "#/$defs/NonEmptyString" }
         },
         "artifacts": {
           "type": "array",
