@@ -194,8 +194,7 @@ mod tests {
             generation_id: id.to_owned(),
             application_generation_sha256: application_digest.to_owned(),
             rendered_config_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_owned(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_owned(),
         };
     }
 
