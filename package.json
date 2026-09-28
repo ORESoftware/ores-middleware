@@ -22,6 +22,10 @@
       "types": "./src/ts/dist/edge-provider-api.d.ts",
       "import": "./src/ts/dist/edge-provider-api.js"
     },
+    "./providers/cloudflare": {
+      "types": "./src/ts/dist/providers/cloudflare.d.ts",
+      "import": "./src/ts/dist/providers/cloudflare.js"
+    },
     "./bun": {
       "types": "./src/ts/dist/bun.d.ts",
       "import": "./src/ts/dist/bun.js"
@@ -109,7 +113,7 @@
   },
   "scripts": {
     "prepare": "npm --prefix src/ts ci --include=dev && npm --prefix src/ts run build",
-    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
+    "contracts:compile": "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit && tsp compile contracts/middleware-package/typespec --no-emit",
     "contracts:cross-translate": "python3 scripts/cross_translate.py",
     "contracts:constraint-parity": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_constraint_gate -- --report target/schema-convergence/constraint-parity.json",
     "contracts:polyglot-generate": "cargo run --quiet --manifest-path tools/contract-parity/Cargo.toml --bin persistence_codegen -- --output-root target/schema-convergence --report target/schema-convergence/receipt.json",
