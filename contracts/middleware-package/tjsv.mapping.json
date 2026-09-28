@@ -1,0 +1,14 @@
+{
+  "schema": "ores.typespec-json-schema-validator.mapping/v1",
+  "declarations": [
+    {"typespec":"Ores.Middleware.Package.NonEmptyString","generated":"NonEmptyString","authored":"NonEmptyString"},
+    {"typespec":"Ores.Middleware.Package.Sha256Hex","generated":"Sha256Hex","authored":"Sha256Hex"},
+    {"typespec":"Ores.Middleware.Package.MiddlewareArtifactDescriptor","generated":"MiddlewareArtifactDescriptor","authored":"MiddlewareArtifactDescriptor"},
+    {"typespec":"Ores.Middleware.Package.MiddlewarePackageManifest","generated":"MiddlewarePackageManifest","authored":"MiddlewarePackageManifest"}
+  ],
+  "ignore": {
+    "typespec": [],
+    "generated": [],
+    "authored": []
+  }
+}
