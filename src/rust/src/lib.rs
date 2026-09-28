@@ -142,7 +142,7 @@ pub use rate_limit_bindings::{
 };
 pub use rate_limit_routes::{
     RateLimitRouteSelector, ResolvedRouteRateLimitPolicy, RouteRateLimitPolicySource,
-    RouteRateLimitRequest, RateLimitResolutionError, RouteRateLimitRule, RouteRateLimitTable,
+    RouteRateLimitRequest, RouteRateLimitResolutionError, RouteRateLimitRule, RouteRateLimitTable,
     RouteRateLimitViolation,
 };
 pub use rate_limit_v2::{
