@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/ores-middleware/raw/main/contracts/config-fingerprint.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "fingerprint_sha256",
+    "public_field_count",
+    "secret_binding_count",
+    "raw_secret_material_included"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.middleware.config-fingerprint/v1"
+    },
+    "fingerprint_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "public_field_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "secret_binding_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "raw_secret_material_included": {
+      "const": false
+    }
+  }
+}
