@@ -33,6 +33,7 @@ pub mod rate_limit_bindings;
 pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
+pub mod runtime_artifact;
 pub mod runtime_manifest;
 pub mod runtime_manifest_evidence;
 pub mod security;
@@ -141,7 +142,7 @@ pub use rate_limit_bindings::{
 };
 pub use rate_limit_routes::{
     RateLimitRouteSelector, ResolvedRouteRateLimitPolicy, RouteRateLimitPolicySource,
-    RouteRateLimitRequest, RouteRateLimitResolutionError, RouteRateLimitRule, RouteRateLimitTable,
+    RouteRateLimitRequest, RateLimitResolutionError, RouteRateLimitRule, RouteRateLimitTable,
     RouteRateLimitViolation,
 };
 pub use rate_limit_v2::{
@@ -151,6 +152,10 @@ pub use rate_limit_v2::{
 pub use resilience::{
     Bulkhead, BulkheadRejected, CircuitAdmission, CircuitBreaker, CircuitBreakerConfig,
     CircuitStateSnapshot, ResilienceConfigError,
+};
+pub use runtime_artifact::{
+    MiddlewareArtifactDescriptor, MiddlewareArtifactKind, MiddlewarePackageManifest,
+    MiddlewarePackageViolation, MiddlewareProvider, MiddlewareRuntimeProfile,
 };
 pub use runtime_manifest::{
     admit_server_stack, admit_server_stack_from, admit_server_stack_from_env, ManifestLoadError,
