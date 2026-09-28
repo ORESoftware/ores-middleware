@@ -45,15 +45,15 @@ pub struct MiddlewareArtifactDescriptor {
 impl MiddlewareArtifactDescriptor {
     #[must_use]
     pub fn is_edge_portable(&self) -> bool {
-        return matches!(
+        matches!(
             self.profile,
             MiddlewareRuntimeProfile::PortableJavaScript | MiddlewareRuntimeProfile::PortableWasm
-        );
+        )
     }
 
     #[must_use]
     pub fn is_provider_overlay(&self) -> bool {
-        return self.provider != MiddlewareProvider::Generic;
+        self.provider != MiddlewareProvider::Generic
     }
 }
 
@@ -168,7 +168,7 @@ impl MiddlewarePackageManifest {
             }
         }
 
-        return violations;
+        violations
     }
 
     #[must_use]
@@ -188,10 +188,10 @@ impl MiddlewarePackageManifest {
             return provider_specific;
         }
 
-        return self.artifacts.iter().find(|artifact| {
+        self.artifacts.iter().find(|artifact| {
             artifact.provider == MiddlewareProvider::Generic
                 && supported_profiles.contains(&artifact.profile)
-        });
+        })
     }
 }
 
@@ -200,9 +200,9 @@ fn is_sha256_hex(value: &str) -> bool {
         return false;
     }
 
-    return value
+    value
         .bytes()
-        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[cfg(test)]
