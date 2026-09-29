@@ -218,7 +218,7 @@ mod tests {
         profile: MiddlewareRuntimeProfile,
         provider: MiddlewareProvider,
     ) -> MiddlewareArtifactDescriptor {
-        return MiddlewareArtifactDescriptor {
+        MiddlewareArtifactDescriptor {
             id: id.to_owned(),
             language: language.to_owned(),
             kind,
@@ -230,7 +230,7 @@ mod tests {
     }
 
     fn manifest() -> MiddlewarePackageManifest {
-        return MiddlewarePackageManifest {
+        MiddlewarePackageManifest {
             spec_version: 1,
             name: "example-auth".to_owned(),
             version: "1.2.3".to_owned(),
