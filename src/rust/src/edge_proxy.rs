@@ -190,7 +190,7 @@ mod tests {
     use super::*;
 
     fn generation(id: &str, application_digest: &str) -> EdgeProxyGeneration {
-        return EdgeProxyGeneration {
+        EdgeProxyGeneration {
             generation_id: id.to_owned(),
             application_generation_sha256: application_digest.to_owned(),
             rendered_config_sha256:
@@ -203,7 +203,7 @@ mod tests {
         generation: EdgeProxyGeneration,
         phase: EdgeProxyLifecyclePhase,
     ) -> EdgeProxyLifecycleReceipt {
-        return EdgeProxyLifecycleReceipt {
+        EdgeProxyLifecycleReceipt {
             proxy: kind,
             generation,
             phase,
