@@ -129,6 +129,39 @@ test("dispatches MessagePack decoder without treating bytes as JSON", async () =
   assert.deepEqual(decoded.value, { a: 1 });
 });
 
+test("dispatches CBOR decoder without UTF-8 conversion", async () => {
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/cbor" },
+    body: new Uint8Array([0xa1, 0x61, 0x61, 0x01])
+  });
+  const decoded = await decodeRequestPayload(request, {
+    ...limits,
+    decoders: {
+      cbor: ({ bytes, mediaType }) => {
+        assert.equal(mediaType, "application/cbor");
+        assert.deepEqual([...bytes], [0xa1, 0x61, 0x61, 0x01]);
+        return { a: 1 };
+      }
+    }
+  });
+  assert.deepEqual(decoded.value, { a: 1 });
+});
+
+test("raw octet-stream preserves non-UTF8 bytes exactly", async () => {
+  const input = new Uint8Array([0x00, 0xff, 0x80, 0x0a, 0x07]);
+  const request = new Request("https://example.test/items", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: input
+  });
+  const decoded = await decodeRequestPayload(request, limits);
+  assert.equal(decoded.representation, "application/octet-stream");
+  assert.ok(decoded.value instanceof Uint8Array);
+  assert.deepEqual([...decoded.value], [...input]);
+  assert.deepEqual([...decoded.bytes], [...input]);
+});
+
 test("protobuf decoding requires both message descriptor and decoder", async () => {
   const request = () => new Request("https://example.test/items", {
     method: "POST",
