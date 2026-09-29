@@ -25,6 +25,7 @@ pub mod middleware_order;
 mod net;
 pub mod operation;
 pub mod otel;
+pub mod payload;
 pub mod placement;
 mod pipeline;
 pub mod provider_api;
