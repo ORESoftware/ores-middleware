@@ -155,15 +155,29 @@ quota exhaustion from unavailable enforcement.
 
 ## Response and telemetry contract
 
-Denied responses include:
+Admitted responses include quota hints so well-behaved clients can pace work before
+they hit a rejection. The preferred wire shape follows the current HTTPAPI
+RateLimit draft:
 
-- `Retry-After` in whole seconds;
-- `RateLimit-Limit`;
-- `RateLimit-Remaining`;
-- `RateLimit-Reset` when known;
+- `RateLimit-Policy: "policy-id";q=<quota>;w=<seconds>`;
+- `RateLimit: "policy-id";r=<remaining>;t=<effective-window-seconds>` when the
+  limiter knows an effective window.
+
+For compatibility with clients built against older drafts, middleware also emits
+`RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` when known.
+
+Denied responses additionally include `Retry-After` in whole seconds. When
+`Retry-After` and `RateLimit` are both present, clients must treat
+`Retry-After` as the hard no-send interval. The ORES diagnostic headers remain:
+
 - `x-ores-rate-limit-policy`;
 - `x-ores-rate-limit-layer`;
 - `x-ores-rate-limit-decision`.
+
+Browser clients can only read non-safelisted response headers across origins when
+the application's CORS layer exposes them. Deployments using the shared
+quota-aware fetch client should expose at least `RateLimit-Policy`, `RateLimit`,
+`Retry-After`, and the compatibility RateLimit fields.
 
 `ores-otel` events use low-cardinality fields: policy ID, layer, algorithm,
 outcome, source, remaining bucket, retry class, and reason code. They carry the
