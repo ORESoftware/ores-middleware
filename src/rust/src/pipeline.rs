@@ -1110,3 +1110,48 @@ mod tests {
         assert!(!headers.contains_key("traceparent"));
     }
 }
+
+
+#[cfg(test)]
+mod rate_limit_response_header_tests {
+    use super::*;
+    use crate::rate_limit::{RateLimitAlgorithm, RateLimitLayer};
+
+    fn decision(kind: RateLimitDecisionKind, remaining: u32) -> RateLimitDecision {
+        RateLimitDecision {
+            kind,
+            source: RateLimitDecisionSource::LocalMemory,
+            policy_id: "ip-default".into(),
+            layer: RateLimitLayer::Application,
+            algorithm: RateLimitAlgorithm::TokenBucket,
+            limit: 5,
+            remaining,
+            retry_after_ms: (remaining == 0).then_some(1_000),
+            reset_after_ms: Some(1_000),
+            reason_code: None,
+        }
+    }
+
+    #[test]
+    fn admitted_response_carries_modern_and_compatibility_quota_hints() {
+        let headers = rate_limit_headers(&decision(RateLimitDecisionKind::Allowed, 2), 1_000, false);
+        assert_eq!(headers.get("ratelimit-policy").map(String::as_str), Some("\"ip-default\";q=5;w=1"));
+        assert_eq!(headers.get("ratelimit").map(String::as_str), Some("\"ip-default\";r=2;t=1"));
+        assert_eq!(headers.get("ratelimit-limit").map(String::as_str), Some("5"));
+        assert_eq!(headers.get("ratelimit-remaining").map(String::as_str), Some("2"));
+        assert_eq!(headers.get("ratelimit-reset").map(String::as_str), Some("1"));
+        assert!(!headers.contains_key("retry-after"));
+    }
+
+    #[test]
+    fn denied_response_carries_retry_after_and_zero_remaining() {
+        let headers = rate_limit_headers(&decision(RateLimitDecisionKind::Denied, 0), 1_000, true);
+        assert_eq!(headers.get("retry-after").map(String::as_str), Some("1"));
+        assert_eq!(headers.get("ratelimit").map(String::as_str), Some("\"ip-default\";r=0;t=1"));
+    }
+
+    #[test]
+    fn structured_policy_identifier_is_escaped() {
+        assert_eq!(structured_field_string("a\\b\"c"), "\"a\\\\b\\\"c\"");
+    }
+}
