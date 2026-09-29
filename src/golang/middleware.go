@@ -156,7 +156,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		}
 
 		if s.config.Settings.RateLimit.Enabled {
-			key := strings.Join([]string{value.TenantID, value.UserID, clientIP(request, trusted), request.URL.Path}, ":")
+			key := clientIP(request, trusted)
 			allowed, err := s.deps.RateLimiter.Allow(ctx, key, s.config.Settings.RateLimit.Capacity, s.config.Settings.RateLimit.RefillPerSecond)
 			if err != nil || !allowed {
 				writeProblem(writer, 429, "rate_limited", "rate limit exceeded")
