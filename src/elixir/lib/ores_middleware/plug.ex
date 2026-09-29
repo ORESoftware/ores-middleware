@@ -229,16 +229,7 @@ defmodule OresMiddleware.Plug do
   defp rate_limit(conn, context, stack, trusted_proxy) do
     policy = stack.config.settings.rateLimit
 
-    key =
-      Enum.join(
-        [
-          context.tenant_id || "_",
-          context.user_id || "_",
-          client_ip(conn, trusted_proxy),
-          conn.request_path
-        ],
-        ":"
-      )
+    key = client_ip(conn, trusted_proxy)
 
     if not policy.enabled or
          stack.hooks.rate_limit.(key, policy.capacity, policy.refillPerSecond),
