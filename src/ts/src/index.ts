@@ -1,5 +1,6 @@
 import { boundRequestBody, PayloadTooLargeError } from "./request-body.js";
 import { scopedIdempotencyKey } from "./idempotency-scope.js";
+import { effectiveClientIp } from "./client-ip.js";
 import { currentContext, runWithContext } from "./context.js";
 import {
   checkRequestContract,
@@ -89,6 +90,8 @@ export interface MiddlewareDependencies {
   rateLimiter?: { allow(key: string, capacity: number, refillPerSecond: number): Promise<boolean> };
   idempotencyStore?: { get(key: string): Promise<StoredResponse | undefined>; set(key: string, response: StoredResponse): Promise<void> };
   isTrustedProxy?: (request: Request) => boolean;
+  /** Direct peer IP supplied by a trusted embedding runtime when no adapter metadata is available. */
+  clientIp?: (request: Request) => string | undefined;
   authorizeIp?: (request: Request, context: RequestContext) => Promise<boolean>;
   telemetry?: {
     started(context: RequestContext, request: Request): Promise<void> | void;
@@ -128,7 +131,7 @@ export function defaultConfig(serviceName: string): MiddlewareConfig {
       maxBodyBytes: 2 * 1024 * 1024,
       contextRegistryMaxEntries: 10_000,
       contextRegistryTtlMs: 30_000,
-      rateLimit: { enabled: true, capacity: 100, refillPerSecond: 20, keyBy: ["tenant", "user", "ip", "route"] },
+      rateLimit: { enabled: true, capacity: 5, refillPerSecond: 5, keyBy: ["ip"] },
       compression: { enabled: true, minimumBytes: 1_024, algorithms: ["br", "gzip"] },
       tls: { mode: "trusted-proxy", requireHttps: true, strictForwardedHeaders: true, trustedProxyCidrs: ["127.0.0.1/32", "::1/128"] },
       securityHeaders: { enabled: true, hstsMaxAgeSeconds: 31_536_000, contentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'", frameOptions: "DENY" },
@@ -252,6 +255,7 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const forwardedProto = request.headers.get("x-forwarded-proto");
     const trustedProxy = dependencies.isTrustedProxy?.(request) ?? false;
     const effectiveHttps = url.protocol === "https:" || (trustedProxy && forwardedProto === "https");
+    const clientIp = effectiveClientIp(request, trustedProxy, dependencies.clientIp);
     if (config.settings.tls.requireHttps && !effectiveHttps) return early(problem(426, "https_required", "HTTPS is required"));
     if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return early(problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer"));
 
@@ -277,7 +281,9 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     }
 
     if (config.settings.rateLimit.enabled) {
-      const rateKey = [initialContext.tenantId ?? "_", initialContext.userId ?? "_", request.headers.get("x-real-ip") ?? "_", url.pathname].join(":");
+      // The default abuse guard is deliberately one bucket per effective client IP.
+      // Unknown peers share a conservative bucket rather than trusting spoofable headers.
+      const rateKey = clientIp ?? "__unknown_client_ip__";
       if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) return early(problem(429, "rate_limited", "rate limit exceeded"));
     }
 
