@@ -106,7 +106,10 @@ mod tests {
 
         for (codec, expected) in cases {
             assert_eq!(codec.wire_name(), expected);
-            assert_eq!(serde_json::to_string(&codec).expect("serialize codec"), format!("\"{expected}\""));
+            assert_eq!(
+                serde_json::to_string(&codec).expect("serialize codec"),
+                format!("\"{expected}\"")
+            );
             assert_eq!(
                 serde_json::from_str::<PayloadCodec>(&format!("\"{expected}\""))
                     .expect("deserialize codec"),
@@ -119,14 +122,8 @@ mod tests {
     fn framing_projection_uses_shared_authority_wire_names() {
         let cases = [
             (TransportFraming::HttpBody, "http_body"),
-            (
-                TransportFraming::TcpLengthDelimited,
-                "tcp_length_delimited",
-            ),
-            (
-                TransportFraming::WebsocketMessage,
-                "websocket_message",
-            ),
+            (TransportFraming::TcpLengthDelimited, "tcp_length_delimited"),
+            (TransportFraming::WebsocketMessage, "websocket_message"),
         ];
 
         for (framing, expected) in cases {
