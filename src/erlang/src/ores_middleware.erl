@@ -40,7 +40,7 @@ default_config(ServiceName) when is_binary(ServiceName), byte_size(ServiceName) 
         settings => #{
             request_id_header => <<"x-request-id">>, trace_header => <<"traceparent">>, timeout_ms => 5000,
             max_body_bytes => 2 * 1024 * 1024, context_registry_max_entries => 10000, context_registry_ttl_ms => 30000,
-            rate_limit => #{enabled => true, capacity => 100, refill_per_second => 20.0, key_by => [tenant, user, ip, route]},
+            rate_limit => #{enabled => true, capacity => 5, refill_per_second => 5.0, key_by => [ip]},
             compression => #{enabled => true, minimum_bytes => 1024, algorithms => [<<"gzip">>]},
             tls => #{mode => trusted_proxy, require_https => true, strict_forwarded_headers => true, trusted_proxy_cidrs => [<<"127.0.0.1/32">>, <<"::1/128">>]},
             security_headers => #{enabled => true, hsts_max_age_seconds => 31536000, content_security_policy => <<"default-src 'self'; frame-ancestors 'none'">>, frame_options => <<"DENY">>},
@@ -191,7 +191,7 @@ prepare_auth(Config, Hooks, Request, Context0, Headers) ->
 prepare_rate(Config, Hooks, Request, Context) ->
     Settings = maps:get(settings, Config),
     Policy = maps:get(rate_limit, Settings),
-    Key = iolist_to_binary(lists:join(<<":">>, [value(maps:get(tenant_id, Context)), value(maps:get(user_id, Context)), value(maps:get(remote_ip, Request, undefined)), maps:get(path, Request)])),
+    Key = value(maps:get(remote_ip, Request, undefined)),
     case maps:get(enabled, Policy) andalso not (maps:get(rate_limit, Hooks))(Key, maps:get(capacity, Policy), maps:get(refill_per_second, Policy)) of
         true -> {error, problem(429, <<"rate_limited">>, <<"rate limit exceeded">>)};
         false -> prepare_fault(Config, Hooks, Request, Context)
