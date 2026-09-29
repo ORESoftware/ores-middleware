@@ -293,6 +293,8 @@ fn sanitize_safe_response_header(name: &str, value: &str) -> Option<(String, Str
     if !matches!(
         name.as_str(),
         "retry-after"
+            | "ratelimit"
+            | "ratelimit-policy"
             | "ratelimit-limit"
             | "ratelimit-remaining"
             | "ratelimit-reset"
