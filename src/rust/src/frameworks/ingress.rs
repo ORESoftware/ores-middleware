@@ -430,6 +430,8 @@ pub fn safe_problem_headers(
             let admitted = matches!(
                 normalized.as_str(),
                 "retry-after"
+                    | "ratelimit"
+                    | "ratelimit-policy"
                     | "ratelimit-limit"
                     | "ratelimit-remaining"
                     | "ratelimit-reset"
