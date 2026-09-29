@@ -606,8 +606,16 @@ pub(crate) fn rate_limit_headers(
 }
 
 fn structured_field_string(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\"");
-    format!("\"{escaped}\"")
+    let mut escaped = String::with_capacity(value.len().saturating_add(2));
+    escaped.push(char::from(34));
+    for character in value.chars() {
+        if character == char::from(92) || character == char::from(34) {
+            escaped.push(char::from(92));
+        }
+        escaped.push(character);
+    }
+    escaped.push(char::from(34));
+    escaped
 }
 
 const fn seconds_ceil(milliseconds: u64) -> u64 {
