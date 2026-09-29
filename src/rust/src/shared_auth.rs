@@ -817,7 +817,9 @@ mod tests {
             method: "GET".into(),
             path: "/protected".into(),
             headers: BTreeMap::new(),
-            remote_ip: None,
+            // Auth tests exercise a real HTTP-style admission path. Preserve a concrete
+            // peer IP so the default IP-only limiter has the principal it requires.
+            remote_ip: Some("203.0.113.10".into()),
             content_length: None,
             transport_secure: true,
         }
