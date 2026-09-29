@@ -226,7 +226,7 @@ defmodule OresMiddleware.Plug do
     end
   end
 
-  defp rate_limit(conn, context, stack, trusted_proxy) do
+  defp rate_limit(conn, _context, stack, trusted_proxy) do
     policy = stack.config.settings.rateLimit
 
     key = client_ip(conn, trusted_proxy)
