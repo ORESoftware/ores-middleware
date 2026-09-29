@@ -56,7 +56,7 @@ pub struct ActiveRequest {
     pub context: RequestContext,
     pub started: Instant,
     request: RequestMetadata,
-    rate_limit_decision: Option<RateLimitDecision>,
+    pub(crate) rate_limit_decision: Option<RateLimitDecision>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -553,7 +553,7 @@ fn rate_limit_error(decision: &RateLimitDecision, window_ms: u64) -> MiddlewareE
         .with_headers(rate_limit_headers(decision, window_ms, true))
 }
 
-fn rate_limit_headers(
+pub(crate) fn rate_limit_headers(
     decision: &RateLimitDecision,
     window_ms: u64,
     denied: bool,
