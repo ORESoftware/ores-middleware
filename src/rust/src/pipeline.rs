@@ -56,6 +56,7 @@ pub struct ActiveRequest {
     pub context: RequestContext,
     pub started: Instant,
     request: RequestMetadata,
+    rate_limit_decision: Option<RateLimitDecision>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -251,15 +252,21 @@ impl MiddlewareStack {
                 ));
             }
 
-            if self.config.settings.rate_limit.enabled {
+            let rate_limit_decision = if self.config.settings.rate_limit.enabled {
                 let decision = self.evaluate_rate_limit(&context, &request, &auth).await;
                 self.telemetry
                     .rate_limit_decision(&context, &request, &decision)
                     .await;
                 if !decision.is_allowed() {
-                    return Err(rate_limit_error(&decision));
+                    return Err(rate_limit_error(
+                        &decision,
+                        self.config.settings.rate_limit.window_ms,
+                    ));
                 }
-            }
+                Some(decision)
+            } else {
+                None
+            };
 
             if self.config.settings.fault_injection.enabled
                 && self.config.settings.fault_injection.latency_ms > 0
@@ -272,11 +279,11 @@ impl MiddlewareStack {
 
             self.telemetry.request_started(&context, &request).await;
             self.registry.insert(context.clone()).await;
-            Ok(Instant::now())
+            Ok((Instant::now(), rate_limit_decision))
         })
         .await;
 
-        let started = match started {
+        let (started, rate_limit_decision) = match started {
             Ok(started) => started,
             Err(error) => {
                 self.registry.remove(&context.request_id).await;
@@ -288,6 +295,7 @@ impl MiddlewareStack {
             context,
             started,
             request,
+            rate_limit_decision,
         })
     }
 
@@ -371,6 +379,7 @@ impl MiddlewareStack {
             context,
             started,
             request,
+            rate_limit_decision,
         } = active;
         let response = ResponseMetadata {
             status,
@@ -434,6 +443,13 @@ impl MiddlewareStack {
         std::iter::once(request_id_header)
             .chain(security_headers.into_iter().flatten())
             .chain(csp_header)
+            .chain(rate_limit_decision.into_iter().flat_map(|decision| {
+                rate_limit_headers(
+                    &decision,
+                    self.config.settings.rate_limit.window_ms,
+                    false,
+                )
+            }))
             .collect()
     }
 }
@@ -519,7 +535,7 @@ fn decision_for_failure(
     }
 }
 
-fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
+fn rate_limit_error(decision: &RateLimitDecision, window_ms: u64) -> MiddlewareError {
     let degraded = matches!(decision.kind, RateLimitDecisionKind::DegradedDenied);
     let status = if degraded { 503 } else { 429 };
     let code = if degraded {
@@ -533,18 +549,48 @@ fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
         "rate limit exceeded"
     };
 
+    MiddlewareError::new(status, code, message)
+        .with_headers(rate_limit_headers(decision, window_ms, true))
+}
+
+fn rate_limit_headers(
+    decision: &RateLimitDecision,
+    window_ms: u64,
+    denied: bool,
+) -> BTreeMap<String, String> {
+    let window_seconds = seconds_ceil(window_ms).max(1);
+    let policy_id = structured_field_string(&decision.policy_id);
+    let policy = format!(
+        "{policy_id};q={};w={window_seconds}",
+        decision.limit
+    );
+    let service_limit = match decision.reset_after_ms {
+        Some(reset_after_ms) => format!(
+            "{policy_id};r={};t={}",
+            decision.remaining,
+            seconds_ceil(reset_after_ms)
+        ),
+        None => format!("{policy_id};r={}", decision.remaining),
+    };
     let reset_header = decision
         .reset_after_ms
         .map(|reset_after_ms| ("ratelimit-reset", seconds_ceil(reset_after_ms).to_string()));
-    let retry_after_ms = decision.retry_after_ms.unwrap_or(1_000);
-    let headers: BTreeMap<String, String> = [
+
+    [
+        ("ratelimit-policy", policy),
+        ("ratelimit", service_limit),
         ("ratelimit-limit", decision.limit.to_string()),
         ("ratelimit-remaining", decision.remaining.to_string()),
     ]
     .into_iter()
     .chain(reset_header)
+    .chain(denied.then(|| {
+        (
+            "retry-after",
+            seconds_ceil(decision.retry_after_ms.unwrap_or(1_000)).to_string(),
+        )
+    }))
     .chain([
-        ("retry-after", seconds_ceil(retry_after_ms).to_string()),
         ("x-ores-rate-limit-policy", decision.policy_id.clone()),
         (
             "x-ores-rate-limit-layer",
@@ -556,9 +602,12 @@ fn rate_limit_error(decision: &RateLimitDecision) -> MiddlewareError {
         ),
     ])
     .map(|(name, value)| (name.to_owned(), value))
-    .collect();
+    .collect()
+}
 
-    MiddlewareError::new(status, code, message).with_headers(headers)
+fn structured_field_string(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\"");
+    format!("\"{escaped}\"")
 }
 
 const fn seconds_ceil(milliseconds: u64) -> u64 {
