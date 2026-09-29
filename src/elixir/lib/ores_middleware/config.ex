@@ -26,9 +26,9 @@ defmodule OresMiddleware.Config do
         contextRegistryTtlMs: 30_000,
         rateLimit: %{
           enabled: true,
-          capacity: 100,
-          refillPerSecond: 20.0,
-          keyBy: [:tenant, :user, :ip, :route]
+          capacity: 5,
+          refillPerSecond: 5.0,
+          keyBy: [:ip]
         },
         compression: %{enabled: true, minimumBytes: 1_024, algorithms: ["gzip"]},
         tls: %{
