@@ -10,6 +10,8 @@ use crate::{
 };
 
 const MAX_LOCAL_RATE_LIMIT_ENTRIES: usize = 10_000;
+const DEFAULT_IP_RATE_LIMIT_CAPACITY: u32 = 5;
+const DEFAULT_IP_RATE_LIMIT_REFILL_PER_SECOND: f64 = 5.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -531,15 +533,12 @@ pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
             context_registry_ttl_ms: 30_000,
             rate_limit: RateLimitPolicy {
                 enabled: true,
-                capacity: 100,
-                refill_per_second: 20.0,
-                key_by: vec![
-                    RateLimitSignal::Tenant,
-                    RateLimitSignal::User,
-                    RateLimitSignal::Ip,
-                    RateLimitSignal::Route,
-                ],
-                policy_id: "application-default".into(),
+                // Secure baseline abuse guard: one shared bucket per effective client IP.
+                // Route/user/tenant limits are explicit overlays, not ways to multiply this allowance.
+                capacity: DEFAULT_IP_RATE_LIMIT_CAPACITY,
+                refill_per_second: DEFAULT_IP_RATE_LIMIT_REFILL_PER_SECOND,
+                key_by: vec![RateLimitSignal::Ip],
+                policy_id: "ip-default".into(),
                 algorithm: RateLimitAlgorithm::TokenBucket,
                 layer: RateLimitLayer::Application,
                 failure_mode: RateLimitFailureMode::LocalOnly,
@@ -617,6 +616,23 @@ pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_rate_limit_is_five_requests_per_second_per_ip() {
+        let config = default_config("test-service");
+        let policy = &config.settings.rate_limit;
+
+        assert!(policy.enabled);
+        assert_eq!(policy.capacity, DEFAULT_IP_RATE_LIMIT_CAPACITY);
+        assert_eq!(
+            policy.refill_per_second,
+            DEFAULT_IP_RATE_LIMIT_REFILL_PER_SECOND
+        );
+        assert_eq!(policy.key_by, vec![RateLimitSignal::Ip]);
+        assert_eq!(policy.policy_id, "ip-default");
+        assert_eq!(policy.window_ms, 1_000);
+        assert_eq!(policy.failure_mode, RateLimitFailureMode::LocalOnly);
+    }
 
     #[test]
     fn production_requires_stable_hmac_key_derivation() {
