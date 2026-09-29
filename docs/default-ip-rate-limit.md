@@ -26,19 +26,33 @@ With strict forwarded-header handling enabled, forwarded identity from an untrus
 
 ## Backpressure contract
 
-Rate limiting is admission control, not an internal request queue. When the bucket is exhausted, middleware rejects early with HTTP `429` and returns the existing backpressure metadata:
+Rate limiting is admission control, not an internal request queue. Admitted
+responses expose the current budget so clients can queue and pace work before
+they reach a rejection:
 
-- `Retry-After`
-- `RateLimit-Limit`
-- `RateLimit-Remaining`
-- `RateLimit-Reset` when the limiter supplies a reset time
-- `X-ORES-Rate-Limit-Policy`
-- `X-ORES-Rate-Limit-Layer`
-- `X-ORES-Rate-Limit-Decision`
+- `RateLimit-Policy: "ip-default";q=5;w=1`
+- `RateLimit: "ip-default";r=<remaining>;t=<effective-window-seconds>`
+- compatibility `RateLimit-Limit`, `RateLimit-Remaining`, and
+  `RateLimit-Reset` fields
 
-If the authoritative limiter is unavailable and policy requires a denial rather than a normal exhaustion response, the middleware uses the existing degraded `503` path. `local-only` retains a bounded in-process fallback so a remote rate-limit backend outage does not silently remove admission control.
+When the bucket is exhausted, middleware rejects early with HTTP `429` and
+adds `Retry-After`. If both `Retry-After` and `RateLimit` are present,
+`Retry-After` is the hard stop signal. ORES policy/layer/decision headers stay
+available for diagnostics.
 
-Clients should use `Retry-After` and the rate-limit metadata to slow producers before retrying. Servers should not sleep request tasks merely to wait for quota; rejecting early preserves memory, worker slots, queue depth, and downstream capacity.
+If the authoritative limiter is unavailable and policy requires a denial rather
+than normal exhaustion, middleware uses the existing degraded `503` path.
+`local-only` retains a bounded in-process fallback so a remote rate-limit
+backend outage does not silently remove admission control.
+
+Clients should consume the quota hints pessimistically: stop dispatch when
+remaining quota reaches zero, begin pacing when it becomes low, cap unreasonable
+server-provided delays, and add small resume jitter to avoid a thundering herd.
+Servers should not sleep request tasks merely to wait for quota; rejecting early
+preserves memory, worker slots, queue depth, and downstream capacity.
+
+For cross-origin browser clients, the application's CORS layer must expose the
+RateLimit and Retry-After response headers.
 
 ## Layering
 
