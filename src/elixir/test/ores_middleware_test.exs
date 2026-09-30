@@ -111,9 +111,10 @@ defmodule OresMiddlewareTest do
         rate_limit: fn _key, _capacity, _refill -> false end
       })
 
+    conn = conn(:get, "/v1")
+
     conn =
-      conn(:get, "/v1")
-      |> OresMiddleware.Plug.wrap(stack, fn conn ->
+      OresMiddleware.Plug.wrap(stack, conn, fn conn ->
         Plug.Conn.resp(conn, 200, "handler must not run")
       end)
 
