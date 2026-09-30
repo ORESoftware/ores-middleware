@@ -66,7 +66,10 @@ defmodule OresMiddlewareTest do
       |> Map.put(:remote_ip, {198, 51, 100, 10})
       |> put_req_header("x-forwarded-for", "203.0.113.9")
 
-    conn = OresMiddleware.Plug.wrap(stack, conn, fn conn -> Plug.Conn.resp(conn, 200, "ok") end)
+    conn =
+      OresMiddleware.Plug.wrap(stack, conn, fn conn ->
+        Plug.Conn.resp(conn, 200, "ok")
+      end)
 
     assert conn.status == 400
   end
@@ -90,7 +93,10 @@ defmodule OresMiddlewareTest do
       |> put_req_header("cf-connecting-ip", "not-an-ip")
       |> put_req_header("x-forwarded-for", "203.0.113.55, 10.0.0.4")
 
-    conn = OresMiddleware.Plug.wrap(stack, conn, fn conn -> Plug.Conn.resp(conn, 200, "ok") end)
+    conn =
+      OresMiddleware.Plug.wrap(stack, conn, fn conn ->
+        Plug.Conn.resp(conn, 200, "ok")
+      end)
 
     assert conn.status == 200
     assert_receive {:rate_key, "203.0.113.55", 5, 5.0}
