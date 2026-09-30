@@ -245,13 +245,13 @@ pub fn evaluate_quota_bundle(
     purge_expired_receipts(now_ms, state);
 
     if let Some(receipt) = state.replay.get(&request.admission_id) {
-        state.last_now_ms = Some(now_ms);
         if receipt.quota_epoch == request.quota_epoch
             && receipt.operation_digest == request.operation_digest
             && receipt.cost == request.cost
         {
             let mut decision = receipt.decision.clone();
             decision.kind = QuotaAdmissionKind::ReplayedAllowed;
+            state.last_now_ms = Some(now_ms);
             return Ok(decision);
         }
 
@@ -268,7 +268,6 @@ pub fn evaluate_quota_bundle(
     }
 
     if request.quota_epoch != policy.quota_epoch {
-        state.last_now_ms = Some(now_ms);
         let reason = if request.quota_epoch < policy.quota_epoch {
             "stale_quota_epoch"
         } else {
@@ -294,7 +293,6 @@ pub fn evaluate_quota_bundle(
         .iter()
         .find(|window| request.cost > window.limit)
     {
-        state.last_now_ms = Some(now_ms);
         return Ok(QuotaAdmissionDecision {
             kind: QuotaAdmissionKind::Denied,
             bundle_id: policy.bundle_id.clone(),
@@ -306,8 +304,6 @@ pub fn evaluate_quota_bundle(
             reason_code: Some("quota_cost_exceeds_policy_limit".into()),
         });
     }
-
-    bind_state_scope(policy, request, state);
 
     for window in &policy.windows {
         let window_started_at_ms = aligned_window_start(now_ms, window.window_ms);
@@ -342,7 +338,6 @@ pub fn evaluate_quota_bundle(
     }
 
     if let Some((policy_id, retry_after_ms)) = exhausted {
-        state.last_now_ms = Some(now_ms);
         return Ok(QuotaAdmissionDecision {
             kind: QuotaAdmissionKind::Denied,
             bundle_id: policy.bundle_id.clone(),
@@ -381,6 +376,8 @@ pub fn evaluate_quota_bundle(
             "quota replay receipt expiration overflowed",
         )
     })?;
+
+    bind_state_scope(policy, request, state);
 
     let mut next_windows = BTreeMap::new();
     let window_decisions = current
@@ -770,6 +767,7 @@ mod tests {
         assert!(state.principal_digest.is_none());
         assert!(state.bundle_id.is_none());
         assert!(state.policy_fingerprint.is_none());
+        assert!(state.last_now_ms.is_none());
         assert!(state.windows.is_empty());
 
         let mut legitimate = request("operation-0009", 9, 1);
@@ -1026,6 +1024,10 @@ mod tests {
         )
         .expect_err("replay expiration overflow must fail closed");
         assert_eq!(error.code, "quota_time_overflow");
+        assert!(state.principal_digest.is_none());
+        assert!(state.bundle_id.is_none());
+        assert!(state.policy_fingerprint.is_none());
+        assert!(state.last_now_ms.is_none());
         assert!(state.windows.is_empty());
     }
 
