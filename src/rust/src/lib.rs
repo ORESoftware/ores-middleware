@@ -40,6 +40,7 @@ pub mod runtime_manifest;
 pub mod runtime_manifest_evidence;
 pub mod security;
 pub mod shared_auth;
+pub mod shared_auth_service;
 pub mod shutdown;
 pub mod stage;
 pub mod validation;
@@ -181,6 +182,9 @@ pub use shared_auth::{
     SharedAuthRuntimeTopology, SharedAuthServerRole, SharedAuthVerifiedPrincipal,
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
     SUPABASE_AUTH_DATABASE_URL_ENV,
+};
+pub use shared_auth_service::{
+    SharedAuthServiceReadyStack, SharedAuthServiceStackError, SharedAuthServiceTopology,
 };
 pub use shutdown::{
     DrainGuard, DrainOutcome, ShutdownCoordinator, ShutdownPhase, ShutdownRejection,
