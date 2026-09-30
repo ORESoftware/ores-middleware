@@ -99,7 +99,11 @@ export function normalizeContentType(raw: string | null): PayloadRepresentation 
 }
 
 function isJsonObject(value: unknown): value is Record<string, JsonValue> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value) || ArrayBuffer.isView(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function copySupportedCarriers(source: Request, target: Request): Request {
