@@ -7,21 +7,22 @@ use std::{
 };
 
 use axum07::{
+    Json, Router,
     body::Body,
     extract::{ConnectInfo, Request, State},
     http::{HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    Json, Router,
 };
 use futures_util::FutureExt;
 use serde_json::json;
 use tower_http07::{compression::CompressionLayer, limit::RequestBodyLimitLayer};
 
 use crate::{
+    BootstrapError, MiddlewareError, MiddlewareStack,
     context::run_with_context,
     integrations::{RequestMetadata, TransportSecurity},
-    stack_from_env, BootstrapError, MiddlewareError, MiddlewareStack,
+    stack_from_env,
 };
 
 /// Installs the shared lifecycle around an Axum 0.7 Router using validated
@@ -65,16 +66,16 @@ async fn dispatch(
         AssertUnwindSafe(next.run(request)).catch_unwind().await
     });
     let mut response = match tokio::time::timeout(timeout, future).await {
-        Err(_) => problem(MiddlewareError {
-            status: 504,
-            code: "deadline_exceeded",
-            message: "request deadline exceeded".into(),
-        }),
-        Ok(Err(_)) => problem(MiddlewareError {
-            status: 500,
-            code: "internal_error",
-            message: "request handler failed".into(),
-        }),
+        Err(_) => problem(MiddlewareError::new(
+            504,
+            "deadline_exceeded",
+            "request deadline exceeded",
+        )),
+        Ok(Err(_)) => problem(MiddlewareError::new(
+            500,
+            "internal_error",
+            "request handler failed",
+        )),
         Ok(Ok(response)) => response,
     };
     let headers = stack
@@ -127,17 +128,30 @@ fn request_metadata(request: &Request) -> RequestMetadata {
 }
 
 fn problem(error: MiddlewareError) -> Response {
-    let status = StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    (
+    let MiddlewareError {
+        status,
+        code,
+        message,
+        headers,
+    } = error;
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let mut response = (
         status,
         Json(json!({
-            "type": format!("urn:ores:middleware:{}", error.code),
-            "title": error.code,
+            "type": format!("urn:ores:middleware:{code}"),
+            "title": code,
             "status": status.as_u16(),
-            "detail": error.message
+            "detail": message
         })),
     )
-        .into_response()
+        .into_response();
+
+    for (name, value) in headers {
+        if let (Ok(name), Ok(value)) = (HeaderName::try_from(name), HeaderValue::try_from(value)) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    response
 }
 
 pub type AxumBody = Body;
