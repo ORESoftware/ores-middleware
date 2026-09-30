@@ -288,7 +288,7 @@ pub fn evaluate_quota_bundle(
     if let Some(window) = policy
         .windows
         .iter()
-        .find(|window| request.cost > window.capacity)
+        .find(|window| u64::from(request.cost) > window.capacity)
     {
         return Ok(QuotaAdmissionDecision {
             kind: QuotaAdmissionKind::Denied,
@@ -303,19 +303,24 @@ pub fn evaluate_quota_bundle(
     }
 
     for window in &policy.policies {
-        let window_started_at_ms = aligned_window_start(now_ms, window.window_ms);
+        let window_ms = window.window_ms.ok_or_else(|| {
+            QuotaBundleError::new(
+                "quota_policy_window_missing",
+                "validated fixed-window quota policy is missing windowMs",
+            )
+        })?;
+        let window_started_at_ms = aligned_window_start(now_ms, window_ms);
         let used = state
             .windows
             .get(&window.policy_id)
             .filter(|value| value.window_started_at_ms == window_started_at_ms)
             .map_or(0, |value| value.used);
         let remaining = window.capacity.saturating_sub(used);
-        let reset_after_ms = window
-            .window_ms
+        let reset_after_ms = window_ms
             .saturating_sub(now_ms.saturating_sub(window_started_at_ms))
             .max(1);
 
-        if request.cost > remaining
+        if u64::from(request.cost) > remaining
             && exhausted
                 .as_ref()
                 .is_none_or(|(_, current_retry_ms)| reset_after_ms > *current_retry_ms)
@@ -380,7 +385,7 @@ pub fn evaluate_quota_bundle(
     let window_decisions = current
         .into_iter()
         .map(|(window, mut window_state, _, reset_after_ms)| {
-            window_state.used = window_state.used.saturating_add(request.cost);
+            window_state.used = window_state.used.saturating_add(u64::from(request.cost));
             let remaining = window.capacity.saturating_sub(window_state.used);
             next_windows.insert(window.policy_id.clone(), window_state);
             QuotaWindowDecision {
@@ -432,36 +437,46 @@ fn validate_policy(policy: &QuotaBundlePolicy) -> Result<(), QuotaBundleError> {
     if policy.policies.is_empty() || policy.policies.len() > MAX_QUOTA_WINDOWS {
         return Err(QuotaBundleError::new(
             "quota_window_count_invalid",
-            format!(
-                "quota bundles require 1..={MAX_QUOTA_WINDOWS} windows"
-            ),
+            format!("quota bundles require 1..={MAX_QUOTA_WINDOWS} policies"),
         ));
     }
 
     let mut seen = BTreeMap::<&str, ()>::new();
     for window in &policy.policies {
-        if !valid_identifier(&window.policy_id) {
+        let violations = window.validate();
+        if !violations.is_empty() {
+            let codes = violations
+                .iter()
+                .map(|violation| violation.code.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
             return Err(QuotaBundleError::new(
-                "quota_policy_id_invalid",
-                "quota policy IDs must be 1..=128 ASCII letters, digits, dot, underscore, or hyphen",
+                "quota_policy_invalid",
+                format!("rate-limit V2 policy {} is invalid: {codes}", window.policy_id),
+            ));
+        }
+        if window.algorithm != RateLimitAlgorithmV2::FixedWindow {
+            return Err(QuotaBundleError::new(
+                "quota_policy_algorithm_unsupported",
+                "atomic quota bundle reference coordinator currently requires fixed-window V2 policies",
+            ));
+        }
+        if window.consistency != RateLimitConsistency::Strict {
+            return Err(QuotaBundleError::new(
+                "quota_policy_consistency_invalid",
+                "atomic quota bundle policies must use strict consistency",
+            ));
+        }
+        if window.enforcement_mode != RateLimitEnforcementMode::Enforce {
+            return Err(QuotaBundleError::new(
+                "quota_policy_enforcement_invalid",
+                "atomic quota bundle coordinator requires enforce-mode policies",
             ));
         }
         if seen.insert(&window.policy_id, ()).is_some() {
             return Err(QuotaBundleError::new(
                 "quota_policy_id_duplicate",
                 "quota policy IDs must be unique within a bundle",
-            ));
-        }
-        if window.capacity == 0 || window.capacity > MAX_QUOTA_LIMIT {
-            return Err(QuotaBundleError::new(
-                "quota_limit_invalid",
-                format!("quota limits must be 1..={MAX_QUOTA_LIMIT}"),
-            ));
-        }
-        if window.window_ms == 0 || window.window_ms > MAX_QUOTA_WINDOW_MS {
-            return Err(QuotaBundleError::new(
-                "quota_window_invalid",
-                format!("quota windows must be 1..={MAX_QUOTA_WINDOW_MS} ms"),
             ));
         }
     }
@@ -564,12 +579,22 @@ fn bind_state_scope(
 
 fn policy_fingerprint(policy: &QuotaBundlePolicy) -> String {
     policy
-        .windows
+        .policies
         .iter()
         .map(|window| {
             format!(
-                "{}:{}:{}",
-                window.policy_id, window.capacity, window.window_ms
+                "{}:{:?}:{:?}:{:?}:{:?}:{:?}:{}:{:?}:{}:{}:{}",
+                window.policy_id,
+                window.operation_class,
+                window.algorithm,
+                window.consistency,
+                window.enforcement_mode,
+                window.layer,
+                window.capacity,
+                window.window_ms,
+                window.maximum_overshoot,
+                window.coordinator_required,
+                window.key_version
             )
         })
         .collect::<Vec<_>>()
