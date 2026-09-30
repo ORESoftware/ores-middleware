@@ -22,9 +22,11 @@ The token-bucket baseline permits an initial burst of up to five requests and th
 
 ## Effective client IP
 
-Forwarded client identity is accepted only when the immediate peer is in the configured trusted-proxy CIDR set. For trusted peers the middleware may use `CF-Connecting-IP` or the first `X-Forwarded-For` address after validating it as an IP address. Otherwise the socket peer address is authoritative.
+Forwarded client identity is accepted only when the immediate peer is in the configured trusted-proxy CIDR set. When `X-Forwarded-For` is present, middleware parses the entire chain, appends the transport-authenticated socket peer, and walks **right-to-left**. Known trusted proxy hops are skipped and the nearest untrusted hop becomes the effective client identity. Attacker-prepended values on the left therefore cannot become authoritative merely because the immediate proxy is trusted.
 
-Trusted-proxy membership is necessary but not sufficient: the proxy must also **sanitize or overwrite** inbound forwarding headers before appending its own identity. Do not configure an intermediary as trusted if it preserves attacker-supplied leading `X-Forwarded-For` values. Invalid forwarded IP syntax is ignored and resolution falls back to the socket peer.
+If any `X-Forwarded-For` element is malformed, resolution fails safely to the socket peer rather than partially trusting the chain. `CF-Connecting-IP` (and the compatibility `X-Real-IP` path where supported) is considered only when `X-Forwarded-For` is absent. Otherwise the socket peer address is authoritative.
+
+Trusted-proxy membership remains necessary: an intermediary should still sanitize/overwrite forwarding metadata according to its deployment contract. The middleware chain walk is defense in depth, not permission to trust arbitrary proxies.
 
 With strict forwarded-header handling enabled, forwarded identity from an untrusted peer is rejected instead of being allowed to spoof or fragment rate-limit buckets.
 
