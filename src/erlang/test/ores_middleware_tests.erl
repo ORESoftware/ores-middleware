@@ -82,7 +82,6 @@ trusted_proxy_rate_key_uses_validated_forwarded_client_test() ->
     Tls0 = maps:get(tls, Settings0),
     Config = Config0#{settings => Settings0#{tls => Tls0#{require_https => false}}},
     Hooks = #{
-        trusted_proxy => fun(_Request, _Cidrs) -> true end,
         rate_limit => fun(Key, Capacity, Refill) ->
             Parent ! {rate_key, Key, Capacity, Refill},
             true
