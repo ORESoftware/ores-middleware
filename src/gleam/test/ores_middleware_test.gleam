@@ -61,3 +61,42 @@ pub fn default_rate_limit_enforces_five_request_burst_per_ip_test() {
   assert status5 == 200
   assert status6 == 429
 }
+
+pub fn rate_limit_denial_exposes_backpressure_metadata_test() {
+  let base = ores_middleware.default_config("rate-limit-test")
+  let config =
+    ores_middleware.Config(
+      ..base,
+      require_https: False,
+      rate_limit_capacity: 1,
+      rate_limit_refill_per_second: 0.000001,
+    )
+  let assert Ok(middleware) =
+    ores_middleware.create_middleware(config, ores_middleware.default_hooks())
+  let request =
+    ores_middleware.Request(
+      "GET",
+      "/v1/items",
+      "http",
+      dict.new(),
+      0,
+      "198.51.100.251",
+    )
+  let next = fn(_) { ores_middleware.Response(200, dict.new(), "ok") }
+
+  let ores_middleware.Response(first_status, _, _) = middleware(request, next)
+  let ores_middleware.Response(status, headers, _) = middleware(request, next)
+
+  assert first_status == 200
+  assert status == 429
+  assert dict.get(headers, "retry-after") == Ok("1")
+  assert dict.get(headers, "ratelimit-policy") == Ok("\"ip-default\";q=1;w=1")
+  assert dict.get(headers, "ratelimit") == Ok("\"ip-default\";r=0;t=1")
+  assert dict.get(headers, "ratelimit-limit") == Ok("1")
+  assert dict.get(headers, "ratelimit-remaining") == Ok("0")
+  assert dict.get(headers, "ratelimit-reset") == Ok("1")
+  assert dict.get(headers, "x-ores-rate-limit-policy") == Ok("ip-default")
+  assert dict.get(headers, "x-ores-rate-limit-layer") == Ok("application")
+  assert dict.get(headers, "x-ores-rate-limit-decision") == Ok("denied")
+}
+
