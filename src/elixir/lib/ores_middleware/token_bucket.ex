@@ -15,6 +15,7 @@ defmodule OresMiddleware.TokenBucket do
   @impl true
   def handle_call({:allow, key, capacity, refill}, _from, state) do
     now = System.monotonic_time(:microsecond)
+    state = normalize_state(state)
     {state, bucket} = ensure_bucket(state, key, capacity, now)
     %{tokens: tokens, updated: updated} = bucket
 
@@ -26,6 +27,17 @@ defmodule OresMiddleware.TokenBucket do
   end
 
   defp initial_state, do: %{buckets: %{}, order: :queue.new()}
+
+  defp normalize_state(%{buckets: buckets, order: order} = state)
+       when is_map(buckets) and is_tuple(order),
+       do: state
+
+  defp normalize_state(legacy) when is_map(legacy) do
+    # One-time hot-upgrade path from the previous unbounded bucket map.
+    keys = legacy |> Map.keys() |> Enum.take(@max_entries)
+    %{buckets: Map.take(legacy, keys), order: :queue.from_list(keys)}
+  end
+
 
   defp ensure_bucket(state, key, capacity, now) do
     case Map.fetch(state.buckets, key) do
