@@ -101,14 +101,14 @@ func TestRateLimitDenialExposesBackpressureMetadata(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, response.Body.String())
 	}
 	expected := map[string]string{
-		"Retry-After": "1",
-		"RateLimit-Policy": "\"ip-default\";q=5;w=1",
-		"RateLimit": "\"ip-default\";r=0;t=1",
-		"RateLimit-Limit": "5",
-		"RateLimit-Remaining": "0",
-		"RateLimit-Reset": "1",
-		"X-Ores-Rate-Limit-Policy": "ip-default",
-		"X-Ores-Rate-Limit-Layer": "application",
+		"Retry-After":                "1",
+		"RateLimit-Policy":           "\"ip-default\";q=5;w=1",
+		"RateLimit":                  "\"ip-default\";r=0;t=1",
+		"RateLimit-Limit":            "5",
+		"RateLimit-Remaining":        "0",
+		"RateLimit-Reset":            "1",
+		"X-Ores-Rate-Limit-Policy":   "ip-default",
+		"X-Ores-Rate-Limit-Layer":    "application",
 		"X-Ores-Rate-Limit-Decision": "denied",
 	}
 	for name, want := range expected {
