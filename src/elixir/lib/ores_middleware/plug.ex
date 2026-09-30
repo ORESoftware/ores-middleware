@@ -151,10 +151,16 @@ defmodule OresMiddleware.Plug do
     trusted = stack.hooks.trusted_proxy?.(conn, tls.trustedProxyCidrs)
     forwarded = first_req_header(conn, "x-forwarded-proto")
 
+    has_forwarded_identity =
+      Enum.any?(["cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded"], fn name ->
+        not is_nil(first_req_header(conn, name))
+      end)
+
     cond do
-      tls.strictForwardedHeaders and not is_nil(forwarded) and not trusted ->
+      tls.strictForwardedHeaders and (not is_nil(forwarded) or has_forwarded_identity) and
+          not trusted ->
         {:error, 400, "untrusted_forwarded_header",
-         "forwarded transport headers came from an untrusted peer"}
+         "forwarded transport or client headers came from an untrusted peer"}
 
       tls.requireHttps and conn.scheme != :https and not (trusted and forwarded == "https") ->
         {:error, 426, "https_required", "HTTPS is required"}
@@ -438,15 +444,37 @@ defmodule OresMiddleware.Plug do
 
   defp random_id, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
-  defp client_ip(conn, true),
-    do:
-      first_req_header(conn, "x-forwarded-for")
-      |> to_string()
-      |> String.split(",")
-      |> List.first()
-      |> String.trim()
+  defp client_ip(conn, true) do
+    forwarded_for =
+      case first_req_header(conn, "x-forwarded-for") do
+        nil -> nil
+        value -> value |> String.split(",", parts: 2) |> List.first()
+      end
+
+    [
+      first_req_header(conn, "cf-connecting-ip"),
+      forwarded_for,
+      first_req_header(conn, "x-real-ip")
+    ]
+    |> Enum.find_value(&normalize_ip/1)
+    |> case do
+      nil -> client_ip(conn, false)
+      value -> value
+    end
+  end
 
   defp client_ip(conn, false), do: conn.remote_ip |> :inet.ntoa() |> to_string()
+
+  defp normalize_ip(value) when is_binary(value) do
+    value = String.trim(value)
+
+    case :inet.parse_address(String.to_charlist(value)) do
+      {:ok, address} -> address |> :inet.ntoa() |> to_string()
+      {:error, _} -> nil
+    end
+  end
+
+  defp normalize_ip(_), do: nil
   defp maybe_put_header(conn, _name, value) when value in [nil, ""], do: conn
   defp maybe_put_header(conn, name, value), do: put_resp_header(conn, name, value)
 end
