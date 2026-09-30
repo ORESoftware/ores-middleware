@@ -407,7 +407,7 @@ fn handle_policy(
           config.rate_limit_refill_per_second,
         )
       {
-        True -> problem(429, "rate_limited", "rate limit exceeded")
+        True -> rate_limit_problem(config.rate_limit_capacity)
         False -> authenticate(config, hooks, request, next, context)
       }
     }
@@ -577,6 +577,27 @@ fn attach_headers(
     False -> headers
   }
   Response(response.status, headers, response.body)
+}
+
+fn rate_limit_problem(capacity: Int) -> Response {
+  let policy = "\"ip-default\""
+  let Response(status, headers, body) =
+    problem(429, "rate_limited", "rate limit exceeded")
+  let headers =
+    headers
+    |> dict.insert(
+      "ratelimit-policy",
+      policy <> ";q=" <> int_to_string(capacity) <> ";w=1",
+    )
+    |> dict.insert("ratelimit", policy <> ";r=0;t=1")
+    |> dict.insert("ratelimit-limit", int_to_string(capacity))
+    |> dict.insert("ratelimit-remaining", "0")
+    |> dict.insert("ratelimit-reset", "1")
+    |> dict.insert("retry-after", "1")
+    |> dict.insert("x-ores-rate-limit-policy", "ip-default")
+    |> dict.insert("x-ores-rate-limit-layer", "application")
+    |> dict.insert("x-ores-rate-limit-decision", "denied")
+  Response(status, headers, body)
 }
 
 fn problem(status: Int, code: String, detail: String) -> Response {
