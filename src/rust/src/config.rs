@@ -404,6 +404,17 @@ const RATE_LIMIT_RULES: &[Rule] = &[
         )
     },
     |config| {
+        let policy_id = &config.settings.rate_limit.policy_id;
+        issue_if(
+            !policy_id.trim().is_empty() && !valid_rate_limit_identifier(policy_id),
+            "/settings/rateLimit/policyId",
+            "invalid_identifier",
+            || {
+                "rate-limit policy IDs must be 1..=128 ASCII letters, digits, dot, underscore, or hyphen".into()
+            },
+        )
+    },
+    |config| {
         issue_if(
             config.settings.rate_limit.key_by.is_empty(),
             "/settings/rateLimit/keyBy",
@@ -505,6 +516,13 @@ const RATE_LIMIT_RULES: &[Rule] = &[
     },
 ];
 
+fn valid_rate_limit_identifier(value: &str) -> bool {
+    return !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+}
 fn validate_rate_limit_policy(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     if !config.settings.rate_limit.enabled {
         return Vec::new();
@@ -691,6 +709,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rate_limit_policy_id_rejects_header_hostile_values() {
+        for invalid in [
+            "contains space",
+            "line\nbreak",
+            "unicode-π",
+            &"x".repeat(129),
+        ] {
+            let mut config = default_config("test-service");
+            config.settings.rate_limit.policy_id = invalid.to_owned();
+            assert!(
+                validate_rate_limit_policy(&config)
+                    .iter()
+                    .any(|issue| issue.code == "invalid_identifier"),
+                "expected invalid policy id to fail: {invalid:?}"
+            );
+        }
+    }
     #[test]
     fn rate_limit_validation_returns_repeatable_owned_issues() {
         let mut config = default_config("test-service");
