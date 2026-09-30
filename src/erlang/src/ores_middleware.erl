@@ -145,14 +145,27 @@ prepare_transport(Config, Hooks, Request, Headers) ->
     Tls = maps:get(tls, Settings),
     Trusted = (maps:get(trusted_proxy, Hooks))(Request, maps:get(trusted_proxy_cidrs, Tls)),
     Forwarded = maps:get(<<"x-forwarded-proto">>, Headers, undefined),
+    HasForwardedIdentity = lists:any(
+        fun(Name) -> maps:is_key(Name, Headers) end,
+        [<<"cf-connecting-ip">>, <<"x-forwarded-for">>, <<"x-real-ip">>, <<"forwarded">>]
+    ),
     Scheme = maps:get(scheme, Request, <<"http">>),
-    case maps:get(strict_forwarded_headers, Tls) andalso Forwarded =/= undefined andalso not Trusted of
-        true -> {error, problem(400, <<"untrusted_forwarded_header">>, <<"forwarded transport headers came from an untrusted peer">>)};
+    StrictViolation = maps:get(strict_forwarded_headers, Tls)
+        andalso (Forwarded =/= undefined orelse HasForwardedIdentity)
+        andalso not Trusted,
+    case StrictViolation of
+        true -> {error, problem(400, <<"untrusted_forwarded_header">>, <<"forwarded transport or client headers came from an untrusted peer">>)};
         false ->
             EffectiveHttps = Scheme =:= <<"https">> orelse (Trusted andalso Forwarded =:= <<"https">>),
             case maps:get(require_https, Tls) andalso not EffectiveHttps of
                 true -> {error, problem(426, <<"https_required">>, <<"HTTPS is required">>)};
-                false -> prepare_context(Config, Hooks, Request, Headers)
+                false ->
+                    PeerIp = maps:get(remote_ip, Request, undefined),
+                    EffectiveClientIp = case Trusted of
+                        true -> forwarded_client_ip(Headers, PeerIp);
+                        false -> value(PeerIp)
+                    end,
+                    prepare_context(Config, Hooks, Request#{effective_client_ip => EffectiveClientIp}, Headers)
             end
     end.
 
@@ -191,7 +204,7 @@ prepare_auth(Config, Hooks, Request, Context0, Headers) ->
 prepare_rate(Config, Hooks, Request, Context) ->
     Settings = maps:get(settings, Config),
     Policy = maps:get(rate_limit, Settings),
-    Key = value(maps:get(remote_ip, Request, undefined)),
+    Key = value(maps:get(effective_client_ip, Request, maps:get(remote_ip, Request, undefined))),
     case maps:get(enabled, Policy) andalso not (maps:get(rate_limit, Hooks))(Key, maps:get(capacity, Policy), maps:get(refill_per_second, Policy)) of
         true -> {error, problem(429, <<"rate_limited">>, <<"rate limit exceeded">>)};
         false -> prepare_fault(Config, Hooks, Request, Context)
@@ -300,6 +313,37 @@ maybe_compress(Settings, #{headers := RequestHeaders}, #{body := Body, headers :
 maybe_compress(_Settings, _Request, Response) -> Response.
 
 problem(Status, Code, Detail) -> #{status => Status, headers => #{<<"content-type">> => <<"application/problem+json">>}, body => iolist_to_binary(json:encode(#{type => <<"urn:ores:middleware:", Code/binary>>, title => Code, status => Status, detail => Detail}))}.
+
+forwarded_client_ip(Headers, Fallback) ->
+    XForwardedFor = case maps:get(<<"x-forwarded-for">>, Headers, undefined) of
+        Value when is_binary(Value) ->
+            case binary:split(Value, <<",">>) of
+                [First, _Rest] -> First;
+                [Only] -> Only
+            end;
+        _ -> undefined
+    end,
+    Candidates = [
+        maps:get(<<"cf-connecting-ip">>, Headers, undefined),
+        XForwardedFor,
+        maps:get(<<"x-real-ip">>, Headers, undefined)
+    ],
+    first_valid_ip(Candidates, value(Fallback)).
+
+first_valid_ip([], Fallback) -> Fallback;
+first_valid_ip([Candidate | Rest], Fallback) ->
+    case canonical_ip(Candidate) of
+        undefined -> first_valid_ip(Rest, Fallback);
+        Ip -> Ip
+    end.
+
+canonical_ip(Value) when is_binary(Value) ->
+    Trimmed = list_to_binary(string:trim(binary_to_list(Value))),
+    case inet:parse_address(binary_to_list(Trimmed)) of
+        {ok, Address} -> list_to_binary(inet:ntoa(Address));
+        {error, _} -> undefined
+    end;
+canonical_ip(_) -> undefined.
 
 accepts(<<>>, _Supported) -> true;
 accepts(<<"*/*">>, _Supported) -> true;
