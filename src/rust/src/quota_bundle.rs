@@ -882,11 +882,11 @@ mod tests {
 
     #[test]
     fn malformed_cost_and_identifiers_fail_before_debit() {
-        let mut policy = policy(1);
+        let mut bad_policy = policy(1);
         let mut state = QuotaBundleState::default();
-        policy.windows[0].policy_id = "bad policy".into();
+        bad_policy.windows[0].policy_id = "bad policy".into();
         let error = evaluate_quota_bundle(
-            &policy,
+            &bad_policy,
             &request("operation-0070", 1, 1),
             70_000,
             &mut state,
