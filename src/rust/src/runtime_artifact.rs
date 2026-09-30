@@ -226,7 +226,7 @@ mod tests {
             provider,
             path: format!("dist/{id}"),
             semantic_contract_sha256: DIGEST.to_owned(),
-        };
+        }
     }
 
     fn manifest() -> MiddlewarePackageManifest {
@@ -267,7 +267,7 @@ mod tests {
                     MiddlewareProvider::Generic,
                 ),
             ],
-        };
+        }
     }
 
     #[test]
