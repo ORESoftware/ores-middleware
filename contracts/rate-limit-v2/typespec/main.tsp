@@ -393,3 +393,77 @@ model RateLimitPolicyV2 {
   @pattern("^[A-Za-z0-9._-]{1,128}$")
   keyVersion: string;
 }
+
+enum QuotaAdmissionKind {
+  allowed: "allowed",
+  replayedAllowed: "replayed-allowed",
+  denied: "denied",
+}
+
+/**
+ * Atomic composition envelope. Each entry remains a full RateLimitPolicyV2;
+ * the bundle contributes only epoch fencing and all-or-none evaluation.
+ */
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model QuotaBundlePolicy {
+  @pattern("^[A-Za-z0-9._-]{1,128}$")
+  bundleId: string;
+
+  @pattern("^[1-9][0-9]{0,19}$")
+  quotaEpoch: string;
+
+  @minItems(1)
+  @maxItems(16)
+  policies: RateLimitPolicyV2[];
+}
+
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model QuotaWindowDecision {
+  @pattern("^[A-Za-z0-9._-]{1,128}$")
+  policyId: string;
+
+  @minValue(1)
+  @maxValue(1000000000)
+  limit: uint64;
+
+  @minValue(0)
+  @maxValue(1000000000)
+  remaining: uint64;
+
+  @minValue(1)
+  @maxValue(2678400000)
+  resetAfterMs: uint64;
+}
+
+/**
+ * Observable quota result for HTTP/RPC projection.
+ * Trusted principal/operation digests and authoritative request cost inputs
+ * are deliberately absent from the public request contract.
+ */
+@TypeSpec.JsonSchema.extension("additionalProperties", false)
+model QuotaAdmissionDecision {
+  kind: QuotaAdmissionKind;
+
+  @pattern("^[A-Za-z0-9._-]{1,128}$")
+  bundleId: string;
+
+  @pattern("^[1-9][0-9]{0,19}$")
+  quotaEpoch: string;
+
+  @minValue(1)
+  @maxValue(1000000)
+  cost: uint32;
+
+  @maxItems(16)
+  windows: QuotaWindowDecision[];
+
+  @pattern("^[A-Za-z0-9._-]{1,128}$")
+  exhaustedPolicyId?: string;
+
+  @minValue(1)
+  @maxValue(2678400000)
+  retryAfterMs?: uint64;
+
+  @pattern("^[A-Za-z0-9._-]{1,128}$")
+  reasonCode?: string;
+}
