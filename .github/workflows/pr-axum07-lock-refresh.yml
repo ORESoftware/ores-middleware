@@ -1,32 +1,35 @@
-name: PR Axum07 lock refresh
+name: PR Axum07 post-merge cleanup
 
 on:
   push:
     branches:
-      - fix/export-axum07-adapter-20260929
+      - fix/axum07-post-merge-cleanup-20260929
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  generate-lock:
+  repair-and-remove-helper:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          persist-credentials: true
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: 1.95.0
-      - name: Regenerate root lockfile from exact branch manifest graph
-        run: cargo generate-lockfile
-      - name: Verify Axum 0.7 compatibility graph resolves
+      - name: Refresh only lock entries required by the merged Axum 0.7 feature graph
+        run: cargo check --manifest-path src/rust/Cargo.toml --all-features
+      - name: Verify the repaired graph is lock-clean
         run: cargo metadata --locked --format-version 1 --manifest-path src/rust/Cargo.toml >/dev/null
-      - name: Upload regenerated lockfile
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: axum07-lock-${{ github.sha }}
-          path: Cargo.lock
-          if-no-files-found: error
-          retention-days: 1
+      - name: Remove this one-shot repair workflow and commit the lock repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr-axum07-lock-refresh.yml
+          git add Cargo.lock .github/workflows/pr-axum07-lock-refresh.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(rust): finalize Axum 0.7 compatibility lock graph'
+          git push origin HEAD:fix/axum07-post-merge-cleanup-20260929
