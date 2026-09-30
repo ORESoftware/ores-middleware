@@ -95,6 +95,7 @@ defmodule OresMiddlewareTest do
     assert conn.status == 200
     assert_receive {:rate_key, "203.0.113.55", 5, 5.0}
   end
+
   test "local token bucket bounds source IP cardinality" do
     {:ok, pid} = OresMiddleware.TokenBucket.start_link([])
 
@@ -107,5 +108,4 @@ defmodule OresMiddlewareTest do
     refute Map.has_key?(buckets, "ip-0")
     assert :queue.len(order) == 10_000
   end
-
 end
