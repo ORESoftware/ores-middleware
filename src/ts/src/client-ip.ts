@@ -57,9 +57,6 @@ export function effectiveClientIp(
   trustedProxy: boolean,
   resolveDirect?: (request: Request) => string | undefined
 ): string | undefined {
-  return (
-    normalizeIp(resolveDirect?.(request)) ??
-    peerIps.get(request) ??
-    (trustedProxy ? forwardedIp(request) : undefined)
-  );
+  const directPeer = normalizeIp(resolveDirect?.(request)) ?? peerIps.get(request);
+  return trustedProxy ? forwardedIp(request) ?? directPeer : directPeer;
 }
