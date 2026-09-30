@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'conformance/formal_model.rs'
+      - 'conformance/quota_bundle_model.rs'
       - '.github/workflows/formal-model.yml'
       - 'src/**'
       - 'packages/**'
@@ -35,3 +36,8 @@ jobs:
         run: |
           rustc --edition=2021 -D warnings conformance/formal_model.rs -o /tmp/formal-model
           /tmp/formal-model
+
+      - name: Exhaust atomic quota bundle state space
+        run: |
+          rustc --edition=2021 -D warnings conformance/quota_bundle_model.rs -o /tmp/quota-bundle-model
+          /tmp/quota-bundle-model
