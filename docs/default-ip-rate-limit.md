@@ -22,6 +22,8 @@ The token-bucket baseline permits an initial burst of up to five requests and th
 
 Forwarded client identity is accepted only when the immediate peer is in the configured trusted-proxy CIDR set. For trusted peers the middleware may use `CF-Connecting-IP` or the first `X-Forwarded-For` address after validating it as an IP address. Otherwise the socket peer address is authoritative.
 
+Trusted-proxy membership is necessary but not sufficient: the proxy must also **sanitize or overwrite** inbound forwarding headers before appending its own identity. Do not configure an intermediary as trusted if it preserves attacker-supplied leading `X-Forwarded-For` values. Invalid forwarded IP syntax is ignored and resolution falls back to the socket peer.
+
 With strict forwarded-header handling enabled, forwarded identity from an untrusted peer is rejected instead of being allowed to spoof or fragment rate-limit buckets.
 
 ## Backpressure contract
