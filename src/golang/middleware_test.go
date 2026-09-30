@@ -105,6 +105,26 @@ func TestTrustedProxyClientIPPrefersCanonicalForwardedIdentity(t *testing.T) {
 	}
 }
 
+func TestMemoryTokenBucketBoundsSourceIPCardinality(t *testing.T) {
+	limiter := NewMemoryTokenBucket(func() time.Time { return time.Unix(0, 0) })
+	for index := 0; index <= defaultLocalRateLimitMaxEntries; index++ {
+		key := fmt.Sprintf("ip-%d", index)
+		allowed, err := limiter.Allow(context.Background(), key, 1, 0.000001)
+		if err != nil || !allowed {
+			t.Fatalf("key %q allowed=%v err=%v", key, allowed, err)
+		}
+	}
+	if got := len(limiter.buckets); got != defaultLocalRateLimitMaxEntries {
+		t.Fatalf("bucket count=%d", got)
+	}
+	if _, exists := limiter.buckets["ip-0"]; exists {
+		t.Fatal("oldest bucket was not evicted")
+	}
+	if limiter.order.Len() != defaultLocalRateLimitMaxEntries {
+		t.Fatalf("order length=%d", limiter.order.Len())
+	}
+}
+
 func TestDescriptorExportsStandardOperations(t *testing.T) {
 	value := Descriptor()
 	if len(value.OperationSymbols) != 7 {
