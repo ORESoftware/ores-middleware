@@ -29,6 +29,7 @@ pub mod payload;
 pub mod placement;
 mod pipeline;
 pub mod provider_api;
+pub mod quota_bundle;
 pub mod rate_limit;
 pub mod rate_limit_bindings;
 pub mod rate_limit_routes;
