@@ -101,8 +101,12 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		}
 		trusted := trustedProxy(request.RemoteAddr, s.config.Settings.TLS.TrustedProxyCIDRs)
 		forwardedProto := strings.ToLower(strings.TrimSpace(request.Header.Get("X-Forwarded-Proto")))
-		if s.config.Settings.TLS.StrictForwardedHeaders && forwardedProto != "" && !trusted {
-			writeProblem(writer, 400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer")
+		hasForwardedIdentity := request.Header.Get("CF-Connecting-IP") != "" ||
+			request.Header.Get("X-Forwarded-For") != "" ||
+			request.Header.Get("X-Real-IP") != "" ||
+			request.Header.Get("Forwarded") != ""
+		if s.config.Settings.TLS.StrictForwardedHeaders && (forwardedProto != "" || hasForwardedIdentity) && !trusted {
+			writeProblem(writer, 400, "untrusted_forwarded_header", "forwarded transport or client headers came from an untrusted peer")
 			return
 		}
 		effectiveHTTPS := request.TLS != nil || (trusted && forwardedProto == "https")
@@ -156,7 +160,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		}
 
 		if s.config.Settings.RateLimit.Enabled {
-			key := strings.Join([]string{value.TenantID, value.UserID, clientIP(request, trusted), request.URL.Path}, ":")
+			key := clientIP(request, trusted)
 			allowed, err := s.deps.RateLimiter.Allow(ctx, key, s.config.Settings.RateLimit.Capacity, s.config.Settings.RateLimit.RefillPerSecond)
 			if err != nil || !allowed {
 				writeProblem(writer, 429, "rate_limited", "rate limit exceeded")
@@ -502,20 +506,37 @@ func trustedProxy(remote string, cidrs []string) bool {
 	}
 	return false
 }
+func canonicalIP(value string) string {
+	address, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil {
+		return ""
+	}
+	return address.String()
+}
+
 func clientIP(request *http.Request, trusted bool) string {
 	if trusted {
-		if value := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-For"), ",")[0]); value != "" {
-			return value
-		}
-		if value := request.Header.Get("X-Real-IP"); value != "" {
-			return value
+		forwardedFor := strings.Split(request.Header.Get("X-Forwarded-For"), ",")[0]
+		for _, candidate := range []string{
+			request.Header.Get("CF-Connecting-IP"),
+			forwardedFor,
+			request.Header.Get("X-Real-IP"),
+		} {
+			if value := canonicalIP(candidate); value != "" {
+				return value
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err == nil {
-		return host
+		if value := canonicalIP(host); value != "" {
+			return value
+		}
 	}
-	return request.RemoteAddr
+	if value := canonicalIP(request.RemoteAddr); value != "" {
+		return value
+	}
+	return "__unknown_client_ip__"
 }
 
 // securityHeaders is the pure policy: config in, the header set to add out.

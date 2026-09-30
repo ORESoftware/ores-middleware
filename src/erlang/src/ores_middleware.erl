@@ -40,7 +40,7 @@ default_config(ServiceName) when is_binary(ServiceName), byte_size(ServiceName) 
         settings => #{
             request_id_header => <<"x-request-id">>, trace_header => <<"traceparent">>, timeout_ms => 5000,
             max_body_bytes => 2 * 1024 * 1024, context_registry_max_entries => 10000, context_registry_ttl_ms => 30000,
-            rate_limit => #{enabled => true, capacity => 100, refill_per_second => 20.0, key_by => [tenant, user, ip, route]},
+            rate_limit => #{enabled => true, capacity => 5, refill_per_second => 5.0, key_by => [ip]},
             compression => #{enabled => true, minimum_bytes => 1024, algorithms => [<<"gzip">>]},
             tls => #{mode => trusted_proxy, require_https => true, strict_forwarded_headers => true, trusted_proxy_cidrs => [<<"127.0.0.1/32">>, <<"::1/128">>]},
             security_headers => #{enabled => true, hsts_max_age_seconds => 31536000, content_security_policy => <<"default-src 'self'; frame-ancestors 'none'">>, frame_options => <<"DENY">>},
@@ -94,7 +94,7 @@ default_hooks() -> #{
     rate_limit => fun(Key, Capacity, Refill) -> ores_middleware_rate_limiter:allow(Key, Capacity, Refill) end,
     idempotency_get => fun(Key) -> ores_middleware_idempotency:get(Key) end,
     idempotency_put => fun(Key, Response, Ttl) -> ores_middleware_idempotency:put(Key, Response, Ttl) end,
-    trusted_proxy => fun(_Request, _Cidrs) -> false end,
+    trusted_proxy => fun(Request, Cidrs) -> trusted_proxy_request(Request, Cidrs) end,
     telemetry_started => fun(Context, Request) -> logger:info("request started", [], #{request_id => maps:get(request_id, Context), trace_id => maps:get(trace_id, Context), method => maps:get(method, Request), path => maps:get(path, Request)}) end,
     telemetry_finished => fun(Context, Request, Response, Duration) -> logger:info("request finished", [], #{request_id => maps:get(request_id, Context), trace_id => maps:get(trace_id, Context), method => maps:get(method, Request), path => maps:get(path, Request), status => maps:get(status, Response), duration_ms => Duration}) end,
     sync_observe => fun(_Context, _Request, _Response, _Duration) -> ok end,
@@ -145,14 +145,27 @@ prepare_transport(Config, Hooks, Request, Headers) ->
     Tls = maps:get(tls, Settings),
     Trusted = (maps:get(trusted_proxy, Hooks))(Request, maps:get(trusted_proxy_cidrs, Tls)),
     Forwarded = maps:get(<<"x-forwarded-proto">>, Headers, undefined),
+    HasForwardedIdentity = lists:any(
+        fun(Name) -> maps:is_key(Name, Headers) end,
+        [<<"cf-connecting-ip">>, <<"x-forwarded-for">>, <<"x-real-ip">>, <<"forwarded">>]
+    ),
     Scheme = maps:get(scheme, Request, <<"http">>),
-    case maps:get(strict_forwarded_headers, Tls) andalso Forwarded =/= undefined andalso not Trusted of
-        true -> {error, problem(400, <<"untrusted_forwarded_header">>, <<"forwarded transport headers came from an untrusted peer">>)};
+    StrictViolation = maps:get(strict_forwarded_headers, Tls)
+        andalso (Forwarded =/= undefined orelse HasForwardedIdentity)
+        andalso not Trusted,
+    case StrictViolation of
+        true -> {error, problem(400, <<"untrusted_forwarded_header">>, <<"forwarded transport or client headers came from an untrusted peer">>)};
         false ->
             EffectiveHttps = Scheme =:= <<"https">> orelse (Trusted andalso Forwarded =:= <<"https">>),
             case maps:get(require_https, Tls) andalso not EffectiveHttps of
                 true -> {error, problem(426, <<"https_required">>, <<"HTTPS is required">>)};
-                false -> prepare_context(Config, Hooks, Request, Headers)
+                false ->
+                    PeerIp = maps:get(remote_ip, Request, undefined),
+                    EffectiveClientIp = case Trusted of
+                        true -> forwarded_client_ip(Headers, PeerIp);
+                        false -> value(PeerIp)
+                    end,
+                    prepare_context(Config, Hooks, Request#{effective_client_ip => EffectiveClientIp}, Headers)
             end
     end.
 
@@ -191,7 +204,7 @@ prepare_auth(Config, Hooks, Request, Context0, Headers) ->
 prepare_rate(Config, Hooks, Request, Context) ->
     Settings = maps:get(settings, Config),
     Policy = maps:get(rate_limit, Settings),
-    Key = iolist_to_binary(lists:join(<<":">>, [value(maps:get(tenant_id, Context)), value(maps:get(user_id, Context)), value(maps:get(remote_ip, Request, undefined)), maps:get(path, Request)])),
+    Key = value(maps:get(effective_client_ip, Request, maps:get(remote_ip, Request, undefined))),
     case maps:get(enabled, Policy) andalso not (maps:get(rate_limit, Hooks))(Key, maps:get(capacity, Policy), maps:get(refill_per_second, Policy)) of
         true -> {error, problem(429, <<"rate_limited">>, <<"rate limit exceeded">>)};
         false -> prepare_fault(Config, Hooks, Request, Context)
@@ -300,6 +313,77 @@ maybe_compress(Settings, #{headers := RequestHeaders}, #{body := Body, headers :
 maybe_compress(_Settings, _Request, Response) -> Response.
 
 problem(Status, Code, Detail) -> #{status => Status, headers => #{<<"content-type">> => <<"application/problem+json">>}, body => iolist_to_binary(json:encode(#{type => <<"urn:ores:middleware:", Code/binary>>, title => Code, status => Status, detail => Detail}))}.
+
+trusted_proxy_request(Request, Cidrs) ->
+    Peer = maps:get(remote_ip, Request, undefined),
+    lists:any(fun(Cidr) -> cidr_contains(Peer, Cidr) end, Cidrs).
+
+cidr_contains(Peer, Cidr) when is_binary(Cidr) ->
+    case binary:split(Cidr, <<"/">>) of
+        [NetworkText, PrefixText] ->
+            case {parse_ip_term(Peer), parse_ip_term(NetworkText), parse_prefix(PrefixText)} of
+                {{ok, Bits, PeerInt}, {ok, Bits, NetworkInt}, Prefix}
+                        when is_integer(Prefix), Prefix >= 0, Prefix =< Bits ->
+                    Shift = Bits - Prefix,
+                    (PeerInt bsr Shift) =:= (NetworkInt bsr Shift);
+                _ -> false
+            end;
+        _ -> false
+    end;
+cidr_contains(_, _) -> false.
+
+parse_prefix(Value) when is_binary(Value) ->
+    try binary_to_integer(Value) catch _:_ -> invalid end;
+parse_prefix(_) -> invalid.
+
+parse_ip_term(Value) when is_binary(Value) ->
+    case inet:parse_address(binary_to_list(Value)) of
+        {ok, Address} -> ip_to_integer(Address);
+        {error, _} -> error
+    end;
+parse_ip_term(Value) when is_tuple(Value) -> ip_to_integer(Value);
+parse_ip_term(_) -> error.
+
+ip_to_integer({A, B, C, D}) ->
+    {ok, 32, (A bsl 24) bor (B bsl 16) bor (C bsl 8) bor D};
+ip_to_integer({A, B, C, D, E, F, G, H}) ->
+    Segments = [A, B, C, D, E, F, G, H],
+    Value = lists:foldl(fun(Segment, Acc) -> (Acc bsl 16) bor Segment end, 0, Segments),
+    {ok, 128, Value};
+ip_to_integer(_) -> error.
+
+forwarded_client_ip(Headers, Fallback) ->
+    XForwardedFor = case maps:get(<<"x-forwarded-for">>, Headers, undefined) of
+        Value when is_binary(Value) ->
+            case binary:split(Value, <<",">>) of
+                [First, _Rest] -> First;
+                [Only] -> Only
+            end;
+        _ -> undefined
+    end,
+    Candidates = [
+        maps:get(<<"cf-connecting-ip">>, Headers, undefined),
+        XForwardedFor,
+        maps:get(<<"x-real-ip">>, Headers, undefined)
+    ],
+    first_valid_ip(Candidates, value(Fallback)).
+
+first_valid_ip([], Fallback) -> Fallback;
+first_valid_ip([Candidate | Rest], Fallback) ->
+    case canonical_ip(Candidate) of
+        undefined -> first_valid_ip(Rest, Fallback);
+        Ip -> Ip
+    end.
+
+canonical_ip(Value) when is_binary(Value) ->
+    Trimmed = list_to_binary(string:trim(binary_to_list(Value))),
+    case inet:parse_address(binary_to_list(Trimmed)) of
+        {ok, Address} -> list_to_binary(inet:ntoa(Address));
+        {error, _} -> undefined
+    end;
+canonical_ip(Value) when is_tuple(Value) ->
+    try list_to_binary(inet:ntoa(Value)) catch _:_ -> undefined end;
+canonical_ip(_) -> undefined.
 
 accepts(<<>>, _Supported) -> true;
 accepts(<<"*/*">>, _Supported) -> true;

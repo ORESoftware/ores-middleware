@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{ActiveRequest, MiddlewareStack};
+use crate::{ActiveRequest, MiddlewareStack, pipeline::rate_limit_headers};
 
 /// Compute the response headers that belong to an admitted request without
 /// consuming/finalizing that request.
@@ -11,7 +11,15 @@ use crate::{ActiveRequest, MiddlewareStack};
 /// request lifetime.
 #[must_use]
 pub fn response_headers(stack: &MiddlewareStack, active: &ActiveRequest) -> BTreeMap<String, String> {
-    response_headers_from_context(stack, &active.context.request_id)
+    let mut headers = response_headers_from_context(stack, &active.context.request_id);
+    if let Some(decision) = &active.rate_limit_decision {
+        headers.extend(rate_limit_headers(
+            decision,
+            stack.config().settings.rate_limit.window_ms,
+            false,
+        ));
+    }
+    headers
 }
 
 /// Pure internal projection. Keep the externally supported streaming seam tied

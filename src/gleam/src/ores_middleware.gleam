@@ -4,6 +4,13 @@ import gleam/string
 
 pub const contract_version = "1.0.0"
 
+@external(erlang, "ores_middleware_gleam_rate_limiter", "allow")
+fn local_rate_limit_allow(
+  key: String,
+  capacity: Int,
+  refill_per_second: Float,
+) -> Bool
+
 pub type Environment {
   Development
   Test
@@ -166,8 +173,8 @@ pub fn default_config(service_name: String) -> Config {
     require_https: True,
     trusted_proxy_cidrs: ["127.0.0.1/32", "::1/128"],
     rate_limit_enabled: True,
-    rate_limit_capacity: 100,
-    rate_limit_refill_per_second: 20.0,
+    rate_limit_capacity: 5,
+    rate_limit_refill_per_second: 5.0,
     compression_enabled: True,
     security_headers_enabled: True,
     idempotency_enabled: True,
@@ -195,7 +202,13 @@ pub fn default_hooks() -> Hooks {
       Error("test identity resolver is not configured")
     },
     authorize_ip: fn(_, _) { True },
-    rate_limit: fn(_, _, _, _) { True },
+    rate_limit: fn(request, _, capacity, refill_per_second) {
+      let key = case string.trim(request.remote_ip) {
+        "" -> "__unknown_client_ip__"
+        value -> value
+      }
+      local_rate_limit_allow(key, capacity, refill_per_second)
+    },
     idempotency_get: fn(_) { Error(Nil) },
     idempotency_put: fn(_, _) { Nil },
     compress: fn(_, response) { response },

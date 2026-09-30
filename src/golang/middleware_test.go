@@ -3,6 +3,7 @@ package oresmiddleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -72,6 +73,56 @@ func TestStackAddsRequestAndSecurityHeaders(t *testing.T) {
 	}
 	if response.Header().Get("x-content-type-options") != "nosniff" {
 		t.Fatal("missing security headers")
+	}
+}
+
+func TestStrictForwardedClientIdentityRejectsUntrustedPeer(t *testing.T) {
+	config := testConfig()
+	config.Settings.TLS.StrictForwardedHeaders = true
+	stack, err := New(config, Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := stack.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler must not run")
+	}))
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "198.51.100.10:4242"
+	request.Header.Set("X-Forwarded-For", "203.0.113.9")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTrustedProxyClientIPPrefersCanonicalForwardedIdentity(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "127.0.0.1:4242"
+	request.Header.Set("CF-Connecting-IP", "203.0.113.055")
+	request.Header.Set("X-Forwarded-For", "203.0.113.55, 10.0.0.4")
+	if got := clientIP(request, true); got != "203.0.113.55" {
+		t.Fatalf("clientIP=%q", got)
+	}
+}
+
+func TestMemoryTokenBucketBoundsSourceIPCardinality(t *testing.T) {
+	limiter := NewMemoryTokenBucket(func() time.Time { return time.Unix(0, 0) })
+	for index := 0; index <= defaultLocalRateLimitMaxEntries; index++ {
+		key := fmt.Sprintf("ip-%d", index)
+		allowed, err := limiter.Allow(context.Background(), key, 1, 0.000001)
+		if err != nil || !allowed {
+			t.Fatalf("key %q allowed=%v err=%v", key, allowed, err)
+		}
+	}
+	if got := len(limiter.buckets); got != defaultLocalRateLimitMaxEntries {
+		t.Fatalf("bucket count=%d", got)
+	}
+	if _, exists := limiter.buckets["ip-0"]; exists {
+		t.Fatal("oldest bucket was not evicted")
+	}
+	if limiter.order.Len() != defaultLocalRateLimitMaxEntries {
+		t.Fatalf("order length=%d", limiter.order.Len())
 	}
 }
 

@@ -10,6 +10,8 @@ use crate::{
 };
 
 const MAX_LOCAL_RATE_LIMIT_ENTRIES: usize = 10_000;
+const DEFAULT_IP_RATE_LIMIT_CAPACITY: u32 = 5;
+const DEFAULT_IP_RATE_LIMIT_REFILL_PER_SECOND: f64 = 5.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -402,6 +404,17 @@ const RATE_LIMIT_RULES: &[Rule] = &[
         )
     },
     |config| {
+        let policy_id = &config.settings.rate_limit.policy_id;
+        issue_if(
+            !policy_id.trim().is_empty() && !valid_rate_limit_identifier(policy_id),
+            "/settings/rateLimit/policyId",
+            "invalid_identifier",
+            || {
+                "rate-limit policy IDs must be 1..=128 ASCII letters, digits, dot, underscore, or hyphen".into()
+            },
+        )
+    },
+    |config| {
         issue_if(
             config.settings.rate_limit.key_by.is_empty(),
             "/settings/rateLimit/keyBy",
@@ -503,6 +516,13 @@ const RATE_LIMIT_RULES: &[Rule] = &[
     },
 ];
 
+fn valid_rate_limit_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
 fn validate_rate_limit_policy(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     if !config.settings.rate_limit.enabled {
         return Vec::new();
@@ -531,15 +551,12 @@ pub fn default_config(service_name: impl Into<String>) -> MiddlewareConfig {
             context_registry_ttl_ms: 30_000,
             rate_limit: RateLimitPolicy {
                 enabled: true,
-                capacity: 100,
-                refill_per_second: 20.0,
-                key_by: vec![
-                    RateLimitSignal::Tenant,
-                    RateLimitSignal::User,
-                    RateLimitSignal::Ip,
-                    RateLimitSignal::Route,
-                ],
-                policy_id: "application-default".into(),
+                // Secure baseline abuse guard: one shared bucket per effective client IP.
+                // Route/user/tenant limits are explicit overlays, not ways to multiply this allowance.
+                capacity: DEFAULT_IP_RATE_LIMIT_CAPACITY,
+                refill_per_second: DEFAULT_IP_RATE_LIMIT_REFILL_PER_SECOND,
+                key_by: vec![RateLimitSignal::Ip],
+                policy_id: "ip-default".into(),
                 algorithm: RateLimitAlgorithm::TokenBucket,
                 layer: RateLimitLayer::Application,
                 failure_mode: RateLimitFailureMode::LocalOnly,
@@ -619,6 +636,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_rate_limit_is_five_requests_per_second_per_ip() {
+        let config = default_config("test-service");
+        let policy = &config.settings.rate_limit;
+
+        assert!(policy.enabled);
+        assert_eq!(policy.capacity, DEFAULT_IP_RATE_LIMIT_CAPACITY);
+        assert_eq!(
+            policy.refill_per_second,
+            DEFAULT_IP_RATE_LIMIT_REFILL_PER_SECOND
+        );
+        assert_eq!(policy.key_by, vec![RateLimitSignal::Ip]);
+        assert_eq!(policy.policy_id, "ip-default");
+        assert_eq!(policy.window_ms, 1_000);
+        assert_eq!(policy.failure_mode, RateLimitFailureMode::LocalOnly);
+    }
+
+    #[test]
     fn production_requires_stable_hmac_key_derivation() {
         let mut config = default_config("test-service");
         config.environment = RuntimeEnvironment::Production;
@@ -675,6 +709,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rate_limit_policy_id_rejects_header_hostile_values() {
+        let too_long = "x".repeat(129);
+        for invalid in [
+            "contains space",
+            "line\nbreak",
+            "unicode-π",
+            too_long.as_str(),
+        ] {
+            let mut config = default_config("test-service");
+            config.settings.rate_limit.policy_id = invalid.to_owned();
+            assert!(
+                validate_rate_limit_policy(&config)
+                    .iter()
+                    .any(|issue| issue.code == "invalid_identifier"),
+                "expected invalid policy id to fail: {invalid:?}"
+            );
+        }
+    }
     #[test]
     fn rate_limit_validation_returns_repeatable_owned_issues() {
         let mut config = default_config("test-service");

@@ -92,16 +92,21 @@ timeout_is_logged_without_late_completion_and_context_is_restored_test() ->
         Parent = self(),
         Logger = test_logger(Parent),
         {ok, Middleware} = ores_middleware_otel:create_middleware(
-            test_config(15),
+            test_config(50),
             fixed_auth_hooks(),
             Logger
         ),
         Response = Middleware(request(<<"request-timeout">>, <<"/timeout">>), fun(_Request) ->
-            timer:sleep(60),
-            #{status => 204, headers => #{}, body => <<>>}
+            Parent ! handler_entered,
+            receive
+                release_handler -> #{status => 204, headers => #{}, body => <<>>}
+            after 5000 ->
+                erlang:error(handler_was_not_cancelled)
+            end
         end),
         ?assertEqual(504, maps:get(status, Response)),
-        Records = collect_records(2, []),
+        receive handler_entered -> ok after 1000 -> erlang:error(handler_never_started) end,
+        Records = collect_until_message(<<"request handler timed out">>, 4, []),
         Messages = [maps:get(message, Record) || Record <- Records],
         ?assert(lists:member(<<"request handler started">>, Messages)),
         ?assert(lists:member(<<"request handler timed out">>, Messages)),
@@ -235,6 +240,20 @@ collect_parallel(RemainingWorkers, RemainingRecords, Records, Workers) ->
             )
     after 5000 ->
         erlang:error({parallel_collection_timeout, RemainingWorkers, RemainingRecords})
+    end.
+
+collect_until_message(_Expected, 0, Records) ->
+    erlang:error({expected_record_not_observed, lists:reverse(Records)});
+collect_until_message(Expected, Remaining, Records) ->
+    receive
+        {record, Record} ->
+            Updated = [Record | Records],
+            case maps:get(message, Record, undefined) =:= Expected of
+                true -> lists:reverse(Updated);
+                false -> collect_until_message(Expected, Remaining - 1, Updated)
+            end
+    after 2000 ->
+        erlang:error({record_collection_timeout, Expected, Remaining})
     end.
 
 collect_records(0, Records) -> lists:reverse(Records);

@@ -61,7 +61,7 @@ test("resolver identity is method + pathname only and validator receives immutab
     }
   };
 
-  const middleware = createMiddleware(config(), { requestContractValidator: validator });
+  const middleware = createMiddleware(config(), { requestContractValidator: validator, isTrustedProxy: () => true });
   const inputs = [
     jsonRequest(
       "https://example.test/v1/items/42?view=full",

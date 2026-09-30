@@ -149,7 +149,7 @@ func DefaultConfig(serviceName string) Config {
 		Settings: MiddlewareSettings{
 			RequestIDHeader: "x-request-id", TraceHeader: "traceparent", TimeoutMS: 5_000, MaxBodyBytes: 2 * 1024 * 1024,
 			ContextRegistryMaxEntries: 10_000, ContextRegistryTTLMS: 30_000,
-			RateLimit:              RateLimitPolicy{Enabled: true, Capacity: 100, RefillPerSecond: 20, KeyBy: []string{"tenant", "user", "ip", "route"}},
+			RateLimit:              RateLimitPolicy{Enabled: true, Capacity: 5, RefillPerSecond: 5, KeyBy: []string{"ip"}},
 			Compression:            CompressionPolicy{Enabled: true, MinimumBytes: 1_024, Algorithms: []string{"gzip"}},
 			TLS:                    TLSPolicy{Mode: "trusted-proxy", RequireHTTPS: true, StrictForwardedHeaders: true, TrustedProxyCIDRs: []string{"127.0.0.1/32", "::1/128"}},
 			SecurityHeaders:        SecurityHeaderPolicy{Enabled: true, HSTSMaxAgeSeconds: 31_536_000, ContentSecurityPolicy: "default-src 'self'; frame-ancestors 'none'", FrameOptions: "DENY"},

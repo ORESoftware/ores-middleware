@@ -3,6 +3,7 @@ import {
   type PortableMiddleware,
   type RequestContext
 } from "./index.js";
+import { attachTrustedPeerIp } from "./client-ip.js";
 
 export {
   fetchHandler,
@@ -136,7 +137,8 @@ function nodeRequestToWeb(req: any): Request {
       ) as BodyInit;
     }
   }
-  return new Request(url, init);
+  const request = new Request(url, init);
+  return attachTrustedPeerIp(request, req.socket?.remoteAddress ?? req.connection?.remoteAddress);
 }
 
 function nodeResponseHeaders(res: any): Headers {

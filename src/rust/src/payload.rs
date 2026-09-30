@@ -20,18 +20,18 @@ pub enum PayloadCodec {
 impl PayloadCodec {
     #[must_use]
     pub const fn wire_name(self) -> &'static str {
-        return match self {
+        match self {
             Self::Json => "json",
             Self::Messagepack => "messagepack",
             Self::Cbor => "cbor",
             Self::Protobuf => "protobuf",
             Self::Raw => "raw",
-        };
+        }
     }
 
     #[must_use]
     pub const fn requires_opaque_byte_preservation(self) -> bool {
-        return matches!(self, Self::Protobuf | Self::Raw);
+        matches!(self, Self::Protobuf | Self::Raw)
     }
 }
 
@@ -47,11 +47,11 @@ pub enum TransportFraming {
 impl TransportFraming {
     #[must_use]
     pub const fn wire_name(self) -> &'static str {
-        return match self {
+        match self {
             Self::HttpBody => "http_body",
             Self::TcpLengthDelimited => "tcp_length_delimited",
             Self::WebsocketMessage => "websocket_message",
-        };
+        }
     }
 }
 
@@ -86,7 +86,7 @@ impl PayloadMetadata {
         if self.codec.requires_opaque_byte_preservation() && !self.preserve_opaque_bytes {
             return Err("protobuf/raw payloads require opaque-byte preservation");
         }
-        return Ok(());
+        Ok(())
     }
 }
 

@@ -35,9 +35,9 @@
     "contextRegistryTtlMs": 30000,
     "rateLimit": {
       "enabled": true,
-      "capacity": 100,
-      "refillPerSecond": 20,
-      "keyBy": ["tenant", "user", "ip", "route"]
+      "capacity": 5,
+      "refillPerSecond": 5,
+      "keyBy": ["ip"]
     },
     "compression": {
       "enabled": true,
