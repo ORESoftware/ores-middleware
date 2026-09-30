@@ -244,7 +244,7 @@ defmodule OresMiddleware.Plug do
   defp rate_limit(conn, _context, stack, trusted_proxy) do
     policy = stack.config.settings.rateLimit
 
-    key = client_ip(conn, trusted_proxy)
+    key = client_ip(conn, trusted_proxy, stack.config.settings.tls.trustedProxyCidrs)
 
     if not policy.enabled or
          stack.hooks.rate_limit.(key, policy.capacity, policy.refillPerSecond),
@@ -453,26 +453,46 @@ defmodule OresMiddleware.Plug do
 
   defp random_id, do: :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
 
-  defp client_ip(conn, true) do
-    forwarded_for =
-      case first_req_header(conn, "x-forwarded-for") do
-        nil -> nil
-        value -> value |> String.split(",", parts: 2) |> List.first()
-      end
+  defp client_ip(conn, false, _trusted_cidrs),
+    do: conn.remote_ip |> :inet.ntoa() |> to_string()
 
-    [
-      first_req_header(conn, "cf-connecting-ip"),
-      forwarded_for,
-      first_req_header(conn, "x-real-ip")
-    ]
-    |> Enum.find_value(&normalize_ip/1)
-    |> case do
-      nil -> client_ip(conn, false)
-      value -> value
+  defp client_ip(conn, true, trusted_cidrs) do
+    direct = conn.remote_ip |> :inet.ntoa() |> to_string()
+
+    case first_req_header(conn, "x-forwarded-for") do
+      value when is_binary(value) and value != "" ->
+        chain =
+          value
+          |> String.split(",")
+          |> Enum.map(&normalize_ip/1)
+
+        if Enum.any?(chain, &is_nil/1) do
+          direct
+        else
+          (chain ++ [direct])
+          |> Enum.reverse()
+          |> Enum.find(fn candidate -> not trusted_ip?(candidate, trusted_cidrs) end)
+          |> case do
+            nil -> direct
+            candidate -> candidate
+          end
+        end
+
+      _ ->
+        normalize_ip(first_req_header(conn, "cf-connecting-ip")) ||
+          normalize_ip(first_req_header(conn, "x-real-ip")) ||
+          direct
     end
   end
 
-  defp client_ip(conn, false), do: conn.remote_ip |> :inet.ntoa() |> to_string()
+  defp trusted_ip?(value, cidrs) do
+    with value when is_binary(value) <- normalize_ip(value),
+         {:ok, address} <- :inet.parse_address(String.to_charlist(value)) do
+      OresMiddleware.IP.in_cidrs?(address, cidrs)
+    else
+      _ -> false
+    end
+  end
 
   defp normalize_ip(value) when is_binary(value) do
     value = String.trim(value)
