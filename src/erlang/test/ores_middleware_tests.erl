@@ -80,7 +80,10 @@ trusted_proxy_rate_key_uses_validated_forwarded_client_test() ->
     Config0 = ores_middleware:default_config(<<"forwarded-test">>),
     Settings0 = maps:get(settings, Config0),
     Tls0 = maps:get(tls, Settings0),
-    Config = Config0#{settings => Settings0#{tls => Tls0#{require_https => false}}},
+    Config = Config0#{settings => Settings0#{tls => Tls0#{
+        require_https => false,
+        trusted_proxy_cidrs => [<<"127.0.0.1/32">>, <<"10.0.0.0/8">>]
+    }}},
     Hooks = #{
         rate_limit => fun(Key, Capacity, Refill) ->
             Parent ! {rate_key, Key, Capacity, Refill},
@@ -93,8 +96,8 @@ trusted_proxy_rate_key_uses_validated_forwarded_client_test() ->
         path => <<"/v1">>,
         scheme => <<"http">>,
         headers => #{
-            <<"cf-connecting-ip">> => <<"not-an-ip">>,
-            <<"x-forwarded-for">> => <<"203.0.113.55, 10.0.0.4">>
+            <<"cf-connecting-ip">> => <<"198.51.100.99">>,
+            <<"x-forwarded-for">> => <<"198.51.100.66, 203.0.113.55, 10.0.0.4">>
         },
         body_size => 0,
         remote_ip => <<"127.0.0.1">>
@@ -103,6 +106,36 @@ trusted_proxy_rate_key_uses_validated_forwarded_client_test() ->
     ?assertEqual(200, maps:get(status, Response)),
     receive
         {rate_key, <<"203.0.113.55">>, 5, 5.0} -> ok
+    after 1000 ->
+        erlang:error(rate_key_not_observed)
+    end.
+
+
+malformed_trusted_xff_falls_back_to_socket_peer_test() ->
+    Parent = self(),
+    Config0 = ores_middleware:default_config(<<"forwarded-malformed">>),
+    Settings0 = maps:get(settings, Config0),
+    Tls0 = maps:get(tls, Settings0),
+    Config = Config0#{settings => Settings0#{tls => Tls0#{require_https => false}}},
+    Hooks = #{
+        rate_limit => fun(Key, _Capacity, _Refill) ->
+            Parent ! {rate_key, Key},
+            true
+        end
+    },
+    {ok, Middleware} = ores_middleware:create_middleware(Config, Hooks),
+    Request = #{
+        method => <<"GET">>,
+        path => <<"/v1">>,
+        scheme => <<"http">>,
+        headers => #{<<"x-forwarded-for">> => <<"not-an-ip, 203.0.113.55">>},
+        body_size => 0,
+        remote_ip => <<"127.0.0.1">>
+    },
+    Response = Middleware(Request, fun(_Request) -> #{status => 200, headers => #{}, body => <<"ok">>} end),
+    ?assertEqual(200, maps:get(status, Response)),
+    receive
+        {rate_key, <<"127.0.0.1">>} -> ok
     after 1000 ->
         erlang:error(rate_key_not_observed)
     end.
