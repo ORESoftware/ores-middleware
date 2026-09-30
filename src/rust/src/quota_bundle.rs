@@ -322,7 +322,11 @@ pub fn evaluate_quota_bundle(
             .saturating_sub(now_ms.saturating_sub(window_started_at_ms))
             .max(1);
 
-        if request.cost > remaining && exhausted.is_none() {
+        if request.cost > remaining
+            && exhausted
+                .as_ref()
+                .is_none_or(|(_, current_retry_ms)| reset_after_ms > *current_retry_ms)
+        {
             exhausted = Some((window.policy_id.clone(), reset_after_ms));
         }
 
@@ -869,6 +873,46 @@ mod tests {
                 .expect("replay mismatch denial");
         assert_eq!(denied.reason_code.as_deref(), Some("admission_replay_mismatch"));
         assert_eq!(state.windows, before);
+    }
+
+    #[test]
+    fn multi_window_denial_uses_latest_blocking_reset() {
+        let policy = QuotaBundlePolicy {
+            bundle_id: "retry-dominance".into(),
+            quota_epoch: epoch(1),
+            windows: vec![
+                QuotaWindowPolicy {
+                    policy_id: "minute".into(),
+                    limit: 2,
+                    window_ms: 60_000,
+                },
+                QuotaWindowPolicy {
+                    policy_id: "hour".into(),
+                    limit: 2,
+                    window_ms: 3_600_000,
+                },
+            ],
+        };
+        let mut state = QuotaBundleState::default();
+        evaluate_quota_bundle(
+            &policy,
+            &request("operation-0032", 1, 2),
+            61_000,
+            &mut state,
+        )
+        .expect("initial debit");
+
+        let denied = evaluate_quota_bundle(
+            &policy,
+            &request("operation-0033", 1, 1),
+            61_001,
+            &mut state,
+        )
+        .expect("multi-window denial");
+        assert_eq!(denied.kind, QuotaAdmissionKind::Denied);
+        assert_eq!(denied.exhausted_policy_id.as_deref(), Some("hour"));
+        assert_eq!(denied.retry_after_ms, Some(3_538_999));
+        assert_eq!(denied.reason_code.as_deref(), Some("quota_exhausted"));
     }
 
     #[test]
