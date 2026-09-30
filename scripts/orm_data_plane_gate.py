@@ -141,6 +141,7 @@ publish = false
 chrono = "0.4"
 diesel = {{ version = "={DIESEL_VERSION}", default-features = false, features = ["postgres", "chrono"] }}
 sea-orm = {{ version = "={SEA_ORM_VERSION}", default-features = false, features = ["macros", "with-chrono", "sqlx-postgres", "runtime-tokio-rustls"] }}
+sea-orm-macros = {{ version = "={SEA_ORM_VERSION}" }}
 # SQLx's PostgreSQL stringprep path enables tinyvec's alloc surface.
 # Explicit std feature unification keeps tinyvec 1.13.0 compilable on
 # the pinned Rust toolchain without broadening database backends.
