@@ -77,6 +77,12 @@ defmodule OresMiddlewareTest do
   test "trusted proxy rate key uses validated forwarded client identity" do
     config = OresMiddleware.default_config("test")
     config = put_in(config, [:settings, :tls, :requireHttps], false)
+    config =
+      put_in(
+        config,
+        [:settings, :tls, :trustedProxyCidrs],
+        ["127.0.0.1/32", "10.0.0.0/8"]
+      )
     parent = self()
 
     stack =
@@ -90,8 +96,11 @@ defmodule OresMiddlewareTest do
     conn =
       conn(:get, "/v1")
       |> Map.put(:remote_ip, {127, 0, 0, 1})
-      |> put_req_header("cf-connecting-ip", "not-an-ip")
-      |> put_req_header("x-forwarded-for", "203.0.113.55, 10.0.0.4")
+      |> put_req_header("cf-connecting-ip", "198.51.100.99")
+      |> put_req_header(
+        "x-forwarded-for",
+        "198.51.100.66, 203.0.113.55, 10.0.0.4"
+      )
 
     conn =
       OresMiddleware.Plug.wrap(stack, conn, fn conn ->
@@ -100,6 +109,33 @@ defmodule OresMiddlewareTest do
 
     assert conn.status == 200
     assert_receive {:rate_key, "203.0.113.55", 5, 5.0}
+  end
+
+  test "malformed trusted XFF falls back to socket peer" do
+    config = OresMiddleware.default_config("test")
+    config = put_in(config, [:settings, :tls, :requireHttps], false)
+    parent = self()
+
+    stack =
+      OresMiddleware.Stack.new!(config, %{
+        rate_limit: fn key, _capacity, _refill ->
+          send(parent, {:rate_key, key})
+          true
+        end
+      })
+
+    conn =
+      conn(:get, "/v1")
+      |> Map.put(:remote_ip, {127, 0, 0, 1})
+      |> put_req_header("x-forwarded-for", "not-an-ip, 203.0.113.55")
+
+    conn =
+      OresMiddleware.Plug.wrap(stack, conn, fn conn ->
+        Plug.Conn.resp(conn, 200, "ok")
+      end)
+
+    assert conn.status == 200
+    assert_receive {:rate_key, "127.0.0.1"}
   end
 
   test "local token bucket bounds source IP cardinality" do
