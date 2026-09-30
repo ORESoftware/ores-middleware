@@ -71,6 +71,10 @@ evict_if_full(State) ->
 
 ensure_started() ->
     case whereis(?MODULE) of
-        undefined -> case start_link() of {ok, _Pid} -> ok; {error, {already_started, _Pid}} -> ok end;
+        undefined ->
+            case gen_server:start({local, ?MODULE}, ?MODULE, #{buckets => #{}, order => queue:new()}, []) of
+                {ok, _Pid} -> ok;
+                {error, {already_started, _Pid}} -> ok
+            end;
         _Pid -> ok
     end.
