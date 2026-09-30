@@ -94,7 +94,7 @@ default_hooks() -> #{
     rate_limit => fun(Key, Capacity, Refill) -> ores_middleware_rate_limiter:allow(Key, Capacity, Refill) end,
     idempotency_get => fun(Key) -> ores_middleware_idempotency:get(Key) end,
     idempotency_put => fun(Key, Response, Ttl) -> ores_middleware_idempotency:put(Key, Response, Ttl) end,
-    trusted_proxy => fun(_Request, _Cidrs) -> false end,
+    trusted_proxy => fun(Request, Cidrs) -> trusted_proxy_request(Request, Cidrs) end,
     telemetry_started => fun(Context, Request) -> logger:info("request started", [], #{request_id => maps:get(request_id, Context), trace_id => maps:get(trace_id, Context), method => maps:get(method, Request), path => maps:get(path, Request)}) end,
     telemetry_finished => fun(Context, Request, Response, Duration) -> logger:info("request finished", [], #{request_id => maps:get(request_id, Context), trace_id => maps:get(trace_id, Context), method => maps:get(method, Request), path => maps:get(path, Request), status => maps:get(status, Response), duration_ms => Duration}) end,
     sync_observe => fun(_Context, _Request, _Response, _Duration) -> ok end,
@@ -314,6 +314,44 @@ maybe_compress(_Settings, _Request, Response) -> Response.
 
 problem(Status, Code, Detail) -> #{status => Status, headers => #{<<"content-type">> => <<"application/problem+json">>}, body => iolist_to_binary(json:encode(#{type => <<"urn:ores:middleware:", Code/binary>>, title => Code, status => Status, detail => Detail}))}.
 
+trusted_proxy_request(Request, Cidrs) ->
+    Peer = maps:get(remote_ip, Request, undefined),
+    lists:any(fun(Cidr) -> cidr_contains(Peer, Cidr) end, Cidrs).
+
+cidr_contains(Peer, Cidr) when is_binary(Cidr) ->
+    case binary:split(Cidr, <<"/">>) of
+        [NetworkText, PrefixText] ->
+            case {parse_ip_term(Peer), parse_ip_term(NetworkText), parse_prefix(PrefixText)} of
+                {{ok, Bits, PeerInt}, {ok, Bits, NetworkInt}, Prefix}
+                        when is_integer(Prefix), Prefix >= 0, Prefix =< Bits ->
+                    Shift = Bits - Prefix,
+                    (PeerInt bsr Shift) =:= (NetworkInt bsr Shift);
+                _ -> false
+            end;
+        _ -> false
+    end;
+cidr_contains(_, _) -> false.
+
+parse_prefix(Value) when is_binary(Value) ->
+    try binary_to_integer(Value) catch _:_ -> invalid end;
+parse_prefix(_) -> invalid.
+
+parse_ip_term(Value) when is_binary(Value) ->
+    case inet:parse_address(binary_to_list(Value)) of
+        {ok, Address} -> ip_to_integer(Address);
+        {error, _} -> error
+    end;
+parse_ip_term(Value) when is_tuple(Value) -> ip_to_integer(Value);
+parse_ip_term(_) -> error.
+
+ip_to_integer({A, B, C, D}) ->
+    {ok, 32, (A bsl 24) bor (B bsl 16) bor (C bsl 8) bor D};
+ip_to_integer({A, B, C, D, E, F, G, H}) ->
+    Segments = [A, B, C, D, E, F, G, H],
+    Value = lists:foldl(fun(Segment, Acc) -> (Acc bsl 16) bor Segment end, 0, Segments),
+    {ok, 128, Value};
+ip_to_integer(_) -> error.
+
 forwarded_client_ip(Headers, Fallback) ->
     XForwardedFor = case maps:get(<<"x-forwarded-for">>, Headers, undefined) of
         Value when is_binary(Value) ->
@@ -343,6 +381,8 @@ canonical_ip(Value) when is_binary(Value) ->
         {ok, Address} -> list_to_binary(inet:ntoa(Address));
         {error, _} -> undefined
     end;
+canonical_ip(Value) when is_tuple(Value) ->
+    try list_to_binary(inet:ntoa(Value)) catch _:_ -> undefined end;
 canonical_ip(_) -> undefined.
 
 accepts(<<>>, _Supported) -> true;
