@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.oresoftware.com/middleware/package/v1.json",
+  "title": "ORES middleware package manifest",
+  "description": "Independent JSON Schema authority for portable/provider-specific middleware artifact packaging. TypeSpec is a peer authority, not a generator source for this file.",
+  "$ref": "#/$defs/MiddlewarePackageManifest",
+  "$defs": {
+    "NonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "Sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "MiddlewareArtifactDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "language",
+        "kind",
+        "profile",
+        "provider",
+        "path",
+        "semantic_contract_sha256"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "language": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "const": "javascript_module",
+              "type": "string"
+            },
+            {
+              "const": "web_assembly_module",
+              "type": "string"
+            },
+            {
+              "const": "native_library",
+              "type": "string"
+            },
+            {
+              "const": "beam_module",
+              "type": "string"
+            },
+            {
+              "const": "process_rpc",
+              "type": "string"
+            }
+          ]
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "const": "portable_javascript",
+              "type": "string"
+            },
+            {
+              "const": "portable_wasm",
+              "type": "string"
+            },
+            {
+              "const": "native",
+              "type": "string"
+            },
+            {
+              "const": "isolated_process",
+              "type": "string"
+            }
+          ]
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "const": "generic",
+              "type": "string"
+            },
+            {
+              "const": "cloudflare",
+              "type": "string"
+            },
+            {
+              "const": "caddy",
+              "type": "string"
+            },
+            {
+              "const": "nginx",
+              "type": "string"
+            },
+            {
+              "const": "haproxy",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "semantic_contract_sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        }
+      }
+    },
+    "MiddlewarePackageManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spec_version",
+        "name",
+        "version",
+        "semantic_contract_sha256",
+        "phases",
+        "capabilities",
+        "artifacts"
+      ],
+      "properties": {
+        "spec_version": {
+          "type": "number",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/NonEmptyString"
+        },
+        "semantic_contract_sha256": {
+          "$ref": "#/$defs/Sha256Hex"
+        },
+        "phases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonEmptyString"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NonEmptyString"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/MiddlewareArtifactDescriptor"
+          }
+        }
+      }
+    }
+  }
+}

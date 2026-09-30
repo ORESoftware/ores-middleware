@@ -3,17 +3,23 @@ name: edge-proxy-adapters
 on:
   pull_request:
     paths:
+      - "adapters/caddy/**"
       - "adapters/nginx/**"
       - "adapters/haproxy/**"
       - "docs/edge-proxy-adapters.md"
+      - "docs/portable-middleware-runtime-profiles.md"
+      - "scripts/check_caddy_adapter.rs"
       - "scripts/check_edge_proxy_adapters.rs"
       - ".github/workflows/edge-proxy-adapters.yml"
   push:
     branches: [main, dev]
     paths:
+      - "adapters/caddy/**"
       - "adapters/nginx/**"
       - "adapters/haproxy/**"
       - "docs/edge-proxy-adapters.md"
+      - "docs/portable-middleware-runtime-profiles.md"
+      - "scripts/check_caddy_adapter.rs"
       - "scripts/check_edge_proxy_adapters.rs"
       - ".github/workflows/edge-proxy-adapters.yml"
   workflow_dispatch:
@@ -55,14 +61,30 @@ jobs:
           nginx -v
           haproxy -vv | head -n 5
 
+      - name: Validate Caddy configuration with pinned runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/work:ro" \
+            caddy:2.11.4-alpine \
+            caddy validate \
+              --config /work/adapters/caddy/Caddyfile.example \
+              --adapter caddyfile
+
       - name: Compile and run edge proxy admission
         shell: bash
         run: |
           set -euo pipefail
-          rustfmt --edition 2024 --check scripts/check_edge_proxy_adapters.rs
+          rustfmt --edition 2024 --check \
+            scripts/check_edge_proxy_adapters.rs \
+            scripts/check_caddy_adapter.rs
           rustc --edition=2024 -D warnings scripts/check_edge_proxy_adapters.rs \
             -o "${RUNNER_TEMP}/check-edge-proxy-adapters"
+          rustc --edition=2024 -D warnings scripts/check_caddy_adapter.rs \
+            -o "${RUNNER_TEMP}/check-caddy-adapter"
           "${RUNNER_TEMP}/check-edge-proxy-adapters"
+          "${RUNNER_TEMP}/check-caddy-adapter"
 
       - name: Ensure validation did not rewrite tracked sources
         shell: bash

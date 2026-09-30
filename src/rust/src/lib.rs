@@ -13,6 +13,7 @@ mod config;
 pub mod config_discovery;
 mod context;
 pub mod docs_serving;
+pub mod edge_proxy;
 pub mod fallthrough;
 pub mod frameworks;
 pub mod hardening;
@@ -34,6 +35,7 @@ pub mod rate_limit_bindings;
 pub mod rate_limit_routes;
 pub mod rate_limit_v2;
 pub mod resilience;
+pub mod runtime_artifact;
 pub mod runtime_manifest;
 pub mod runtime_manifest_evidence;
 pub mod security;
@@ -74,6 +76,11 @@ pub use context::{
     current_logged_in_user_id, current_request_id, current_session_id, current_tenant_id,
     current_trace_id, current_user_id, run_with_captured_context, run_with_context,
     spawn_with_current_context, ContextRegistry, RequestContext,
+};
+pub use edge_proxy::{
+    edge_proxy_descriptor, require_phase, require_same_application_generation, EdgeProxyAdapter,
+    EdgeProxyAdapterError, EdgeProxyCapabilities, EdgeProxyDescriptor, EdgeProxyGeneration,
+    EdgeProxyKind, EdgeProxyLifecyclePhase, EdgeProxyLifecycleReceipt,
 };
 pub use host_abi::{
     middleware_config_sha256, MiddlewareHostAbiError, MiddlewareHostBeginResult,
@@ -153,6 +160,10 @@ pub use rate_limit_v2::{
 pub use resilience::{
     Bulkhead, BulkheadRejected, CircuitAdmission, CircuitBreaker, CircuitBreakerConfig,
     CircuitStateSnapshot, ResilienceConfigError,
+};
+pub use runtime_artifact::{
+    MiddlewareArtifactDescriptor, MiddlewareArtifactKind, MiddlewarePackageManifest,
+    MiddlewarePackageViolation, MiddlewareProvider, MiddlewareRuntimeProfile,
 };
 pub use runtime_manifest::{
     admit_server_stack, admit_server_stack_from, admit_server_stack_from_env, ManifestLoadError,

@@ -54,7 +54,7 @@ const EXPECTED_WORKSPACE_SCRIPTS: &[(&str, &str)] = &[
     ),
     (
         "contracts:compile",
-        "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit",
+        "tsp compile contracts/typespec --output-dir target/contracts/typespec && tsp compile contracts/docs-serving.tsp --no-emit && tsp compile contracts/persistence/idempotency-record.tsp --no-emit && tsp compile contracts/rate-limit-v2/typespec --no-emit && tsp compile contracts/middleware-package/typespec --no-emit",
     ),
     (
         "contracts:cross-translate",

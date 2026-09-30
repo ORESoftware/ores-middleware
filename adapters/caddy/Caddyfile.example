@@ -1,0 +1,59 @@
+{
+	# Example is intentionally local/plain HTTP. Consumer infra owns public TLS
+	# topology and may enable Caddy Automatic HTTPS for admitted hostnames.
+	auto_https off
+
+	servers {
+		# Replace with the exact deployment-owned proxy CIDRs when Caddy is behind
+		# another trusted edge. Never use 0.0.0.0/0 or ::/0.
+		trusted_proxies static 127.0.0.1/32 ::1/128
+	}
+}
+
+:8080 {
+	route {
+		@forbidden_method method TRACE CONNECT
+		respond @forbidden_method 405
+
+		# Deployment generators replace this closed example allowlist.
+		@unknown_host not host localhost example.invalid
+		respond @unknown_host 421
+
+		request_body {
+			max_size 2MB
+		}
+
+		header {
+			-Server
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "strict-origin-when-cross-origin"
+		}
+
+		reverse_proxy 127.0.0.1:9000 {
+			# Caddy already protects its X-Forwarded-* defaults from untrusted
+			# spoofing. The ORES baseline additionally removes metadata that is
+			# not part of the admitted transport identity contract.
+			header_up -Forwarded
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Port
+			header_up -X-Real-IP
+			header_up -Proxy
+			header_up -tracestate
+			header_up -baggage
+			header_up -Upgrade
+			header_up -TE
+			header_up -Trailer
+			header_up -X-Request-ID
+
+			# The Rust/Erlang ORES router is authoritative for middleware and
+			# request-id generation. Caddy contributes only admitted transport facts.
+			header_up X-Real-IP {client_ip}
+			header_up X-Ores-Edge-Proxy caddy
+
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 30s
+			}
+		}
+	}
+}

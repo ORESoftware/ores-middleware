@@ -51,9 +51,11 @@ erlang:
 
 edge-proxy-adapters:
     mkdir -p target/tools
-    rustfmt --edition 2024 --check scripts/check_edge_proxy_adapters.rs
+    rustfmt --edition 2024 --check scripts/check_edge_proxy_adapters.rs scripts/check_caddy_adapter.rs
     rustc --edition=2024 -D warnings scripts/check_edge_proxy_adapters.rs -o target/tools/check-edge-proxy-adapters
+    rustc --edition=2024 -D warnings scripts/check_caddy_adapter.rs -o target/tools/check-caddy-adapter
     target/tools/check-edge-proxy-adapters
+    target/tools/check-caddy-adapter
 
 verify: contracts rust ts golang gleam elixir erlang edge-proxy-adapters
     npm run descriptors:check
