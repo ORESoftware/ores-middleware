@@ -195,7 +195,7 @@ mod tests {
             application_generation_sha256: application_digest.to_owned(),
             rendered_config_sha256:
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_owned(),
-        };
+        }
     }
 
     fn receipt(
@@ -207,7 +207,7 @@ mod tests {
             proxy: kind,
             generation,
             phase,
-        };
+        }
     }
 
     #[test]
