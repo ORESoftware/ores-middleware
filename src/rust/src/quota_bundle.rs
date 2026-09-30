@@ -447,7 +447,7 @@ fn validate_policy(policy: &QuotaBundlePolicy) -> Result<(), QuotaBundleError> {
         if !violations.is_empty() {
             let codes = violations
                 .iter()
-                .map(|violation| violation.code.as_str())
+                .map(|violation| violation.code)
                 .collect::<Vec<_>>()
                 .join(",");
             return Err(QuotaBundleError::new(
