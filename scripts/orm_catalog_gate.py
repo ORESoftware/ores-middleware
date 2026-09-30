@@ -149,6 +149,7 @@ publish = false
 chrono = "0.4"
 diesel = {{ version = "={DIESEL_VERSION}", default-features = false, features = ["postgres", "chrono"] }}
 sea-orm = {{ version = "={SEA_ORM_VERSION}", default-features = false, features = ["macros", "with-chrono"] }}
+sea-orm-macros = {{ version = "={SEA_ORM_VERSION}" }}
 serde_json = "1"
 '''
 
