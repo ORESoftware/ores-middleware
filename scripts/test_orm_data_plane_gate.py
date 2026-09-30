@@ -73,7 +73,8 @@ class OrmDataPlaneGateTests(unittest.TestCase):
     def test_generated_crate_pins_real_database_enabled_orms(self) -> None:
         cargo = render_data_plane_cargo()
         self.assertIn(f'version = "={DIESEL_VERSION}"', cargo)
-        self.assertIn(f'version = "={SEA_ORM_VERSION}"', cargo)
+        self.assertGreaterEqual(cargo.count(f'version = "={SEA_ORM_VERSION}"'), 2)
+        self.assertIn(f'sea-orm-macros = {{ version = "={SEA_ORM_VERSION}" }}', cargo)
         self.assertIn('"postgres"', cargo)
         self.assertIn('"sqlx-postgres"', cargo)
         self.assertIn('"runtime-tokio-rustls"', cargo)
