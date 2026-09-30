@@ -151,14 +151,23 @@ defmodule OresMiddleware.Plug do
     trusted = stack.hooks.trusted_proxy?.(conn, tls.trustedProxyCidrs)
     forwarded = first_req_header(conn, "x-forwarded-proto")
 
+    forwarded_identity_headers = [
+      "cf-connecting-ip",
+      "x-forwarded-for",
+      "x-real-ip",
+      "forwarded"
+    ]
+
     has_forwarded_identity =
-      Enum.any?(["cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded"], fn name ->
+      Enum.any?(forwarded_identity_headers, fn name ->
         not is_nil(first_req_header(conn, name))
       end)
 
+    untrusted_forwarding =
+      (not is_nil(forwarded) or has_forwarded_identity) and not trusted
+
     cond do
-      tls.strictForwardedHeaders and (not is_nil(forwarded) or has_forwarded_identity) and
-          not trusted ->
+      tls.strictForwardedHeaders and untrusted_forwarding ->
         {:error, 400, "untrusted_forwarded_header",
          "forwarded transport or client headers came from an untrusted peer"}
 
