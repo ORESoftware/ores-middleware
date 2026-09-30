@@ -240,7 +240,7 @@ pub fn evaluate_quota_bundle(
     validate_policy(policy)?;
     validate_request(request)?;
     validate_clock(now_ms, state.last_now_ms)?;
-    validate_state_scope(policy, request, state)?;
+    validate_existing_state_scope(policy, request, state)?;
 
     purge_expired_receipts(now_ms, state);
 
@@ -285,6 +285,8 @@ pub fn evaluate_quota_bundle(
             reason_code: Some(reason.into()),
         });
     }
+
+    bind_state_scope(policy, request, state);
 
     let mut current = Vec::with_capacity(policy.windows.len());
     let mut exhausted: Option<(String, u64)> = None;
@@ -506,10 +508,10 @@ fn validate_clock(now_ms: u64, previous: Option<u64>) -> Result<(), QuotaBundleE
     Ok(())
 }
 
-fn validate_state_scope(
+fn validate_existing_state_scope(
     policy: &QuotaBundlePolicy,
     request: &QuotaAdmissionRequest,
-    state: &mut QuotaBundleState,
+    state: &QuotaBundleState,
 ) -> Result<(), QuotaBundleError> {
     if state
         .principal_digest
@@ -543,7 +545,14 @@ fn validate_state_scope(
             "quota window structure changed for an existing ledger",
         ));
     }
+    Ok(())
+}
 
+fn bind_state_scope(
+    policy: &QuotaBundlePolicy,
+    request: &QuotaAdmissionRequest,
+    state: &mut QuotaBundleState,
+) {
     if state.principal_digest.is_none() {
         state.principal_digest = Some(request.principal_digest.clone());
     }
@@ -551,9 +560,8 @@ fn validate_state_scope(
         state.bundle_id = Some(policy.bundle_id.clone());
     }
     if state.policy_fingerprint.is_none() {
-        state.policy_fingerprint = Some(fingerprint);
+        state.policy_fingerprint = Some(policy_fingerprint(policy));
     }
-    Ok(())
 }
 
 fn policy_fingerprint(policy: &QuotaBundlePolicy) -> String {
@@ -740,6 +748,32 @@ mod tests {
         assert_eq!(denied.exhausted_policy_id.as_deref(), Some("minute"));
         assert_eq!(denied.reason_code.as_deref(), Some("quota_exhausted"));
         assert_eq!(state.windows, before);
+    }
+
+    #[test]
+    fn rejected_first_contact_does_not_claim_an_empty_ledger() {
+        let policy = policy(9);
+        let mut state = QuotaBundleState::default();
+
+        let stale = evaluate_quota_bundle(
+            &policy,
+            &request("operation-0008", 8, 1),
+            19_000,
+            &mut state,
+        )
+        .expect("stale request denial");
+        assert_eq!(stale.kind, QuotaAdmissionKind::Denied);
+        assert!(state.principal_digest.is_none());
+        assert!(state.bundle_id.is_none());
+        assert!(state.policy_fingerprint.is_none());
+        assert!(state.windows.is_empty());
+
+        let mut legitimate = request("operation-0009", 9, 1);
+        legitimate.principal_digest = "d".repeat(64);
+        let admitted = evaluate_quota_bundle(&policy, &legitimate, 19_001, &mut state)
+            .expect("legitimate principal can claim empty ledger");
+        assert_eq!(admitted.kind, QuotaAdmissionKind::Allowed);
+        assert_eq!(state.principal_digest.as_deref(), Some(legitimate.principal_digest()));
     }
 
     #[test]
