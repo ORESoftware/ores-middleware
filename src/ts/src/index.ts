@@ -178,16 +178,29 @@ export function validateConfig(config: MiddlewareConfig): ValidationIssue[] {
   return configRules.flatMap((rule) => rule(config));
 }
 
+const DEFAULT_LOCAL_RATE_LIMIT_MAX_ENTRIES = 10_000;
+
 class MemoryTokenBucket {
   readonly #buckets = new Map<string, { tokens: number; last: number }>();
-  constructor(private readonly now: () => number) {}
+  constructor(
+    private readonly now: () => number,
+    private readonly maxEntries = DEFAULT_LOCAL_RATE_LIMIT_MAX_ENTRIES
+  ) {}
   async allow(key: string, capacity: number, refillPerSecond: number): Promise<boolean> {
     const now = this.now();
     const previous = this.#buckets.get(key) ?? { tokens: capacity, last: now };
-    // The bucket is a new value derived from the previous one; the Map is the
-    // one stateful store and is replaced entry-by-entry, never edited in place.
     const refilled = Math.min(capacity, previous.tokens + ((now - previous.last) / 1_000) * refillPerSecond);
     const allowed = refilled >= 1;
+
+    // HOT-PATH: Map insertion order is a bounded O(1) FIFO approximation.
+    // Existing keys are refreshed in place; only a new key can evict one old
+    // bucket, preventing source-IP churn from growing process memory without bound.
+    if (this.#buckets.has(key)) {
+      this.#buckets.delete(key);
+    } else if (this.#buckets.size >= this.maxEntries) {
+      const oldest = this.#buckets.keys().next().value;
+      if (oldest !== undefined) this.#buckets.delete(oldest);
+    }
     this.#buckets.set(key, { tokens: allowed ? refilled - 1 : refilled, last: now });
     return allowed;
   }
