@@ -25,6 +25,7 @@ use crate::{
         DynRateLimitKeyDeriver, HmacSha256KeyDeriver, RateLimitDecision, RateLimitDecisionKind,
         RateLimitDecisionSource, RateLimitFailureMode, RateLimitKeyDerivationMode,
         RateLimitRequest, UnavailableRateLimitKeyDeriver, derive_rate_limit_principal,
+        validate_rate_limit_decision,
     },
 };
 
@@ -339,9 +340,11 @@ impl MiddlewareStack {
             cost: 1,
         };
 
-        match self.rate_limiter.evaluate(&evaluation).await {
-            Ok(decision) if valid_rate_limit_decision(&evaluation, &decision) => decision,
-            Ok(_) => decision_for_failure(policy, false, "rate_limit_decision_invalid"),
+        match self.rate_limiter.evaluate(&evaluation).await.and_then(|decision| {
+            validate_rate_limit_decision(&evaluation, &decision)?;
+            Ok(decision)
+        }) {
+            Ok(decision) => decision,
             Err(error) => match (policy.layer, policy.failure_mode) {
                 // Authorization is a security boundary. A primary outage must
                 // not be weakened by either fail-open or a split local view.
@@ -355,7 +358,12 @@ impl MiddlewareStack {
                     decision_for_failure(policy, false, error.code)
                 }
                 (_, RateLimitFailureMode::LocalOnly) => {
-                    match self.local_rate_limiter.evaluate(&evaluation).await {
+                    match self.local_rate_limiter.evaluate(&evaluation).await.and_then(
+                        |decision| {
+                            validate_rate_limit_decision(&evaluation, &decision)?;
+                            Ok(decision)
+                        },
+                    ) {
                         Ok(mut decision) => {
                             if decision.is_allowed() {
                                 decision.kind = RateLimitDecisionKind::DegradedAllowed;
@@ -511,26 +519,6 @@ fn correlate_error(
         .entry(config.settings.request_id_header.clone())
         .or_insert_with(|| context.request_id.clone());
     error
-}
-
-fn valid_rate_limit_decision(
-    request: &RateLimitRequest,
-    decision: &RateLimitDecision,
-) -> bool {
-    let reason_code_valid = decision.reason_code.as_deref().is_none_or(|value| {
-        !value.is_empty()
-            && value.len() <= 128
-            && value
-                .bytes()
-                .all(|byte| !byte.is_ascii_control() && byte.is_ascii())
-    });
-
-    decision.policy_id == request.policy_id
-        && decision.layer == request.layer
-        && decision.algorithm == request.algorithm
-        && decision.limit == request.capacity
-        && decision.remaining <= decision.limit
-        && reason_code_valid
 }
 
 fn decision_for_failure(
