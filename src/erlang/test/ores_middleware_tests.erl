@@ -75,6 +75,34 @@ strict_forwarded_client_identity_rejects_untrusted_peer_test() ->
     Response = Middleware(Request, fun(_Request) -> #{status => 200, headers => #{}, body => <<"ok">>} end),
     ?assertEqual(400, maps:get(status, Response)).
 
+rate_limit_denial_exposes_backpressure_metadata_test() ->
+    Config0 = ores_middleware:default_config(<<"rate-limit-test">>),
+    Settings0 = maps:get(settings, Config0),
+    Tls0 = maps:get(tls, Settings0),
+    Config = Config0#{settings => Settings0#{tls => Tls0#{require_https => false}}},
+    Hooks = #{rate_limit => fun(_Key, _Capacity, _Refill) -> false end},
+    {ok, Middleware} = ores_middleware:create_middleware(Config, Hooks),
+    Request = #{
+        method => <<"GET">>,
+        path => <<"/v1">>,
+        scheme => <<"http">>,
+        headers => #{},
+        body_size => 0,
+        remote_ip => <<"203.0.113.9">>
+    },
+    Response = Middleware(Request, fun(_Request) -> erlang:error(handler_must_not_run) end),
+    Headers = maps:get(headers, Response),
+    ?assertEqual(429, maps:get(status, Response)),
+    ?assertEqual(<<"1">>, maps:get(<<"retry-after">>, Headers)),
+    ?assertEqual(<<"\"ip-default\";q=5;w=1">>, maps:get(<<"ratelimit-policy">>, Headers)),
+    ?assertEqual(<<"\"ip-default\";r=0;t=1">>, maps:get(<<"ratelimit">>, Headers)),
+    ?assertEqual(<<"5">>, maps:get(<<"ratelimit-limit">>, Headers)),
+    ?assertEqual(<<"0">>, maps:get(<<"ratelimit-remaining">>, Headers)),
+    ?assertEqual(<<"1">>, maps:get(<<"ratelimit-reset">>, Headers)),
+    ?assertEqual(<<"ip-default">>, maps:get(<<"x-ores-rate-limit-policy">>, Headers)),
+    ?assertEqual(<<"application">>, maps:get(<<"x-ores-rate-limit-layer">>, Headers)),
+    ?assertEqual(<<"denied">>, maps:get(<<"x-ores-rate-limit-decision">>, Headers)).
+
 trusted_proxy_rate_key_uses_validated_forwarded_client_test() ->
     Parent = self(),
     Config0 = ores_middleware:default_config(<<"forwarded-test">>),
