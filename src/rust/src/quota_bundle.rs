@@ -649,31 +649,43 @@ fn valid_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        middleware_order::OperationClass,
+        rate_limit::{RateLimitFailureMode, RateLimitLayer},
+    };
 
     fn epoch(value: u64) -> QuotaEpoch {
         QuotaEpoch::new(value).expect("valid epoch")
+    }
+
+    fn window_policy(policy_id: &str, capacity: u64, window_ms: u64) -> RateLimitPolicyV2 {
+        RateLimitPolicyV2 {
+            policy_id: policy_id.into(),
+            operation_class: OperationClass::JobAdmission,
+            algorithm: RateLimitAlgorithmV2::FixedWindow,
+            consistency: RateLimitConsistency::Strict,
+            enforcement_mode: RateLimitEnforcementMode::Enforce,
+            failure_mode: RateLimitFailureMode::FailClosed,
+            layer: RateLimitLayer::Application,
+            capacity,
+            window_ms: Some(window_ms),
+            refill_tokens: None,
+            refill_interval_ms: None,
+            maximum_overshoot: 0,
+            local_deny_cache_entries: 0,
+            coordinator_required: true,
+            key_version: "v1".into(),
+        }
     }
 
     fn policy(epoch_value: u64) -> QuotaBundlePolicy {
         QuotaBundlePolicy {
             bundle_id: "tenant-default".into(),
             quota_epoch: epoch(epoch_value),
-            windows: vec![
-                QuotaWindowPolicy {
-                    policy_id: "minute".into(),
-                    limit: 5,
-                    window_ms: 60_000,
-                },
-                QuotaWindowPolicy {
-                    policy_id: "ten-minute".into(),
-                    limit: 7,
-                    window_ms: 600_000,
-                },
-                QuotaWindowPolicy {
-                    policy_id: "hour".into(),
-                    limit: 10,
-                    window_ms: 3_600_000,
-                },
+            policies: vec![
+                window_policy("minute", 5, 60_000),
+                window_policy("ten-minute", 7, 600_000),
+                window_policy("hour", 10, 3_600_000),
             ],
         }
     }
@@ -900,17 +912,9 @@ mod tests {
         let policy = QuotaBundlePolicy {
             bundle_id: "retry-dominance".into(),
             quota_epoch: epoch(1),
-            windows: vec![
-                QuotaWindowPolicy {
-                    policy_id: "minute".into(),
-                    limit: 2,
-                    window_ms: 60_000,
-                },
-                QuotaWindowPolicy {
-                    policy_id: "hour".into(),
-                    limit: 2,
-                    window_ms: 3_600_000,
-                },
+            policies: vec![
+                window_policy("minute", 2, 60_000),
+                window_policy("hour", 2, 3_600_000),
             ],
         };
         let mut state = QuotaBundleState::default();
@@ -961,16 +965,8 @@ mod tests {
     fn replay_receipt_expires_at_latest_charged_window_boundary() {
         let mut policy = policy(5);
         policy.policies = vec![
-            QuotaWindowPolicy {
-                policy_id: "minute".into(),
-                limit: 5,
-                window_ms: 60_000,
-            },
-            QuotaWindowPolicy {
-                policy_id: "ten-minute".into(),
-                limit: 10,
-                window_ms: 600_000,
-            },
+            window_policy("minute", 5, 60_000),
+            window_policy("ten-minute", 10, 600_000),
         ];
         let mut state = QuotaBundleState::default();
         let request = request("operation-0036", 5, 1);
@@ -996,11 +992,7 @@ mod tests {
         let policy = QuotaBundlePolicy {
             bundle_id: "capacity-test".into(),
             quota_epoch: epoch(1),
-            windows: vec![QuotaWindowPolicy {
-                policy_id: "hour".into(),
-                limit: MAX_QUOTA_LIMIT,
-                window_ms: 3_600_000,
-            }],
+            policies: vec![window_policy("hour", 1_000_000_000, 3_600_000)],
         };
         let mut state = QuotaBundleState::default();
 
@@ -1031,11 +1023,7 @@ mod tests {
         let policy = QuotaBundlePolicy {
             bundle_id: "time-overflow".into(),
             quota_epoch: epoch(1),
-            windows: vec![QuotaWindowPolicy {
-                policy_id: "tiny".into(),
-                limit: 10,
-                window_ms: 10,
-            }],
+            policies: vec![window_policy("tiny", 10, 10)],
         };
         let mut state = QuotaBundleState::default();
         let error = evaluate_quota_bundle(
@@ -1056,11 +1044,7 @@ mod tests {
     #[test]
     fn fixed_window_boundary_rollover_is_deterministic() {
         let mut policy = policy(2);
-        policy.policies = vec![QuotaWindowPolicy {
-            policy_id: "minute".into(),
-            limit: 2,
-            window_ms: 60_000,
-        }];
+        policy.policies = vec![window_policy("minute", 2, 60_000)];
         let mut state = QuotaBundleState::default();
 
         let first = evaluate_quota_bundle(
@@ -1135,7 +1119,7 @@ mod tests {
         .expect("initial admission");
 
         let mut mutated = policy.clone();
-        mutated.windows[0].limit = 999;
+        mutated.policies[0].capacity = 999;
         let error = evaluate_quota_bundle(
             &mutated,
             &request("operation-0061", 1, 1),
