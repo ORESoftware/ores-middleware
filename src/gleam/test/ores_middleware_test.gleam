@@ -25,7 +25,6 @@ pub fn production_rejects_test_only_middleware_test() {
   assert list.length(ores_middleware.validate_config(config)) >= 2
 }
 
-
 pub fn default_rate_limit_enforces_five_request_burst_per_ip_test() {
   let base = ores_middleware.default_config("rate-limit-test")
   let config =
