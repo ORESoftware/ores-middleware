@@ -75,6 +75,36 @@ func TestStackAddsRequestAndSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestStrictForwardedClientIdentityRejectsUntrustedPeer(t *testing.T) {
+	config := testConfig()
+	config.Settings.TLS.StrictForwardedHeaders = true
+	stack, err := New(config, Dependencies{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := stack.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler must not run")
+	}))
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "198.51.100.10:4242"
+	request.Header.Set("X-Forwarded-For", "203.0.113.9")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestTrustedProxyClientIPPrefersCanonicalForwardedIdentity(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "127.0.0.1:4242"
+	request.Header.Set("CF-Connecting-IP", "203.0.113.055")
+	request.Header.Set("X-Forwarded-For", "203.0.113.55, 10.0.0.4")
+	if got := clientIP(request, true); got != "203.0.113.55" {
+		t.Fatalf("clientIP=%q", got)
+	}
+}
+
 func TestDescriptorExportsStandardOperations(t *testing.T) {
 	value := Descriptor()
 	if len(value.OperationSymbols) != 7 {
