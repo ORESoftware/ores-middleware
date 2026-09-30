@@ -659,7 +659,7 @@ mod tests {
     }
 
     fn window_policy(policy_id: &str, capacity: u64, window_ms: u64) -> RateLimitPolicyV2 {
-        RateLimitPolicyV2 {
+        let policy = RateLimitPolicyV2 {
             policy_id: policy_id.into(),
             operation_class: OperationClass::JobAdmission,
             algorithm: RateLimitAlgorithmV2::FixedWindow,
@@ -675,7 +675,12 @@ mod tests {
             local_deny_cache_entries: 0,
             coordinator_required: true,
             key_version: "v1".into(),
-        }
+        };
+        assert!(
+            policy.validate().is_empty(),
+            "test fixture must remain a valid V2 policy"
+        );
+        policy
     }
 
     fn policy(epoch_value: u64) -> QuotaBundlePolicy {
@@ -1131,6 +1136,52 @@ mod tests {
     }
 
     #[test]
+    fn bundle_rejects_policy_shapes_that_bypass_strict_fixed_window_authority() {
+        let mut state = QuotaBundleState::default();
+
+        let mut token_bucket = policy(1);
+        token_bucket.policies[0].algorithm = RateLimitAlgorithmV2::TokenBucket;
+        token_bucket.policies[0].window_ms = None;
+        token_bucket.policies[0].refill_tokens = Some(5);
+        token_bucket.policies[0].refill_interval_ms = Some(60_000);
+        let error = evaluate_quota_bundle(
+            &token_bucket,
+            &request("operation-0065", 1, 1),
+            65_000,
+            &mut state,
+        )
+        .expect_err("bundle must not reinterpret token-bucket policy as a window");
+        assert_eq!(error.code, "quota_policy_algorithm_unsupported");
+
+        let mut bounded = policy(1);
+        bounded.policies[0].consistency = RateLimitConsistency::Bounded;
+        bounded.policies[0].failure_mode = RateLimitFailureMode::LocalOnly;
+        bounded.policies[0].maximum_overshoot = 1;
+        bounded.policies[0].local_deny_cache_entries = 1;
+        bounded.policies[0].coordinator_required = false;
+        let error = evaluate_quota_bundle(
+            &bounded,
+            &request("operation-0066", 1, 1),
+            65_000,
+            &mut state,
+        )
+        .expect_err("atomic bundle must require strict consistency");
+        assert_eq!(error.code, "quota_policy_consistency_invalid");
+
+        let mut audit = policy(1);
+        audit.policies[0].enforcement_mode = RateLimitEnforcementMode::Audit;
+        let error = evaluate_quota_bundle(
+            &audit,
+            &request("operation-0067", 1, 1),
+            65_000,
+            &mut state,
+        )
+        .expect_err("atomic debit must not run under audit mode");
+        assert_eq!(error.code, "quota_policy_enforcement_invalid");
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
     fn malformed_cost_and_identifiers_fail_before_debit() {
         let mut bad_policy = policy(1);
         let mut state = QuotaBundleState::default();
@@ -1142,7 +1193,7 @@ mod tests {
             &mut state,
         )
         .expect_err("invalid policy id");
-        assert_eq!(error.code, "quota_policy_id_invalid");
+        assert_eq!(error.code, "quota_policy_invalid");
         assert!(state.windows.is_empty());
 
         let policy = policy(1);
