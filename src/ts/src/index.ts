@@ -278,7 +278,12 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     }
     const effectiveHttps = url.protocol === "https:" || (trustedProxy && forwardedProto === "https");
     if (config.settings.tls.requireHttps && !effectiveHttps) return early(problem(426, "https_required", "HTTPS is required"));
-    const clientIp = effectiveClientIp(request, trustedProxy, dependencies.clientIp);
+    const clientIp = effectiveClientIp(
+      request,
+      trustedProxy,
+      dependencies.clientIp,
+      config.settings.tls.trustedProxyCidrs,
+    );
 
     if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, initialContext))) return early(problem(403, "ip_policy_denied", "request source is not permitted"));
 
