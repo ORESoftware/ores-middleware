@@ -27,6 +27,7 @@ pub enum MiddlewareStage {
     PrincipalRateLimit,
     Authorization,
     Idempotency,
+    QuotaAdmission,
     Handler,
     ResponseCompression,
     SecurityHeaders,
@@ -48,6 +49,7 @@ impl MiddlewareStage {
             Self::PrincipalRateLimit => "principal-rate-limit",
             Self::Authorization => "authorization",
             Self::Idempotency => "idempotency",
+            Self::QuotaAdmission => "quota-admission",
             Self::Handler => "handler",
             Self::ResponseCompression => "response-compression",
             Self::SecurityHeaders => "security-headers",
@@ -74,6 +76,33 @@ pub const DEFAULT_MIDDLEWARE_ORDER: [MiddlewareStage; 16] = [
     MiddlewareStage::PrincipalRateLimit,
     MiddlewareStage::Authorization,
     MiddlewareStage::Idempotency,
+    MiddlewareStage::Handler,
+    MiddlewareStage::ResponseCompression,
+    MiddlewareStage::SecurityHeaders,
+    MiddlewareStage::TelemetryFinalize,
+];
+
+/// Reviewed profile for operations that consume paid/scarce quota.
+///
+/// Principal rate limiting remains before authorization so every authenticated
+/// attempt can be abuse-limited. Quota admission is deliberately after
+/// idempotency so a replay that is satisfied by the idempotency layer does not
+/// consume paid quota again, and before the handler so work cannot start
+/// without an authoritative admission.
+pub const BILLABLE_QUOTA_MIDDLEWARE_ORDER: [MiddlewareStage; 17] = [
+    MiddlewareStage::PanicBoundary,
+    MiddlewareStage::Deadline,
+    MiddlewareStage::RequestId,
+    MiddlewareStage::TraceContext,
+    MiddlewareStage::TrustedProxy,
+    MiddlewareStage::TransportSecurity,
+    MiddlewareStage::PayloadLimit,
+    MiddlewareStage::AnonymousFloodGuard,
+    MiddlewareStage::Authentication,
+    MiddlewareStage::PrincipalRateLimit,
+    MiddlewareStage::Authorization,
+    MiddlewareStage::Idempotency,
+    MiddlewareStage::QuotaAdmission,
     MiddlewareStage::Handler,
     MiddlewareStage::ResponseCompression,
     MiddlewareStage::SecurityHeaders,
@@ -214,6 +243,24 @@ const ORDER_RULES: [OrderRule; 11] = [
     },
 ];
 
+const QUOTA_ORDER_RULES: [OrderRule; 3] = [
+    OrderRule {
+        first: MiddlewareStage::Authorization,
+        second: MiddlewareStage::Idempotency,
+        code: "authorization-before-idempotency",
+    },
+    OrderRule {
+        first: MiddlewareStage::Idempotency,
+        second: MiddlewareStage::QuotaAdmission,
+        code: "idempotency-before-quota-admission",
+    },
+    OrderRule {
+        first: MiddlewareStage::QuotaAdmission,
+        second: MiddlewareStage::Handler,
+        code: "quota-admission-before-handler",
+    },
+];
+
 /// Validates the complete historical reviewed ORES reference profile.
 ///
 /// This is intentionally strict and is retained for consumers that explicitly
@@ -259,6 +306,57 @@ pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolati
         .chain(missing)
         .chain(first)
         .chain(declared_rules)
+        .chain(reviewed_order)
+        .collect()
+}
+
+/// Validates the reviewed billable/scarce-resource profile.
+///
+/// This profile is additive to the historical compatibility profile. It keeps
+/// abuse rate limiting and paid quota admission as separate decisions and
+/// requires idempotency to run before quota consumption.
+pub fn validate_billable_quota_middleware_order(
+    stages: &[MiddlewareStage],
+) -> Vec<OrderViolation> {
+    let duplicates = stages.iter().enumerate().filter_map(|(index, stage)| {
+        stages[..index].contains(stage).then_some(OrderViolation {
+            code: "duplicate-stage",
+            message: "middleware stages must occur exactly once",
+        })
+    });
+
+    let missing = BILLABLE_QUOTA_MIDDLEWARE_ORDER
+        .into_iter()
+        .filter(|expected| !stages.contains(expected))
+        .map(|_| OrderViolation {
+            code: "missing-stage",
+            message: "every reviewed billable-quota middleware stage must be present exactly once",
+        });
+
+    let first = require_first(
+        stages,
+        MiddlewareStage::PanicBoundary,
+        "panic-boundary-must-be-first",
+    )
+    .into_iter();
+
+    let base_rules = ORDER_RULES
+        .into_iter()
+        .filter_map(|rule| require_before(stages, rule.first, rule.second, rule.code));
+
+    let quota_rules = QUOTA_ORDER_RULES
+        .into_iter()
+        .filter_map(|rule| require_before(stages, rule.first, rule.second, rule.code));
+
+    let reviewed_order = BILLABLE_QUOTA_MIDDLEWARE_ORDER
+        .windows(2)
+        .filter_map(|pair| require_before(stages, pair[0], pair[1], "reviewed-stage-order"));
+
+    duplicates
+        .chain(missing)
+        .chain(first)
+        .chain(base_rules)
+        .chain(quota_rules)
         .chain(reviewed_order)
         .collect()
 }
@@ -353,6 +451,49 @@ mod tests {
             validate_middleware_order(&stages)
                 .iter()
                 .any(|issue| issue.code == "reviewed-stage-order")
+        );
+    }
+
+    #[test]
+    fn billable_quota_profile_places_idempotency_before_quota() {
+        assert!(
+            validate_billable_quota_middleware_order(&BILLABLE_QUOTA_MIDDLEWARE_ORDER).is_empty()
+        );
+        let idempotency = BILLABLE_QUOTA_MIDDLEWARE_ORDER
+            .iter()
+            .position(|stage| *stage == MiddlewareStage::Idempotency)
+            .unwrap();
+        let quota = BILLABLE_QUOTA_MIDDLEWARE_ORDER
+            .iter()
+            .position(|stage| *stage == MiddlewareStage::QuotaAdmission)
+            .unwrap();
+        let handler = BILLABLE_QUOTA_MIDDLEWARE_ORDER
+            .iter()
+            .position(|stage| *stage == MiddlewareStage::Handler)
+            .unwrap();
+        assert!(idempotency < quota);
+        assert!(quota < handler);
+    }
+
+    #[test]
+    fn billable_quota_profile_rejects_quota_before_idempotency() {
+        let mut stages = BILLABLE_QUOTA_MIDDLEWARE_ORDER;
+        stages.swap(11, 12);
+        assert!(
+            validate_billable_quota_middleware_order(&stages)
+                .iter()
+                .any(|issue| issue.code == "idempotency-before-quota-admission")
+        );
+    }
+
+    #[test]
+    fn billable_quota_profile_rejects_handler_before_quota() {
+        let mut stages = BILLABLE_QUOTA_MIDDLEWARE_ORDER;
+        stages.swap(12, 13);
+        assert!(
+            validate_billable_quota_middleware_order(&stages)
+                .iter()
+                .any(|issue| issue.code == "quota-admission-before-handler")
         );
     }
 

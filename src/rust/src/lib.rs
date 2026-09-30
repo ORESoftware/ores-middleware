@@ -101,8 +101,9 @@ pub use lambda_capabilities::{
     lambda_invocation_capabilities, LAMBDA_INVOCATION_CAPABILITIES,
 };
 pub use middleware_order::{
-    rate_limit_posture, validate_middleware_order, MiddlewareStage, OperationClass, OrderViolation,
-    RateLimitConsistency, RateLimitPosture, DEFAULT_MIDDLEWARE_ORDER,
+    rate_limit_posture, validate_billable_quota_middleware_order, validate_middleware_order,
+    MiddlewareStage, OperationClass, OrderViolation, RateLimitConsistency, RateLimitPosture,
+    BILLABLE_QUOTA_MIDDLEWARE_ORDER, DEFAULT_MIDDLEWARE_ORDER,
 };
 pub use operation::{
     run_operation_boundary, run_operation_boundary_with_cancellation,
@@ -190,6 +191,7 @@ pub const CAPABILITIES: &[&str] = &[
     "deadline-timeout",
     "payload-limit",
     "rate-limit",
+    "quota-admission",
     "auth",
     "sync-observer",
     "json",
