@@ -206,7 +206,6 @@ pub const CAPABILITIES: &[&str] = &[
     "deadline-timeout",
     "payload-limit",
     "rate-limit",
-    "quota-admission",
     "auth",
     "sync-observer",
     "json",
