@@ -70,7 +70,7 @@ test("strict mode rejects forwarded client identity from an untrusted peer", asy
   assert.deepEqual(keys, []);
 });
 
-test("trusted proxy identity uses the first validated forwarded client IP", async () => {
+test("trusted proxy identity uses the nearest untrusted hop, not an attacker prepend", async () => {
   const keys = [];
   const middleware = createMiddleware(testConfig(), {
     isTrustedProxy: () => true,
@@ -82,12 +82,15 @@ test("trusted proxy identity uses the first validated forwarded client IP", asyn
     }
   });
 
-  const response = await middleware(
+  const request = attachTrustedPeerIp(
     new Request("http://example.test/v1/items", {
-      headers: { "x-forwarded-for": "203.0.113.40, 10.0.0.4" }
+      headers: {
+        "x-forwarded-for": "198.51.100.66, 203.0.113.40, 127.0.0.2"
+      }
     }),
-    async () => new Response("ok")
+    "127.0.0.1"
   );
+  const response = await middleware(request, async () => new Response("ok"));
 
   assert.equal(response.status, 200);
   assert.deepEqual(keys, ["203.0.113.40"]);
@@ -185,4 +188,26 @@ test("default local limiter bounds attacker-controlled IP cardinality", async ()
 
   currentIp = "198.51.100.1";
   assert.equal((await middleware(new Request("http://example.test/v1"), next)).status, 200);
+});
+
+
+test("malformed XFF falls back to the trusted socket peer", async () => {
+  const keys = [];
+  const middleware = createMiddleware(testConfig(), {
+    rateLimiter: {
+      async allow(key) {
+        keys.push(key);
+        return true;
+      }
+    }
+  });
+  const request = attachTrustedPeerIp(
+    new Request("http://example.test/v1/items", {
+      headers: { "x-forwarded-for": "not-an-ip, 203.0.113.9" }
+    }),
+    "127.0.0.1"
+  );
+  const response = await middleware(request, async () => new Response("ok"));
+  assert.equal(response.status, 200);
+  assert.deepEqual(keys, ["127.0.0.1"]);
 });
