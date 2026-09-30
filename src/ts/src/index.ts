@@ -1,6 +1,6 @@
 import { boundRequestBody, PayloadTooLargeError } from "./request-body.js";
 import { scopedIdempotencyKey } from "./idempotency-scope.js";
-import { effectiveClientIp } from "./client-ip.js";
+import { attachedPeerIsTrusted, effectiveClientIp } from "./client-ip.js";
 import { currentContext, runWithContext } from "./context.js";
 import {
   checkRequestContract,
@@ -266,7 +266,7 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
 
     const url = new URL(request.url);
     const forwardedProto = request.headers.get("x-forwarded-proto");
-    const trustedProxy = dependencies.isTrustedProxy?.(request) ?? false;
+    const trustedProxy = dependencies.isTrustedProxy?.(request) ?? attachedPeerIsTrusted(request, config.settings.tls.trustedProxyCidrs);
     const hasForwardedIdentity = ["cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded"]
       .some((name) => request.headers.has(name));
     if (
