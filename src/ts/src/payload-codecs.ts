@@ -10,7 +10,9 @@ export type PayloadRepresentation =
   | "application/problem+json"
   | "application/xml"
   | "application/msgpack"
-  | "application/protobuf";
+  | "application/cbor"
+  | "application/protobuf"
+  | "application/octet-stream";
 
 export type PayloadDecoder = (input: Readonly<{
   bytes: Uint8Array;
@@ -23,6 +25,7 @@ export type PayloadDecoder = (input: Readonly<{
 export interface PayloadDecoderRegistry {
   readonly xml?: PayloadDecoder;
   readonly messagePack?: PayloadDecoder;
+  readonly cbor?: PayloadDecoder;
   readonly protobuf?: PayloadDecoder;
 }
 
@@ -83,9 +86,13 @@ export function normalizeContentType(raw: string | null): PayloadRepresentation 
     case "application/msgpack":
     case "application/x-msgpack":
       return "application/msgpack";
+    case "application/cbor":
+      return "application/cbor";
     case "application/protobuf":
     case "application/x-protobuf":
       return "application/protobuf";
+    case "application/octet-stream":
+      return "application/octet-stream";
     default:
       throw new PayloadDecodeError(415, "unsupported_media_type", "unsupported request content type");
   }
@@ -216,6 +223,11 @@ export async function decodeRequestPayload(
         value = await decoder({ bytes, mediaType: representation, request: decodedRequest, routeId: options.routeId });
         break;
       }
+      case "application/cbor": {
+        const decoder = requireDecoder(options.decoders?.cbor, "cbor_decoder_unavailable");
+        value = await decoder({ bytes, mediaType: representation, request: decodedRequest, routeId: options.routeId });
+        break;
+      }
       case "application/protobuf": {
         if (!options.protobufMessageType) {
           throw new PayloadDecodeError(422, "protobuf_message_type_required", "protobuf decoding requires a route message descriptor");
@@ -230,6 +242,9 @@ export async function decodeRequestPayload(
         });
         break;
       }
+      case "application/octet-stream":
+        value = bytes.slice();
+        break;
     }
   } catch (error) {
     if (error instanceof PayloadDecodeError || error instanceof PayloadTooLargeError) throw error;
