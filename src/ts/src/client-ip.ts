@@ -61,7 +61,10 @@ function parseIpv4Value(value: string): bigint | undefined {
 function ipv6Words(value: string): number[] | undefined {
   const lower = value.toLowerCase();
   if (lower.split("::").length > 2) return undefined;
-  const [headRaw, tailRaw] = lower.includes("::") ? lower.split("::") : [lower, undefined];
+  const compressed = lower.includes("::");
+  const split = compressed ? lower.split("::") : [lower];
+  const headRaw = split[0] ?? "";
+  const tailRaw = compressed ? (split[1] ?? "") : undefined;
 
   const expand = (raw: string | undefined): number[] | undefined => {
     if (!raw) return [];
@@ -69,6 +72,7 @@ function ipv6Words(value: string): number[] | undefined {
     const words: number[] = [];
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index];
+      if (part === undefined) return undefined;
       if (part.includes(".")) {
         if (index !== parts.length - 1) return undefined;
         const ipv4 = parseIpv4Value(part);
