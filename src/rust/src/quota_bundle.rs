@@ -894,6 +894,64 @@ mod tests {
         assert_eq!(fresh.kind, QuotaAdmissionKind::Allowed);
     }
     #[test]
+    fn replay_capacity_fails_closed_before_an_untracked_debit() {
+        let policy = QuotaBundlePolicy {
+            bundle_id: "capacity-test".into(),
+            quota_epoch: epoch(1),
+            windows: vec![QuotaWindowPolicy {
+                policy_id: "hour".into(),
+                limit: MAX_QUOTA_LIMIT,
+                window_ms: 3_600_000,
+            }],
+        };
+        let mut state = QuotaBundleState::default();
+
+        for index in 0..MAX_QUOTA_REPLAY_RECEIPTS {
+            evaluate_quota_bundle(
+                &policy,
+                &request(&format!("capacity-{index:08}"), 1, 1),
+                1_000,
+                &mut state,
+            )
+            .expect("bounded replay admission");
+        }
+        let before = state.windows.clone();
+
+        let error = evaluate_quota_bundle(
+            &policy,
+            &request("capacity-overflow", 1, 1),
+            1_000,
+            &mut state,
+        )
+        .expect_err("full replay ledger must fail closed");
+        assert_eq!(error.code, "quota_replay_capacity_exceeded");
+        assert_eq!(state.windows, before);
+    }
+
+    #[test]
+    fn replay_expiration_overflow_fails_before_debit() {
+        let policy = QuotaBundlePolicy {
+            bundle_id: "time-overflow".into(),
+            quota_epoch: epoch(1),
+            windows: vec![QuotaWindowPolicy {
+                policy_id: "tiny".into(),
+                limit: 10,
+                window_ms: 10,
+            }],
+        };
+        let mut state = QuotaBundleState::default();
+        let error = evaluate_quota_bundle(
+            &policy,
+            &request("time-overflow-0001", 1, 1),
+            u64::MAX,
+            &mut state,
+        )
+        .expect_err("replay expiration overflow must fail closed");
+        assert_eq!(error.code, "quota_time_overflow");
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
     fn fixed_window_boundary_rollover_is_deterministic() {
         let mut policy = policy(2);
         policy.windows = vec![QuotaWindowPolicy {
