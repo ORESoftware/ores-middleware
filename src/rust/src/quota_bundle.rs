@@ -236,6 +236,24 @@ pub fn evaluate_quota_bundle(
     let mut current = Vec::with_capacity(policy.windows.len());
     let mut exhausted: Option<(String, u64)> = None;
 
+    if let Some(window) = policy
+        .windows
+        .iter()
+        .find(|window| request.cost > window.limit)
+    {
+        state.last_now_ms = Some(now_ms);
+        return Ok(QuotaAdmissionDecision {
+            kind: QuotaAdmissionKind::Denied,
+            bundle_id: policy.bundle_id.clone(),
+            quota_epoch: policy.quota_epoch,
+            cost: request.cost,
+            windows: Vec::new(),
+            exhausted_policy_id: Some(window.policy_id.clone()),
+            retry_after_ms: None,
+            reason_code: Some("quota_cost_exceeds_policy_limit".into()),
+        });
+    }
+
     for window in &policy.windows {
         let window_started_at_ms = aligned_window_start(now_ms, window.window_ms);
         let used = state
@@ -293,10 +311,9 @@ pub fn evaluate_quota_bundle(
         ));
     }
 
-    let replay_ttl_ms = policy
-        .windows
+    let replay_ttl_ms = current
         .iter()
-        .map(|window| window.window_ms)
+        .map(|(_, _, _, reset_after_ms)| *reset_after_ms)
         .max()
         .ok_or_else(|| QuotaBundleError::new("quota_windows_empty", "quota bundle is empty"))?;
     let expires_at_ms = now_ms.checked_add(replay_ttl_ms).ok_or_else(|| {
@@ -706,6 +723,62 @@ mod tests {
         assert_eq!(state.windows, before);
     }
 
+    #[test]
+    fn cost_larger_than_policy_limit_is_not_advertised_as_retryable() {
+        let policy = policy(5);
+        let mut state = QuotaBundleState::default();
+        let decision = evaluate_quota_bundle(
+            &policy,
+            &request("operation-0035", 5, 6),
+            45_000,
+            &mut state,
+        )
+        .expect("policy cost rejection");
+
+        assert_eq!(decision.kind, QuotaAdmissionKind::Denied);
+        assert_eq!(
+            decision.reason_code.as_deref(),
+            Some("quota_cost_exceeds_policy_limit")
+        );
+        assert_eq!(decision.exhausted_policy_id.as_deref(), Some("minute"));
+        assert_eq!(decision.retry_after_ms, None);
+        assert!(state.windows.is_empty());
+    }
+
+    #[test]
+    fn replay_receipt_expires_at_latest_charged_window_boundary() {
+        let mut policy = policy(5);
+        policy.windows = vec![
+            QuotaWindowPolicy {
+                policy_id: "minute".into(),
+                limit: 5,
+                window_ms: 60_000,
+            },
+            QuotaWindowPolicy {
+                policy_id: "ten-minute".into(),
+                limit: 10,
+                window_ms: 600_000,
+            },
+        ];
+        let mut state = QuotaBundleState::default();
+        let request = request("operation-0036", 5, 1);
+
+        evaluate_quota_bundle(&policy, &request, 599_999, &mut state)
+            .expect("initial admission");
+        let receipt = state
+            .replay
+            .get("operation-0036")
+            .expect("replay receipt");
+        assert_eq!(receipt.expires_at_ms, 600_000);
+
+        let replay = evaluate_quota_bundle(&policy, &request, 599_999, &mut state)
+            .expect("pre-boundary replay");
+        assert_eq!(replay.kind, QuotaAdmissionKind::ReplayedAllowed);
+
+        let fresh = evaluate_quota_bundle(&policy, &request, 600_000, &mut state)
+            .expect("post-boundary admission");
+        assert_eq!(fresh.kind, QuotaAdmissionKind::Allowed);
+    }
     #[test]
     fn fixed_window_boundary_rollover_is_deterministic() {
         let mut policy = policy(2);
