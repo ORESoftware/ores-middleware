@@ -23,7 +23,22 @@ This additive contract hardens rate limiting without silently changing the exist
 15. security headers;
 16. telemetry finalization.
 
-Framework adapters may have different lexical nesting, but their observable execution trace must satisfy `validate_middleware_order`. In particular, forwarded client identity is unusable until the immediate peer passes trusted-proxy validation, and principal limiting cannot run until authentication establishes a canonical subject.
+Framework adapters may have different lexical nesting, but their observable execution trace must satisfy `validate_middleware_order` when they opt into this historical profile. In particular, forwarded client identity is unusable until the immediate peer passes trusted-proxy validation, and principal limiting cannot run until authentication establishes a canonical subject.
+
+### Billable/scarce-resource quota order
+
+Paid quota is **not** the same decision as abuse rate limiting. For operations that consume a paid allowance or scarce worker capacity, `BILLABLE_QUOTA_MIDDLEWARE_ORDER` adds a separate `quota-admission` stage:
+
+```text
+authentication
+  -> principal-rate-limit
+  -> authorization
+  -> idempotency
+  -> quota-admission
+  -> handler
+```
+
+The principal limiter stays early so a replay or malicious retry is still abuse-limited. Quota admission is after idempotency so a request satisfied by an existing idempotency record does not consume paid quota again, and before the handler so new work cannot start without authoritative quota/concurrency admission. Consumers that do not use the historical full profile can express the same dependencies through their own `MiddlewareOrderPolicy`.
 
 ## Consistency and failure behavior
 
