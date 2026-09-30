@@ -5,7 +5,11 @@ import gleam/string
 pub const contract_version = "1.0.0"
 
 @external(erlang, "ores_middleware_gleam_rate_limiter", "allow")
-fn local_rate_limit_allow(key: String, capacity: Int, refill_per_second: Float) -> Bool
+fn local_rate_limit_allow(
+  key: String,
+  capacity: Int,
+  refill_per_second: Float,
+) -> Bool
 
 pub type Environment {
   Development
