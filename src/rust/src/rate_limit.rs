@@ -215,6 +215,26 @@ pub struct RateLimitDecision {
     pub reason_code: Option<String>,
 }
 
+pub fn validate_rate_limit_decision(
+    request: &RateLimitRequest,
+    decision: &RateLimitDecision,
+) -> Result<(), IntegrationError> {
+    let valid = decision.policy_id == request.policy_id
+        && decision.layer == request.layer
+        && decision.algorithm == request.algorithm
+        && decision.limit == request.capacity
+        && decision.limit > 0
+        && decision.remaining <= decision.limit;
+    if valid {
+        return Ok(());
+    }
+    return Err(IntegrationError {
+        code: "invalid_rate_limit_decision",
+        message: "rate-limit provider returned a decision inconsistent with the requested policy"
+            .into(),
+    });
+}
+
 impl RateLimitDecision {
     pub const fn is_allowed(&self) -> bool {
         self.kind.is_allowed()
@@ -466,6 +486,50 @@ fn update_length_prefixed(mac: &mut HmacSha256, value: &[u8]) {
 fn update_vec_length_prefixed(target: &mut Vec<u8>, value: &[u8]) {
     target.extend_from_slice(&(value.len() as u64).to_be_bytes());
     target.extend_from_slice(value);
+}
+
+#[cfg(test)]
+mod decision_validation_tests {
+    use super::*;
+
+    fn request() -> RateLimitRequest {
+        RateLimitRequest {
+            principal: RateLimitPrincipal {
+                digest: "digest".into(),
+                key_version: "v1".into(),
+            },
+            policy_id: "ip-default".into(),
+            algorithm: RateLimitAlgorithm::TokenBucket,
+            layer: RateLimitLayer::Application,
+            capacity: 5,
+            refill_per_second: 5.0,
+            window_ms: 1_000,
+            cost: 1,
+        }
+    }
+
+    #[test]
+    fn provider_decision_must_match_requested_policy_authority() {
+        let request = request();
+        let mut decision =
+            RateLimitDecision::legacy(&request, true, RateLimitDecisionSource::Redis);
+        assert!(validate_rate_limit_decision(&request, &decision).is_ok());
+
+        decision.policy_id = "other-policy".into();
+        assert!(validate_rate_limit_decision(&request, &decision).is_err());
+        decision.policy_id = request.policy_id.clone();
+
+        decision.limit = request.capacity + 1;
+        assert!(validate_rate_limit_decision(&request, &decision).is_err());
+        decision.limit = request.capacity;
+
+        decision.remaining = decision.limit + 1;
+        assert!(validate_rate_limit_decision(&request, &decision).is_err());
+        decision.remaining = decision.limit;
+
+        decision.layer = RateLimitLayer::Authorization;
+        assert!(validate_rate_limit_decision(&request, &decision).is_err());
+    }
 }
 
 #[cfg(test)]
