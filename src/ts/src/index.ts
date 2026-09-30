@@ -254,10 +254,18 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
     const url = new URL(request.url);
     const forwardedProto = request.headers.get("x-forwarded-proto");
     const trustedProxy = dependencies.isTrustedProxy?.(request) ?? false;
+    const hasForwardedIdentity = ["cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded"]
+      .some((name) => request.headers.has(name));
+    if (
+      config.settings.tls.strictForwardedHeaders &&
+      (forwardedProto !== null || hasForwardedIdentity) &&
+      !trustedProxy
+    ) {
+      return early(problem(400, "untrusted_forwarded_header", "forwarded transport or client headers came from an untrusted peer"));
+    }
     const effectiveHttps = url.protocol === "https:" || (trustedProxy && forwardedProto === "https");
-    const clientIp = effectiveClientIp(request, trustedProxy, dependencies.clientIp);
     if (config.settings.tls.requireHttps && !effectiveHttps) return early(problem(426, "https_required", "HTTPS is required"));
-    if (config.settings.tls.strictForwardedHeaders && forwardedProto && !trustedProxy) return early(problem(400, "untrusted_forwarded_header", "forwarded transport headers came from an untrusted peer"));
+    const clientIp = effectiveClientIp(request, trustedProxy, dependencies.clientIp);
 
     if (dependencies.authorizeIp && !(await dependencies.authorizeIp(request, initialContext))) return early(problem(403, "ip_policy_denied", "request source is not permitted"));
 
