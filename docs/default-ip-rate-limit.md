@@ -16,6 +16,8 @@ The Rust middleware `default_config` enables one rate-limit bucket per **effecti
 
 The default deliberately does **not** include route, method, user, tenant, session, or API-key identity in the key. Those dimensions are useful for additional policy overlays, but including them in the baseline would let one source multiply its allowance by rotating routes or identities.
 
+In-process fallback bucket stores are capped at **10,000 client-IP entries** across the Rust, TypeScript, Go, Elixir, Erlang, and Gleam implementations. Admission of a new IP evicts an older local bucket rather than allowing attacker-controlled source cardinality to grow process memory without bound. Authoritative distributed quota providers may use their own bounded retention policy.
+
 The token-bucket baseline permits an initial burst of up to five requests and then refills at five requests per second. Consumers that require a strict rolling-window ceiling should select the corresponding rate-limit algorithm/provider through the canonical `ores-rate-limit` / `.ores-rl.toml` policy rather than weakening or duplicating the IP baseline in application code.
 
 ## Effective client IP
