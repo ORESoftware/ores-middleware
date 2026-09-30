@@ -665,32 +665,53 @@ fn enforce_transport_policy(
 }
 
 fn effective_client_ip(config: &MiddlewareConfig, request: &RequestMetadata) -> Option<String> {
-    let trusted_proxy = peer_is_trusted(
+    let socket_peer = request
+        .remote_ip
+        .as_deref()
+        .and_then(|value| value.parse::<IpAddr>().ok())?;
+
+    if !peer_is_trusted(
         request.remote_ip.as_deref(),
         &config.settings.tls.trusted_proxy_cidrs,
-    );
-    if trusted_proxy {
-        let forwarded = request
-            .headers
-            .get("cf-connecting-ip")
-            .map(String::as_str)
-            .or_else(|| {
-                request
-                    .headers
-                    .get("x-forwarded-for")
-                    .and_then(|value| value.split(',').next())
-            })
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if let Some(ip) = forwarded.and_then(|value| value.parse::<IpAddr>().ok()) {
+    ) {
+        return Some(socket_peer.to_string());
+    }
+
+    if let Some(chain) = request.headers.get("x-forwarded-for") {
+        let mut parsed = Vec::new();
+        for value in chain.split(',').map(str::trim) {
+            let Ok(ip) = value.parse::<IpAddr>() else {
+                // A malformed chain is not partially trusted. Falling back to
+                // the authenticated socket peer prevents an attacker from
+                // steering identity selection with an invalid prefix/suffix.
+                return Some(socket_peer.to_string());
+            };
+            parsed.push(ip);
+        }
+        parsed.push(socket_peer);
+
+        for candidate in parsed.into_iter().rev() {
+            let trusted = config
+                .settings
+                .tls
+                .trusted_proxy_cidrs
+                .iter()
+                .any(|cidr| cidr_contains(cidr, candidate));
+            if !trusted {
+                return Some(candidate.to_string());
+            }
+        }
+
+        return Some(socket_peer.to_string());
+    }
+
+    if let Some(cf_connecting_ip) = request.headers.get("cf-connecting-ip") {
+        if let Ok(ip) = cf_connecting_ip.trim().parse::<IpAddr>() {
             return Some(ip.to_string());
         }
     }
-    request
-        .remote_ip
-        .as_deref()
-        .and_then(|value| value.parse::<IpAddr>().ok())
-        .map(|ip| ip.to_string())
+
+    Some(socket_peer.to_string())
 }
 
 fn peer_is_trusted(remote_ip: Option<&str>, cidrs: &[String]) -> bool {
@@ -797,6 +818,57 @@ mod tests {
         assert_eq!(
             effective_client_ip(&config, &request).as_deref(),
             Some("203.0.113.9")
+        );
+    }
+
+    #[test]
+    fn xff_walks_from_the_socket_inward_and_ignores_attacker_prepends() {
+        let mut config = default_config("test-service");
+        config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
+        let mut request = request("10.23.4.5", Some("https"), false);
+        request.headers.insert(
+            "x-forwarded-for".into(),
+            "198.51.100.66, 203.0.113.9, 10.23.4.6".into(),
+        );
+        assert_eq!(
+            effective_client_ip(&config, &request).as_deref(),
+            Some("203.0.113.9")
+        );
+    }
+
+    #[test]
+    fn malformed_xff_falls_back_to_the_trusted_socket_peer() {
+        let mut config = default_config("test-service");
+        config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
+        let mut request = request("10.23.4.5", Some("https"), false);
+        request
+            .headers
+            .insert("x-forwarded-for".into(), "not-an-ip, 203.0.113.9".into());
+        assert_eq!(
+            effective_client_ip(&config, &request).as_deref(),
+            Some("10.23.4.5")
+        );
+    }
+
+    #[test]
+    fn cf_connecting_ip_is_used_only_when_xff_is_absent() {
+        let mut config = default_config("test-service");
+        config.settings.tls.trusted_proxy_cidrs = vec!["10.0.0.0/8".into()];
+        let mut request = request("10.23.4.5", Some("https"), false);
+        request
+            .headers
+            .insert("cf-connecting-ip".into(), "203.0.113.55".into());
+        assert_eq!(
+            effective_client_ip(&config, &request).as_deref(),
+            Some("203.0.113.55")
+        );
+
+        request
+            .headers
+            .insert("x-forwarded-for".into(), "198.51.100.8, 10.23.4.6".into());
+        assert_eq!(
+            effective_client_ip(&config, &request).as_deref(),
+            Some("198.51.100.8")
         );
     }
 
