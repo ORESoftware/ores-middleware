@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createMiddleware, defaultConfig } from "../dist/index.js";
+import { attachTrustedPeerIp } from "../dist/client-ip.js";
 
 function testConfig() {
   const config = defaultConfig("default-ip-rate-limit-test");
@@ -45,7 +46,7 @@ test("portable middleware keys the baseline strictly by resolved client IP", asy
   assert.deepEqual(keys, [["203.0.113.9", 5, 5]]);
 });
 
-test("untrusted forwarded identity cannot fragment the default IP bucket", async () => {
+test("strict mode rejects forwarded client identity from an untrusted peer", async () => {
   const keys = [];
   const middleware = createMiddleware(testConfig(), {
     isTrustedProxy: () => false,
@@ -57,20 +58,18 @@ test("untrusted forwarded identity cannot fragment the default IP bucket", async
     }
   });
 
-  for (const spoofed of ["203.0.113.1", "203.0.113.2"]) {
-    const response = await middleware(
-      new Request("http://example.test/v1/items", {
-        headers: {
-          "x-real-ip": spoofed,
-          "x-forwarded-for": spoofed
-        }
-      }),
-      async () => new Response("ok")
-    );
-    assert.equal(response.status, 200);
-  }
+  const response = await middleware(
+    new Request("http://example.test/v1/items", {
+      headers: {
+        "x-real-ip": "203.0.113.1",
+        "x-forwarded-for": "203.0.113.2"
+      }
+    }),
+    async () => new Response("ok")
+  );
 
-  assert.deepEqual(keys, ["__unknown_client_ip__", "__unknown_client_ip__"]);
+  assert.equal(response.status, 400);
+  assert.deepEqual(keys, []);
 });
 
 test("trusted proxy identity uses the first validated forwarded client IP", async () => {
@@ -94,4 +93,29 @@ test("trusted proxy identity uses the first validated forwarded client IP", asyn
 
   assert.equal(response.status, 200);
   assert.deepEqual(keys, ["203.0.113.40"]);
+});
+
+
+test("trusted forwarded client identity overrides the adapter-recorded proxy peer", async () => {
+  const keys = [];
+  const middleware = createMiddleware(testConfig(), {
+    isTrustedProxy: () => true,
+    rateLimiter: {
+      async allow(key) {
+        keys.push(key);
+        return true;
+      }
+    }
+  });
+
+  const request = attachTrustedPeerIp(
+    new Request("http://example.test/v1/items", {
+      headers: { "x-forwarded-for": "203.0.113.55, 10.0.0.5" }
+    }),
+    "10.0.0.10"
+  );
+  const response = await middleware(request, async () => new Response("ok"));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(keys, ["203.0.113.55"]);
 });
