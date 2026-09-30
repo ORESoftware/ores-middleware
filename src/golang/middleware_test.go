@@ -96,12 +96,30 @@ func TestStrictForwardedClientIdentityRejectsUntrustedPeer(t *testing.T) {
 	}
 }
 
-func TestTrustedProxyClientIPPrefersCanonicalForwardedIdentity(t *testing.T) {
+func TestTrustedProxyClientIPWalksFromSocketInward(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
-	request.RemoteAddr = "127.0.0.1:4242"
-	request.Header.Set("CF-Connecting-IP", "203.0.113.055")
-	request.Header.Set("X-Forwarded-For", "203.0.113.55, 10.0.0.4")
-	if got := clientIP(request, true); got != "203.0.113.55" {
+	request.RemoteAddr = "10.0.0.5:4242"
+	request.Header.Set("CF-Connecting-IP", "198.51.100.99")
+	request.Header.Set("X-Forwarded-For", "198.51.100.66, 203.0.113.55, 10.0.0.4")
+	if got := clientIP(request, true, []string{"10.0.0.0/8"}); got != "203.0.113.55" {
+		t.Fatalf("clientIP=%q", got)
+	}
+}
+
+func TestTrustedProxyMalformedXFFFallsBackToSocketPeer(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "10.0.0.5:4242"
+	request.Header.Set("X-Forwarded-For", "not-an-ip, 203.0.113.55")
+	if got := clientIP(request, true, []string{"10.0.0.0/8"}); got != "10.0.0.5" {
+		t.Fatalf("clientIP=%q", got)
+	}
+}
+
+func TestTrustedProxyCFIdentityUsedOnlyWithoutXFF(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "10.0.0.5:4242"
+	request.Header.Set("CF-Connecting-IP", "203.0.113.55")
+	if got := clientIP(request, true, []string{"10.0.0.0/8"}); got != "203.0.113.55" {
 		t.Fatalf("clientIP=%q", got)
 	}
 }
