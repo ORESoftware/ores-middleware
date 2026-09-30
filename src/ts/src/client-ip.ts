@@ -34,17 +34,36 @@ export function attachTrustedPeerIp(request: Request, value: unknown): Request {
   return request;
 }
 
-function forwardedIp(request: Request): string | undefined {
+function forwardedIp(
+  request: Request,
+  directPeer: string | undefined,
+  trustedProxyCidrs: readonly string[],
+): string | undefined {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const chain = forwarded.split(",").map((value) => normalizeIp(value));
+    if (chain.some((value) => value === undefined)) {
+      return directPeer;
+    }
+
+    const parsed = chain.filter((value): value is string => value !== undefined);
+    if (directPeer) parsed.push(directPeer);
+
+    // Walk from the socket inward. Attacker-prepended entries live on the
+    // opposite end of the chain and cannot become the selected identity.
+    for (let index = parsed.length - 1; index >= 0; index -= 1) {
+      const candidate = parsed[index];
+      if (candidate === undefined) continue;
+      const trusted = trustedProxyCidrs.some((cidr) => ipInCidr(candidate, cidr));
+      if (!trusted) return candidate;
+    }
+    return directPeer;
+  }
+
   const cf = normalizeIp(request.headers.get("cf-connecting-ip"));
   if (cf) return cf;
 
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = normalizeIp(forwarded.split(",", 1)[0]);
-    if (first) return first;
-  }
-
-  return normalizeIp(request.headers.get("x-real-ip"));
+  return normalizeIp(request.headers.get("x-real-ip")) ?? directPeer;
 }
 
 
@@ -144,8 +163,11 @@ export function attachedPeerIsTrusted(request: Request, cidrs: readonly string[]
 export function effectiveClientIp(
   request: Request,
   trustedProxy: boolean,
-  resolveDirect?: (request: Request) => string | undefined
+  resolveDirect?: (request: Request) => string | undefined,
+  trustedProxyCidrs: readonly string[] = [],
 ): string | undefined {
   const directPeer = normalizeIp(resolveDirect?.(request)) ?? peerIps.get(request);
-  return trustedProxy ? forwardedIp(request) ?? directPeer : directPeer;
+  return trustedProxy
+    ? forwardedIp(request, directPeer, trustedProxyCidrs)
+    : directPeer;
 }
