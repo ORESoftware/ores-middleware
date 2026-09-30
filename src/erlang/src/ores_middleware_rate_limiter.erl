@@ -16,7 +16,8 @@ init(State) -> {ok, State}.
 
 handle_call({allow, Key, Capacity, Refill}, _From, State0) ->
     Now = erlang:monotonic_time(microsecond),
-    {State1, Bucket} = ensure_bucket(State0, Key, Capacity, Now),
+    State = normalize_state(State0),
+    {State1, Bucket} = ensure_bucket(State, Key, Capacity, Now),
     #{tokens := OldTokens, updated := Updated} = Bucket,
     Tokens0 = OldTokens + ((Now - Updated) / 1000000) * Refill,
     Tokens1 = erlang:min(Capacity * 1.0, Tokens0),
@@ -28,6 +29,19 @@ handle_call({allow, Key, Capacity, Refill}, _From, State0) ->
 
 handle_cast(_Message, State) -> {noreply, State}.
 handle_info(_Message, State) -> {noreply, State}.
+
+normalize_state(#{buckets := Buckets, order := Order} = State)
+        when is_map(Buckets) ->
+    case queue:is_queue(Order) of
+        true -> State;
+        false -> migrate_legacy_state(Buckets)
+    end;
+normalize_state(State) when is_map(State) -> migrate_legacy_state(State).
+
+migrate_legacy_state(LegacyBuckets) ->
+    %% One-time hot-upgrade path from the previous unbounded map state.
+    Keys = lists:sublist(maps:keys(LegacyBuckets), ?MAX_ENTRIES),
+    #{buckets => maps:with(Keys, LegacyBuckets), order => queue:from_list(Keys)}.
 
 ensure_bucket(State, Key, Capacity, Now) ->
     Buckets = maps:get(buckets, State),
