@@ -111,14 +111,59 @@ pub struct QuotaBundlePolicy {
     pub windows: Vec<QuotaWindowPolicy>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// Trusted server-side admission input.
+///
+/// This deliberately does not implement `Deserialize`: authoritative cost,
+/// principal identity, and operation identity must be derived by trusted
+/// middleware/RPC metadata rather than accepted from an untrusted request body.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct QuotaAdmissionRequest {
-    pub principal_digest: String,
-    pub operation_digest: String,
-    pub admission_id: String,
-    pub quota_epoch: QuotaEpoch,
-    pub cost: u32,
+    principal_digest: String,
+    operation_digest: String,
+    admission_id: String,
+    quota_epoch: QuotaEpoch,
+    cost: u32,
+}
+
+impl QuotaAdmissionRequest {
+    pub fn from_trusted_context(
+        principal_digest: impl Into<String>,
+        operation_digest: impl Into<String>,
+        admission_id: impl Into<String>,
+        quota_epoch: QuotaEpoch,
+        cost: u32,
+    ) -> Result<Self, QuotaBundleError> {
+        let request = Self {
+            principal_digest: principal_digest.into(),
+            operation_digest: operation_digest.into(),
+            admission_id: admission_id.into(),
+            quota_epoch,
+            cost,
+        };
+        validate_request(&request)?;
+        Ok(request)
+    }
+
+    pub fn principal_digest(&self) -> &str {
+        &self.principal_digest
+    }
+
+    pub fn operation_digest(&self) -> &str {
+        &self.operation_digest
+    }
+
+    pub fn admission_id(&self) -> &str {
+        &self.admission_id
+    }
+
+    pub const fn quota_epoch(&self) -> QuotaEpoch {
+        self.quota_epoch
+    }
+
+    pub const fn cost(&self) -> u32 {
+        self.cost
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -610,6 +655,40 @@ mod tests {
             quota_epoch: epoch(epoch_value),
             cost,
         }
+    }
+
+    #[test]
+    fn trusted_admission_constructor_rejects_forged_or_malformed_authority_inputs() {
+        assert!(
+            QuotaAdmissionRequest::from_trusted_context(
+                "raw-tenant-id",
+                "b".repeat(64),
+                "operation-0000",
+                epoch(1),
+                1,
+            )
+            .is_err()
+        );
+        assert!(
+            QuotaAdmissionRequest::from_trusted_context(
+                "a".repeat(64),
+                "b".repeat(64),
+                "short",
+                epoch(1),
+                1,
+            )
+            .is_err()
+        );
+        assert!(
+            QuotaAdmissionRequest::from_trusted_context(
+                "a".repeat(64),
+                "b".repeat(64),
+                "operation-0000",
+                epoch(1),
+                MAX_QUOTA_COST + 1,
+            )
+            .is_err()
+        );
     }
 
     #[test]
