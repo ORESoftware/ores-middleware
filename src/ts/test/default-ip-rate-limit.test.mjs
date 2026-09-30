@@ -44,6 +44,29 @@ test("portable middleware keys the baseline strictly by resolved client IP", asy
   assert.deepEqual(keys, [["203.0.113.9", 5, 5]]);
 });
 
+test("rate-limit denial exposes modern and compatibility backpressure metadata", async () => {
+  const middleware = createMiddleware(testConfig(), {
+    clientIp: () => "203.0.113.9",
+    rateLimiter: { async allow() { return false; } }
+  });
+
+  const response = await middleware(
+    new Request("http://example.test/v1/items"),
+    async () => new Response("handler must not run")
+  );
+
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "1");
+  assert.equal(response.headers.get("ratelimit-policy"), "\"ip-default\";q=5;w=1");
+  assert.equal(response.headers.get("ratelimit"), "\"ip-default\";r=0;t=1");
+  assert.equal(response.headers.get("ratelimit-limit"), "5");
+  assert.equal(response.headers.get("ratelimit-remaining"), "0");
+  assert.equal(response.headers.get("ratelimit-reset"), "1");
+  assert.equal(response.headers.get("x-ores-rate-limit-policy"), "ip-default");
+  assert.equal(response.headers.get("x-ores-rate-limit-layer"), "application");
+  assert.equal(response.headers.get("x-ores-rate-limit-decision"), "denied");
+});
+
 test("strict mode rejects forwarded client identity from an untrusted peer", async () => {
   const keys = [];
   const middleware = createMiddleware(testConfig(), {
