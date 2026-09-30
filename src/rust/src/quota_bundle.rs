@@ -782,6 +782,33 @@ mod tests {
     }
 
     #[test]
+    fn epoch_advance_allows_only_existing_receipt_replay_not_new_stale_admission() {
+        let old_policy = policy(5);
+        let mut state = QuotaBundleState::default();
+        let admitted = request("operation-0025", 5, 1);
+        evaluate_quota_bundle(&old_policy, &admitted, 35_000, &mut state)
+            .expect("initial admission");
+        let before = state.windows.clone();
+
+        let new_policy = policy(6);
+        let replay = evaluate_quota_bundle(&new_policy, &admitted, 35_001, &mut state)
+            .expect("existing admission replay");
+        assert_eq!(replay.kind, QuotaAdmissionKind::ReplayedAllowed);
+        assert_eq!(state.windows, before);
+
+        let stale_new = evaluate_quota_bundle(
+            &new_policy,
+            &request("operation-0026", 5, 1),
+            35_002,
+            &mut state,
+        )
+        .expect("stale new admission denial");
+        assert_eq!(stale_new.kind, QuotaAdmissionKind::Denied);
+        assert_eq!(stale_new.reason_code.as_deref(), Some("stale_quota_epoch"));
+        assert_eq!(state.windows, before);
+    }
+
+    #[test]
     fn admission_id_cannot_be_reused_for_different_operation_or_cost() {
         let policy = policy(5);
         let mut state = QuotaBundleState::default();
