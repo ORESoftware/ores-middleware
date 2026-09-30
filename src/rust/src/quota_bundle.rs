@@ -286,8 +286,6 @@ pub fn evaluate_quota_bundle(
         });
     }
 
-    bind_state_scope(policy, request, state);
-
     let mut current = Vec::with_capacity(policy.windows.len());
     let mut exhausted: Option<(String, u64)> = None;
 
@@ -308,6 +306,8 @@ pub fn evaluate_quota_bundle(
             reason_code: Some("quota_cost_exceeds_policy_limit".into()),
         });
     }
+
+    bind_state_scope(policy, request, state);
 
     for window in &policy.windows {
         let window_started_at_ms = aligned_window_start(now_ms, window.window_ms);
