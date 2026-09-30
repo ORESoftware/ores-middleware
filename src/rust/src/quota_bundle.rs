@@ -5,10 +5,13 @@ use std::{
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+use crate::{
+    middleware_order::RateLimitConsistency,
+    rate_limit_v2::{RateLimitAlgorithmV2, RateLimitEnforcementMode, RateLimitPolicyV2},
+};
+
 pub const MAX_QUOTA_WINDOWS: usize = 16;
 pub const MAX_QUOTA_COST: u32 = 1_000_000;
-pub const MAX_QUOTA_LIMIT: u32 = 2_147_483_647;
-pub const MAX_QUOTA_WINDOW_MS: u64 = 31 * 24 * 60 * 60 * 1_000;
 pub const MAX_QUOTA_REPLAY_RECEIPTS: usize = 2_048;
 
 const MAX_QUOTA_IDENTIFIER_BYTES: usize = 128;
@@ -97,18 +100,12 @@ fn parse_quota_epoch(value: &str) -> Result<QuotaEpoch, QuotaBundleError> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct QuotaWindowPolicy {
-    pub policy_id: String,
-    pub limit: u32,
-    pub window_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QuotaBundlePolicy {
     pub bundle_id: String,
     pub quota_epoch: QuotaEpoch,
-    pub windows: Vec<QuotaWindowPolicy>,
+    /// Existing V2 policies remain the single-window policy authority.
+    /// The bundle adds atomic composition; it does not define a second policy shape.
+    pub policies: Vec<RateLimitPolicyV2>,
 }
 
 /// Trusted server-side admission input.
@@ -178,8 +175,8 @@ pub enum QuotaAdmissionKind {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QuotaWindowDecision {
     pub policy_id: String,
-    pub limit: u32,
-    pub remaining: u32,
+    pub limit: u64,
+    pub remaining: u64,
     pub reset_after_ms: u64,
 }
 
@@ -208,7 +205,7 @@ impl QuotaAdmissionDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowState {
     window_started_at_ms: u64,
-    used: u32,
+    used: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -285,13 +282,13 @@ pub fn evaluate_quota_bundle(
         });
     }
 
-    let mut current = Vec::with_capacity(policy.windows.len());
+    let mut current = Vec::with_capacity(policy.policies.len());
     let mut exhausted: Option<(String, u64)> = None;
 
     if let Some(window) = policy
         .windows
         .iter()
-        .find(|window| request.cost > window.limit)
+        .find(|window| request.cost > window.capacity)
     {
         return Ok(QuotaAdmissionDecision {
             kind: QuotaAdmissionKind::Denied,
@@ -305,14 +302,14 @@ pub fn evaluate_quota_bundle(
         });
     }
 
-    for window in &policy.windows {
+    for window in &policy.policies {
         let window_started_at_ms = aligned_window_start(now_ms, window.window_ms);
         let used = state
             .windows
             .get(&window.policy_id)
             .filter(|value| value.window_started_at_ms == window_started_at_ms)
             .map_or(0, |value| value.used);
-        let remaining = window.limit.saturating_sub(used);
+        let remaining = window.capacity.saturating_sub(used);
         let reset_after_ms = window
             .window_ms
             .saturating_sub(now_ms.saturating_sub(window_started_at_ms))
@@ -347,7 +344,7 @@ pub fn evaluate_quota_bundle(
                 .into_iter()
                 .map(|(window, _, remaining, reset_after_ms)| QuotaWindowDecision {
                     policy_id: window.policy_id.clone(),
-                    limit: window.limit,
+                    limit: window.capacity,
                     remaining,
                     reset_after_ms,
                 })
@@ -384,11 +381,11 @@ pub fn evaluate_quota_bundle(
         .into_iter()
         .map(|(window, mut window_state, _, reset_after_ms)| {
             window_state.used = window_state.used.saturating_add(request.cost);
-            let remaining = window.limit.saturating_sub(window_state.used);
+            let remaining = window.capacity.saturating_sub(window_state.used);
             next_windows.insert(window.policy_id.clone(), window_state);
             QuotaWindowDecision {
                 policy_id: window.policy_id.clone(),
-                limit: window.limit,
+                limit: window.capacity,
                 remaining,
                 reset_after_ms,
             }
@@ -432,7 +429,7 @@ fn validate_policy(policy: &QuotaBundlePolicy) -> Result<(), QuotaBundleError> {
             "quota bundle IDs must be 1..=128 ASCII letters, digits, dot, underscore, or hyphen",
         ));
     }
-    if policy.windows.is_empty() || policy.windows.len() > MAX_QUOTA_WINDOWS {
+    if policy.policies.is_empty() || policy.policies.len() > MAX_QUOTA_WINDOWS {
         return Err(QuotaBundleError::new(
             "quota_window_count_invalid",
             format!(
@@ -442,7 +439,7 @@ fn validate_policy(policy: &QuotaBundlePolicy) -> Result<(), QuotaBundleError> {
     }
 
     let mut seen = BTreeMap::<&str, ()>::new();
-    for window in &policy.windows {
+    for window in &policy.policies {
         if !valid_identifier(&window.policy_id) {
             return Err(QuotaBundleError::new(
                 "quota_policy_id_invalid",
@@ -455,7 +452,7 @@ fn validate_policy(policy: &QuotaBundlePolicy) -> Result<(), QuotaBundleError> {
                 "quota policy IDs must be unique within a bundle",
             ));
         }
-        if window.limit == 0 || window.limit > MAX_QUOTA_LIMIT {
+        if window.capacity == 0 || window.capacity > MAX_QUOTA_LIMIT {
             return Err(QuotaBundleError::new(
                 "quota_limit_invalid",
                 format!("quota limits must be 1..={MAX_QUOTA_LIMIT}"),
@@ -572,7 +569,7 @@ fn policy_fingerprint(policy: &QuotaBundlePolicy) -> String {
         .map(|window| {
             format!(
                 "{}:{}:{}",
-                window.policy_id, window.limit, window.window_ms
+                window.policy_id, window.capacity, window.window_ms
             )
         })
         .collect::<Vec<_>>()
@@ -938,7 +935,7 @@ mod tests {
     #[test]
     fn replay_receipt_expires_at_latest_charged_window_boundary() {
         let mut policy = policy(5);
-        policy.windows = vec![
+        policy.policies = vec![
             QuotaWindowPolicy {
                 policy_id: "minute".into(),
                 limit: 5,
@@ -1034,7 +1031,7 @@ mod tests {
     #[test]
     fn fixed_window_boundary_rollover_is_deterministic() {
         let mut policy = policy(2);
-        policy.windows = vec![QuotaWindowPolicy {
+        policy.policies = vec![QuotaWindowPolicy {
             policy_id: "minute".into(),
             limit: 2,
             window_ms: 60_000,
@@ -1128,7 +1125,7 @@ mod tests {
     fn malformed_cost_and_identifiers_fail_before_debit() {
         let mut bad_policy = policy(1);
         let mut state = QuotaBundleState::default();
-        bad_policy.windows[0].policy_id = "bad policy".into();
+        bad_policy.policies[0].policy_id = "bad policy".into();
         let error = evaluate_quota_bundle(
             &bad_policy,
             &request("operation-0070", 1, 1),
