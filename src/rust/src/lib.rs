@@ -202,7 +202,6 @@ pub const CAPABILITIES: &[&str] = &[
     "deadline-timeout",
     "payload-limit",
     "rate-limit",
-    "quota-admission",
     "auth",
     "sync-observer",
     "json",
@@ -310,6 +309,12 @@ mod tests {
         let value = descriptor();
         assert_eq!(value.operation_symbols.len(), 7);
         assert_eq!(value.capabilities.len(), CAPABILITIES.len());
+        assert!(!value.capabilities.iter().any(|capability| capability == "quota-admission"));
+        assert!(
+            BILLABLE_QUOTA_MIDDLEWARE_ORDER
+                .iter()
+                .any(|stage| *stage == MiddlewareStage::QuotaAdmission)
+        );
     }
 
     #[test]
