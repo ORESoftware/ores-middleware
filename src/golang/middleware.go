@@ -160,7 +160,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 		}
 
 		if s.config.Settings.RateLimit.Enabled {
-			key := clientIP(request, trusted)
+			key := clientIP(request, trusted, s.config.Settings.TLS.TrustedProxyCIDRs)
 			allowed, err := s.deps.RateLimiter.Allow(ctx, key, s.config.Settings.RateLimit.Capacity, s.config.Settings.RateLimit.RefillPerSecond)
 			if err != nil || !allowed {
 				writeProblem(writer, 429, "rate_limited", "rate limit exceeded")
@@ -514,27 +514,63 @@ func canonicalIP(value string) string {
 	return address.String()
 }
 
-func clientIP(request *http.Request, trusted bool) string {
-	if trusted {
-		forwardedFor := strings.Split(request.Header.Get("X-Forwarded-For"), ",")[0]
-		for _, candidate := range []string{
-			request.Header.Get("CF-Connecting-IP"),
-			forwardedFor,
-			request.Header.Get("X-Real-IP"),
-		} {
-			if value := canonicalIP(candidate); value != "" {
-				return value
-			}
-		}
-	}
+func directClientIP(request *http.Request) string {
 	host, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err == nil {
 		if value := canonicalIP(host); value != "" {
 			return value
 		}
 	}
-	if value := canonicalIP(request.RemoteAddr); value != "" {
-		return value
+	return canonicalIP(request.RemoteAddr)
+}
+
+func clientIP(request *http.Request, trusted bool, trustedCIDRs []string) string {
+	direct := directClientIP(request)
+	if !trusted {
+		if direct != "" {
+			return direct
+		}
+		return "__unknown_client_ip__"
+	}
+
+	if forwarded := request.Header.Get("X-Forwarded-For"); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		chain := make([]string, 0, len(parts)+1)
+		for _, part := range parts {
+			value := canonicalIP(part)
+			if value == "" {
+				if direct != "" {
+					return direct
+				}
+				return "__unknown_client_ip__"
+			}
+			chain = append(chain, value)
+		}
+		if direct != "" {
+			chain = append(chain, direct)
+		}
+
+		for index := len(chain) - 1; index >= 0; index-- {
+			candidate := chain[index]
+			if !trustedProxy(candidate, trustedCIDRs) {
+				return candidate
+			}
+		}
+		if direct != "" {
+			return direct
+		}
+	}
+
+	for _, candidate := range []string{
+		request.Header.Get("CF-Connecting-IP"),
+		request.Header.Get("X-Real-IP"),
+	} {
+		if value := canonicalIP(candidate); value != "" {
+			return value
+		}
+	}
+	if direct != "" {
+		return direct
 	}
 	return "__unknown_client_ip__"
 }
