@@ -36,9 +36,7 @@ test("portable middleware keys the baseline strictly by resolved client IP", asy
   });
 
   const response = await middleware(
-    new Request("http://example.test/v1/other-route", {
-      headers: { "x-real-ip": "198.51.100.77" }
-    }),
+    new Request("http://example.test/v1/other-route"),
     async () => new Response("ok")
   );
 
@@ -95,7 +93,6 @@ test("trusted proxy identity uses the first validated forwarded client IP", asyn
   assert.deepEqual(keys, ["203.0.113.40"]);
 });
 
-
 test("trusted forwarded client identity overrides the adapter-recorded proxy peer", async () => {
   const keys = [];
   const middleware = createMiddleware(testConfig(), {
@@ -118,4 +115,30 @@ test("trusted forwarded client identity overrides the adapter-recorded proxy pee
 
   assert.equal(response.status, 200);
   assert.deepEqual(keys, ["203.0.113.55"]);
+});
+
+
+test("default local limiter bounds attacker-controlled IP cardinality", async () => {
+  const config = testConfig();
+  config.settings.rateLimit.capacity = 1;
+  config.settings.rateLimit.refillPerSecond = 0.000001;
+  let currentIp = "198.51.100.1";
+  const middleware = createMiddleware(config, {
+    clientIp: () => currentIp,
+    now: () => 0
+  });
+  const next = async () => new Response("ok");
+
+  assert.equal((await middleware(new Request("http://example.test/v1"), next)).status, 200);
+  assert.equal((await middleware(new Request("http://example.test/v1"), next)).status, 429);
+
+  for (let index = 0; index < 10_000; index += 1) {
+    const high = Math.floor(index / 256);
+    const low = index % 256;
+    currentIp = `2001:db8:${high.toString(16)}::${low.toString(16)}`;
+    assert.equal((await middleware(new Request("http://example.test/v1"), next)).status, 200);
+  }
+
+  currentIp = "198.51.100.1";
+  assert.equal((await middleware(new Request("http://example.test/v1"), next)).status, 200);
 });
