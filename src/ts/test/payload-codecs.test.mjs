@@ -160,6 +160,7 @@ test("raw octet-stream preserves non-UTF8 bytes exactly", async () => {
   assert.ok(decoded.value instanceof Uint8Array);
   assert.deepEqual([...decoded.value], [...input]);
   assert.deepEqual([...decoded.bytes], [...input]);
+  assert.equal(decoded.jsonPayload, undefined);
 });
 
 test("protobuf decoding requires both message descriptor and decoder", async () => {
