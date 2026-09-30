@@ -38,7 +38,6 @@ defmodule OresMiddleware.TokenBucket do
     %{buckets: Map.take(legacy, keys), order: :queue.from_list(keys)}
   end
 
-
   defp ensure_bucket(state, key, capacity, now) do
     case Map.fetch(state.buckets, key) do
       {:ok, bucket} ->
@@ -51,7 +50,11 @@ defmodule OresMiddleware.TokenBucket do
         bucket = %{tokens: capacity * 1.0, updated: now}
 
         {
-          %{state | buckets: Map.put(state.buckets, key, bucket), order: :queue.in(key, state.order)},
+          %{
+            state
+            | buckets: Map.put(state.buckets, key, bucket),
+              order: :queue.in(key, state.order)
+          },
           bucket
         }
     end
