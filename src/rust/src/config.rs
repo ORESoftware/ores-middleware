@@ -711,11 +711,12 @@ mod tests {
 
     #[test]
     fn rate_limit_policy_id_rejects_header_hostile_values() {
+        let too_long = "x".repeat(129);
         for invalid in [
             "contains space",
             "line\nbreak",
             "unicode-π",
-            &"x".repeat(129),
+            too_long.as_str(),
         ] {
             let mut config = default_config("test-service");
             config.settings.rate_limit.policy_id = invalid.to_owned();
