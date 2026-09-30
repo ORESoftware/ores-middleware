@@ -99,4 +99,3 @@ pub fn rate_limit_denial_exposes_backpressure_metadata_test() {
   assert dict.get(headers, "x-ores-rate-limit-layer") == Ok("application")
   assert dict.get(headers, "x-ores-rate-limit-decision") == Ok("denied")
 }
-
