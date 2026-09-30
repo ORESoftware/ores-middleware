@@ -1,6 +1,7 @@
 package oresmiddleware
 
 import (
+	"container/list"
 	"context"
 	"net/http"
 	"sync"
@@ -70,18 +71,28 @@ type Dependencies struct {
 	RandomFloat64            func() float64
 }
 
+const defaultLocalRateLimitMaxEntries = 10_000
+
 type bucket struct {
 	tokens  float64
 	updated time.Time
+	order   *list.Element
 }
 type MemoryTokenBucket struct {
-	mu      sync.Mutex
-	buckets map[string]bucket
-	now     func() time.Time
+	mu         sync.Mutex
+	buckets    map[string]bucket
+	order      *list.List
+	now        func() time.Time
+	maxEntries int
 }
 
 func NewMemoryTokenBucket(now func() time.Time) *MemoryTokenBucket {
-	return &MemoryTokenBucket{buckets: make(map[string]bucket), now: now}
+	return &MemoryTokenBucket{
+		buckets:    make(map[string]bucket),
+		order:      list.New(),
+		now:        now,
+		maxEntries: defaultLocalRateLimitMaxEntries,
+	}
 }
 
 func (m *MemoryTokenBucket) Allow(_ context.Context, key string, capacity int, refill float64) (bool, error) {
@@ -90,7 +101,15 @@ func (m *MemoryTokenBucket) Allow(_ context.Context, key string, capacity int, r
 	now := m.now()
 	value, ok := m.buckets[key]
 	if !ok {
-		value = bucket{tokens: float64(capacity), updated: now}
+		// HOT-PATH: one FIFO eviction per new key keeps source-IP churn bounded
+		// without scanning the map or turning admission into O(n) work.
+		if len(m.buckets) >= m.maxEntries {
+			if oldest := m.order.Front(); oldest != nil {
+				delete(m.buckets, oldest.Value.(string))
+				m.order.Remove(oldest)
+			}
+		}
+		value = bucket{tokens: float64(capacity), updated: now, order: m.order.PushBack(key)}
 	}
 	value.tokens += now.Sub(value.updated).Seconds() * refill
 	if value.tokens > float64(capacity) {
