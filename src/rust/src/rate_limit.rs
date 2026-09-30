@@ -219,12 +219,20 @@ pub fn validate_rate_limit_decision(
     request: &RateLimitRequest,
     decision: &RateLimitDecision,
 ) -> Result<(), IntegrationError> {
+    let reason_code_valid = decision.reason_code.as_deref().is_none_or(|value| {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii() && !byte.is_ascii_control())
+    });
     let valid = decision.policy_id == request.policy_id
         && decision.layer == request.layer
         && decision.algorithm == request.algorithm
         && decision.limit == request.capacity
         && decision.limit > 0
-        && decision.remaining <= decision.limit;
+        && decision.remaining <= decision.limit
+        && reason_code_valid;
     if valid {
         return Ok(());
     }
@@ -528,6 +536,10 @@ mod decision_validation_tests {
         decision.remaining = decision.limit;
 
         decision.layer = RateLimitLayer::Authorization;
+        assert!(validate_rate_limit_decision(&request, &decision).is_err());
+
+        decision.layer = request.layer;
+        decision.reason_code = Some("bad\nreason".into());
         assert!(validate_rate_limit_decision(&request, &decision).is_err());
     }
 }
