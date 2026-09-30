@@ -37,3 +37,18 @@ descriptor_has_standard_surface_test() ->
     Descriptor = ores_middleware:descriptor(),
     ?assertEqual(23, length(maps:get(<<"capabilities">>, Descriptor))),
     ?assertEqual(7, map_size(maps:get(<<"operationSymbols">>, Descriptor))).
+
+
+local_rate_limiter_bounds_source_ip_cardinality_test() ->
+    lists:foreach(
+        fun(Index) ->
+            Key = iolist_to_binary(io_lib:format("bounded-ip-~B", [Index])),
+            ?assertEqual(true, ores_middleware_rate_limiter:allow(Key, 1, 0.000001))
+        end,
+        lists:seq(0, 10000)
+    ),
+    State = sys:get_state(ores_middleware_rate_limiter),
+    Buckets = maps:get(buckets, State),
+    Order = maps:get(order, State),
+    ?assert(map_size(Buckets) =< 10000),
+    ?assert(queue:len(Order) =< 10000).
