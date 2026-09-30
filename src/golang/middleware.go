@@ -163,7 +163,7 @@ func (s *Stack) Wrap(next http.Handler) http.Handler {
 			key := clientIP(request, trusted)
 			allowed, err := s.deps.RateLimiter.Allow(ctx, key, s.config.Settings.RateLimit.Capacity, s.config.Settings.RateLimit.RefillPerSecond)
 			if err != nil || !allowed {
-				writeProblem(writer, 429, "rate_limited", "rate limit exceeded")
+				writeRateLimitProblem(writer, s.config.Settings.RateLimit.Capacity)
 				return
 			}
 		}
@@ -413,6 +413,22 @@ func writeProblem(writer http.ResponseWriter, status int, code, detail string) {
 	responseStatus, headers, body := value.snapshot()
 	copyResponse(writer, responseStatus, headers, body)
 }
+func writeRateLimitProblem(writer http.ResponseWriter, capacity int) {
+	value := problemResponse(http.StatusTooManyRequests, "rate_limited", "rate limit exceeded")
+	policy := "\"ip-default\""
+	value.header.Set("RateLimit-Policy", fmt.Sprintf("%s;q=%d;w=1", policy, capacity))
+	value.header.Set("RateLimit", fmt.Sprintf("%s;r=0;t=1", policy))
+	value.header.Set("RateLimit-Limit", strconv.Itoa(capacity))
+	value.header.Set("RateLimit-Remaining", "0")
+	value.header.Set("RateLimit-Reset", "1")
+	value.header.Set("Retry-After", "1")
+	value.header.Set("X-Ores-Rate-Limit-Policy", "ip-default")
+	value.header.Set("X-Ores-Rate-Limit-Layer", "application")
+	value.header.Set("X-Ores-Rate-Limit-Decision", "denied")
+	responseStatus, headers, body := value.snapshot()
+	copyResponse(writer, responseStatus, headers, body)
+}
+
 func copyResponse(writer http.ResponseWriter, status int, headers http.Header, body []byte) {
 	for key, values := range headers {
 		for _, value := range values {
