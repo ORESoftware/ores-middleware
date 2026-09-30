@@ -93,6 +93,50 @@ test("trusted proxy identity uses the first validated forwarded client IP", asyn
   assert.deepEqual(keys, ["203.0.113.40"]);
 });
 
+test("configured CIDRs trust adapter-attached loopback peers without a custom hook", async () => {
+  const keys = [];
+  const middleware = createMiddleware(testConfig(), {
+    rateLimiter: {
+      async allow(key) {
+        keys.push(key);
+        return true;
+      }
+    }
+  });
+  const request = attachTrustedPeerIp(
+    new Request("http://example.test/v1/items", {
+      headers: { "x-forwarded-for": "203.0.113.88" }
+    }),
+    "127.0.0.1"
+  );
+  const response = await middleware(request, async () => new Response("ok"));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(keys, ["203.0.113.88"]);
+});
+
+test("configured IPv6 CIDRs trust adapter-attached loopback peers", async () => {
+  const keys = [];
+  const middleware = createMiddleware(testConfig(), {
+    rateLimiter: {
+      async allow(key) {
+        keys.push(key);
+        return true;
+      }
+    }
+  });
+  const request = attachTrustedPeerIp(
+    new Request("http://example.test/v1/items", {
+      headers: { "x-forwarded-for": "2001:db8::44" }
+    }),
+    "::1"
+  );
+  const response = await middleware(request, async () => new Response("ok"));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(keys, ["2001:db8::44"]);
+});
+
 test("trusted forwarded client identity overrides the adapter-recorded proxy peer", async () => {
   const keys = [];
   const middleware = createMiddleware(testConfig(), {
