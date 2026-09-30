@@ -162,7 +162,7 @@ prepare_transport(Config, Hooks, Request, Headers) ->
                 false ->
                     PeerIp = maps:get(remote_ip, Request, undefined),
                     EffectiveClientIp = case Trusted of
-                        true -> forwarded_client_ip(Headers, PeerIp);
+                        true -> forwarded_client_ip(Headers, PeerIp, maps:get(trusted_proxy_cidrs, Tls));
                         false -> value(PeerIp)
                     end,
                     prepare_context(Config, Hooks, Request#{effective_client_ip => EffectiveClientIp}, Headers)
@@ -352,21 +352,35 @@ ip_to_integer({A, B, C, D, E, F, G, H}) ->
     {ok, 128, Value};
 ip_to_integer(_) -> error.
 
-forwarded_client_ip(Headers, Fallback) ->
-    XForwardedFor = case maps:get(<<"x-forwarded-for">>, Headers, undefined) of
-        Value when is_binary(Value) ->
-            case binary:split(Value, <<",">>) of
-                [First, _Rest] -> First;
-                [Only] -> Only
-            end;
-        _ -> undefined
+forwarded_client_ip(Headers, Fallback, Cidrs) ->
+    Direct = case canonical_ip(Fallback) of
+        undefined -> value(Fallback);
+        Ip -> Ip
     end,
-    Candidates = [
-        maps:get(<<"cf-connecting-ip">>, Headers, undefined),
-        XForwardedFor,
-        maps:get(<<"x-real-ip">>, Headers, undefined)
-    ],
-    first_valid_ip(Candidates, value(Fallback)).
+    case maps:get(<<"x-forwarded-for">>, Headers, undefined) of
+        Xff when is_binary(Xff), byte_size(Xff) > 0 ->
+            Parsed = [canonical_ip(Part) || Part <- binary:split(Xff, <<",">>, [global])],
+            case lists:any(fun(Ip) -> Ip =:= undefined end, Parsed) of
+                true -> Direct;
+                false -> nearest_untrusted(lists:reverse(Parsed ++ [Direct]), Cidrs, Direct)
+            end;
+        _ ->
+            Candidates = [
+                maps:get(<<"cf-connecting-ip">>, Headers, undefined),
+                maps:get(<<"x-real-ip">>, Headers, undefined)
+            ],
+            first_valid_ip(Candidates, Direct)
+    end.
+
+nearest_untrusted([], _Cidrs, Fallback) -> Fallback;
+nearest_untrusted([Candidate | Rest], Cidrs, Fallback) ->
+    case trusted_ip(Candidate, Cidrs) of
+        true -> nearest_untrusted(Rest, Cidrs, Fallback);
+        false -> Candidate
+    end.
+
+trusted_ip(Ip, Cidrs) ->
+    lists:any(fun(Cidr) -> cidr_contains(Ip, Cidr) end, Cidrs).
 
 first_valid_ip([], Fallback) -> Fallback;
 first_valid_ip([Candidate | Rest], Fallback) ->
