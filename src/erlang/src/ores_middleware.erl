@@ -188,7 +188,7 @@ prepare_auth(Config, Hooks, Request, Context0, Headers) ->
             end
     end.
 
-prepare_rate(Config, Hooks, Request, _Context) ->
+prepare_rate(Config, Hooks, Request, Context) ->
     Settings = maps:get(settings, Config),
     Policy = maps:get(rate_limit, Settings),
     Key = value(maps:get(remote_ip, Request, undefined)),
