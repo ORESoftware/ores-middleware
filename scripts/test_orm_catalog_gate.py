@@ -37,7 +37,8 @@ class OrmCatalogGateTests(unittest.TestCase):
     def test_generated_crate_pins_real_orm_versions(self) -> None:
         cargo = render_cargo()
         self.assertIn(f'version = "={DIESEL_VERSION}"', cargo)
-        self.assertIn(f'version = "={SEA_ORM_VERSION}"', cargo)
+        self.assertGreaterEqual(cargo.count(f'version = "={SEA_ORM_VERSION}"'), 2)
+        self.assertIn(f'sea-orm-macros = {{ version = "={SEA_ORM_VERSION}" }}', cargo)
         self.assertIn('features = ["postgres", "chrono"]', cargo)
         self.assertIn('features = ["macros", "with-chrono"]', cargo)
 
