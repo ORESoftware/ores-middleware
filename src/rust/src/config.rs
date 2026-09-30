@@ -517,11 +517,11 @@ const RATE_LIMIT_RULES: &[Rule] = &[
 ];
 
 fn valid_rate_limit_identifier(value: &str) -> bool {
-    return !value.is_empty()
+    !value.is_empty()
         && value.len() <= 128
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 fn validate_rate_limit_policy(config: &MiddlewareConfig) -> Vec<ValidationIssue> {
     if !config.settings.rate_limit.enabled {
