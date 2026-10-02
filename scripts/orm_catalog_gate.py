@@ -39,7 +39,7 @@ from scripts.schema_convergence import (
 )
 
 DIESEL_VERSION = "2.3.12"
-SEA_ORM_VERSION = "2.0.2"
+SEA_ORM_VERSION = "2.0.4"
 
 
 @dataclass(frozen=True)
