@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TJSV_REVISION: d60d0d79d83e075077382623ec9e23a401ab601f
+  TJSV_REVISION: 69337efc11ba4ecaa90b48878c942384fc74f650
   EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
