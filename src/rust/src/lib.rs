@@ -315,9 +315,7 @@ mod tests {
         assert_eq!(value.capabilities.len(), CAPABILITIES.len());
         assert!(!value.capabilities.iter().any(|capability| capability == "quota-admission"));
         assert!(
-            BILLABLE_QUOTA_MIDDLEWARE_ORDER
-                .iter()
-                .any(|stage| *stage == MiddlewareStage::QuotaAdmission)
+            BILLABLE_QUOTA_MIDDLEWARE_ORDER.contains(&MiddlewareStage::QuotaAdmission)
         );
     }
 
