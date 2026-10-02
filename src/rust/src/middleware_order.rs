@@ -315,9 +315,7 @@ pub fn validate_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolati
 /// This profile is additive to the historical compatibility profile. It keeps
 /// abuse rate limiting and paid quota admission as separate decisions and
 /// requires idempotency to run before quota consumption.
-pub fn validate_billable_quota_middleware_order(
-    stages: &[MiddlewareStage],
-) -> Vec<OrderViolation> {
+pub fn validate_billable_quota_middleware_order(stages: &[MiddlewareStage]) -> Vec<OrderViolation> {
     let duplicates = stages.iter().enumerate().filter_map(|(index, stage)| {
         stages[..index].contains(stage).then_some(OrderViolation {
             code: "duplicate-stage",
