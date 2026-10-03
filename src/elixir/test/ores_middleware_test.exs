@@ -102,6 +102,34 @@ defmodule OresMiddlewareTest do
     assert_receive {:rate_key, "203.0.113.55", 5, 5.0}
   end
 
+  test "rate-limit denial exposes backpressure metadata" do
+    config = OresMiddleware.default_config("test")
+    config = put_in(config, [:settings, :tls, :requireHttps], false)
+
+    stack =
+      OresMiddleware.Stack.new!(config, %{
+        rate_limit: fn _key, _capacity, _refill -> false end
+      })
+
+    conn = conn(:get, "/v1")
+
+    conn =
+      OresMiddleware.Plug.wrap(stack, conn, fn conn ->
+        Plug.Conn.resp(conn, 200, "handler must not run")
+      end)
+
+    assert conn.status == 429
+    assert Plug.Conn.get_resp_header(conn, "retry-after") == ["1"]
+    assert Plug.Conn.get_resp_header(conn, "ratelimit-policy") == ["\"ip-default\";q=5;w=1"]
+    assert Plug.Conn.get_resp_header(conn, "ratelimit") == ["\"ip-default\";r=0;t=1"]
+    assert Plug.Conn.get_resp_header(conn, "ratelimit-limit") == ["5"]
+    assert Plug.Conn.get_resp_header(conn, "ratelimit-remaining") == ["0"]
+    assert Plug.Conn.get_resp_header(conn, "ratelimit-reset") == ["1"]
+    assert Plug.Conn.get_resp_header(conn, "x-ores-rate-limit-policy") == ["ip-default"]
+    assert Plug.Conn.get_resp_header(conn, "x-ores-rate-limit-layer") == ["application"]
+    assert Plug.Conn.get_resp_header(conn, "x-ores-rate-limit-decision") == ["denied"]
+  end
+
   test "local token bucket bounds source IP cardinality" do
     {:ok, pid} = OresMiddleware.TokenBucket.start_link([])
 

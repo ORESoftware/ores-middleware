@@ -305,7 +305,9 @@ export function createMiddleware(config: MiddlewareConfig, dependencies: Middlew
       // The default abuse guard is deliberately one bucket per effective client IP.
       // Unknown peers share a conservative bucket rather than trusting spoofable headers.
       const rateKey = clientIp ?? "__unknown_client_ip__";
-      if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) return early(problem(429, "rate_limited", "rate limit exceeded"));
+      if (!(await rateLimiter.allow(rateKey, config.settings.rateLimit.capacity, config.settings.rateLimit.refillPerSecond))) {
+        return early(rateLimitDeniedProblem(config.settings.rateLimit.capacity));
+      }
     }
 
     const canBypass = config.environment === "test" || config.environment === "staging";
@@ -488,6 +490,28 @@ function operationFailureResponse(failure: OperationFailure): Response {
     : failure.kind === "cancelled"
       ? problem(499, "request_cancelled", "request was cancelled")
       : problem(500, "internal_error", "request processing failed");
+}
+
+function rateLimitDeniedProblem(capacity: number): Response {
+  const policy = "\"ip-default\"";
+  return Response.json(
+    { type: "urn:ores:middleware:rate_limited", title: "rate_limited", status: 429, detail: "rate limit exceeded" },
+    {
+      status: 429,
+      headers: {
+        "content-type": "application/problem+json",
+        "ratelimit-policy": `${policy};q=${capacity};w=1`,
+        "ratelimit": `${policy};r=0;t=1`,
+        "ratelimit-limit": String(capacity),
+        "ratelimit-remaining": "0",
+        "ratelimit-reset": "1",
+        "retry-after": "1",
+        "x-ores-rate-limit-policy": "ip-default",
+        "x-ores-rate-limit-layer": "application",
+        "x-ores-rate-limit-decision": "denied"
+      }
+    }
+  );
 }
 
 function problem(status: number, code: string, detail: string): Response { return Response.json({ type: `urn:ores:middleware:${code}`, title: code, status, detail }, { status, headers: { "content-type": "application/problem+json" } }); }

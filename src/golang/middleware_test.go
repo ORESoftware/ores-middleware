@@ -76,6 +76,48 @@ func TestStackAddsRequestAndSecurityHeaders(t *testing.T) {
 	}
 }
 
+type denyRateLimiter struct{}
+
+func (denyRateLimiter) Allow(context.Context, string, int, float64) (bool, error) {
+	return false, nil
+}
+
+func TestRateLimitDenialExposesBackpressureMetadata(t *testing.T) {
+	config := testConfig()
+	config.Settings.RateLimit.Enabled = true
+	stack, err := New(config, Dependencies{RateLimiter: denyRateLimiter{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := stack.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("handler must not run")
+	}))
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/v1", nil)
+	request.RemoteAddr = "203.0.113.9:4242"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+	expected := map[string]string{
+		"Retry-After":                "1",
+		"RateLimit-Policy":           "\"ip-default\";q=5;w=1",
+		"RateLimit":                  "\"ip-default\";r=0;t=1",
+		"RateLimit-Limit":            "5",
+		"RateLimit-Remaining":        "0",
+		"RateLimit-Reset":            "1",
+		"x-ores-rate-limit-policy":   "ip-default",
+		"x-ores-rate-limit-layer":    "application",
+		"x-ores-rate-limit-decision": "denied",
+	}
+	for name, want := range expected {
+		if got := response.Header().Get(name); got != want {
+			t.Fatalf("%s=%q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestStrictForwardedClientIdentityRejectsUntrustedPeer(t *testing.T) {
 	config := testConfig()
 	config.Settings.TLS.StrictForwardedHeaders = true

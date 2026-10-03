@@ -119,6 +119,7 @@ defmodule OresMiddleware.Plug do
        System.monotonic_time(:millisecond), idempotency_key, previous_context, previous_metadata}
     else
       {:cached, conn} -> {:halt, conn}
+      {:rate_limited, capacity} -> {:halt, rate_limit_problem(conn, capacity)}
       {:error, status, code, detail} -> {:halt, problem(conn, status, code, detail)}
     end
   end
@@ -249,7 +250,7 @@ defmodule OresMiddleware.Plug do
     if not policy.enabled or
          stack.hooks.rate_limit.(key, policy.capacity, policy.refillPerSecond),
        do: :ok,
-       else: {:error, 429, "rate_limited", "rate limit exceeded"}
+       else: {:rate_limited, policy.capacity}
   end
 
   defp inject_fault(config) do
@@ -377,6 +378,22 @@ defmodule OresMiddleware.Plug do
 
     Logger.reset_metadata(previous_metadata)
     conn
+  end
+
+  defp rate_limit_problem(conn, capacity) do
+    policy = "\"ip-default\""
+
+    conn
+    |> put_resp_header("ratelimit-policy", "#{policy};q=#{capacity};w=1")
+    |> put_resp_header("ratelimit", "#{policy};r=0;t=1")
+    |> put_resp_header("ratelimit-limit", to_string(capacity))
+    |> put_resp_header("ratelimit-remaining", "0")
+    |> put_resp_header("ratelimit-reset", "1")
+    |> put_resp_header("retry-after", "1")
+    |> put_resp_header("x-ores-rate-limit-policy", "ip-default")
+    |> put_resp_header("x-ores-rate-limit-layer", "application")
+    |> put_resp_header("x-ores-rate-limit-decision", "denied")
+    |> problem(429, "rate_limited", "rate limit exceeded")
   end
 
   defp problem(conn, status, code, detail) do

@@ -340,7 +340,8 @@ impl MiddlewareStack {
         };
 
         match self.rate_limiter.evaluate(&evaluation).await {
-            Ok(decision) => decision,
+            Ok(decision) if valid_rate_limit_decision(&evaluation, &decision) => decision,
+            Ok(_) => decision_for_failure(policy, false, "rate_limit_decision_invalid"),
             Err(error) => match (policy.layer, policy.failure_mode) {
                 // Authorization is a security boundary. A primary outage must
                 // not be weakened by either fail-open or a split local view.
@@ -510,6 +511,26 @@ fn correlate_error(
         .entry(config.settings.request_id_header.clone())
         .or_insert_with(|| context.request_id.clone());
     error
+}
+
+fn valid_rate_limit_decision(
+    request: &RateLimitRequest,
+    decision: &RateLimitDecision,
+) -> bool {
+    let reason_code_valid = decision.reason_code.as_deref().is_none_or(|value| {
+        !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii() && !byte.is_ascii_control())
+    });
+
+    decision.policy_id == request.policy_id
+        && decision.layer == request.layer
+        && decision.algorithm == request.algorithm
+        && decision.limit == request.capacity
+        && decision.remaining <= decision.limit
+        && reason_code_valid
 }
 
 fn decision_for_failure(
@@ -815,6 +836,73 @@ mod tests {
         config.settings.tls.mode = "in-process".into();
         config.settings.tls.trusted_proxy_cidrs.clear();
         assert!(enforce_transport_policy(&config, &request("198.51.100.10", None, true),).is_ok());
+    }
+
+    struct MalformedDecisionLimiter;
+
+    impl RateLimiter for MalformedDecisionLimiter {
+        fn allow<'a>(
+            &'a self,
+            _key: &'a str,
+            _capacity: u32,
+            _refill_per_second: f64,
+        ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { true })
+        }
+
+        fn evaluate<'a>(
+            &'a self,
+            request: &'a RateLimitRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<RateLimitDecision, IntegrationError>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                Ok(RateLimitDecision {
+                    kind: RateLimitDecisionKind::Allowed,
+                    source: RateLimitDecisionSource::Redis,
+                    policy_id: "evil\r\nx-injected: 1".into(),
+                    layer: request.layer,
+                    algorithm: request.algorithm,
+                    limit: request.capacity,
+                    remaining: request.capacity,
+                    retry_after_ms: None,
+                    reset_after_ms: Some(request.window_ms),
+                    reason_code: None,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_provider_decision_fails_closed_before_header_projection() {
+        let mut config = default_config("test-service");
+        config.settings.tls.mode = "in-process".into();
+        config.settings.tls.trusted_proxy_cidrs.clear();
+        config.settings.rate_limit.failure_mode = RateLimitFailureMode::FailOpen;
+        let stack = MiddlewareStack::new(config)
+            .unwrap()
+            .with_rate_limiter(Arc::new(MalformedDecisionLimiter));
+
+        let error = match stack.begin(request("203.0.113.9", None, true)).await {
+            Ok(_) => panic!("malformed provider decision must fail closed"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.status, 503);
+        assert_eq!(error.code, "rate_limit_unavailable");
+        assert_eq!(
+            error
+                .headers
+                .get("x-ores-rate-limit-decision")
+                .map(String::as_str),
+            Some("degraded-denied")
+        );
+        assert_eq!(
+            error
+                .headers
+                .get("x-ores-rate-limit-policy")
+                .map(String::as_str),
+            Some("ip-default")
+        );
     }
 
     struct FailingLimiter;
