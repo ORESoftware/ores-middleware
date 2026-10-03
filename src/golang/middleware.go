@@ -423,9 +423,9 @@ func writeRateLimitProblem(writer http.ResponseWriter, capacity int) {
 	value.header.Set("RateLimit-Remaining", "0")
 	value.header.Set("RateLimit-Reset", "1")
 	value.header.Set("Retry-After", "1")
-	value.header.Set("X-Ores-Rate-Limit-Policy", "ip-default")
-	value.header.Set("X-Ores-Rate-Limit-Layer", "application")
-	value.header.Set("X-Ores-Rate-Limit-Decision", "denied")
+	value.header.Set("x-ores-Rate-Limit-Policy", "ip-default")
+	value.header.Set("x-ores-Rate-Limit-Layer", "application")
+	value.header.Set("x-ores-Rate-Limit-Decision", "denied")
 	responseStatus, headers, body := value.snapshot()
 	copyResponse(writer, responseStatus, headers, body)
 }
