@@ -107,9 +107,9 @@ func TestRateLimitDenialExposesBackpressureMetadata(t *testing.T) {
 		"RateLimit-Limit":            "5",
 		"RateLimit-Remaining":        "0",
 		"RateLimit-Reset":            "1",
-		"x-ores-Rate-Limit-Policy":   "ip-default",
-		"x-ores-Rate-Limit-Layer":    "application",
-		"x-ores-Rate-Limit-Decision": "denied",
+		"x-ores-rate-limit-policy":   "ip-default",
+		"x-ores-rate-limit-layer":    "application",
+		"x-ores-rate-limit-decision": "denied",
 	}
 	for name, want := range expected {
 		if got := response.Header().Get(name); got != want {
