@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  TJSV_REVISION: d60d0d79d83e075077382623ec9e23a401ab601f
+  TJSV_REVISION: 69337efc11ba4ecaa90b48878c942384fc74f650
   EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
@@ -120,14 +120,14 @@ jobs:
           }
           NODE
 
-      - name: Prove numeric policy drift fails closed
+      - name: Prove contradictory numeric policy drift fails closed
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const source = JSON.parse(fs.readFileSync('contracts/rate-limit-v2/json-schema/rate-limit-policy.schema.json', 'utf8'));
-          source.$defs.RateLimitPolicyV2.properties.capacity.maximum = 999999999;
+          source.$defs.RateLimitPolicyV2.properties.capacity.maximum = 0;
           fs.writeFileSync('target/rate-limit-v2-tjsv/drifted.schema.json', `${JSON.stringify(source, null, 2)}\n`);
           NODE
           set +e
