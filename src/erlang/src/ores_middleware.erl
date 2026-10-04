@@ -206,7 +206,7 @@ prepare_rate(Config, Hooks, Request, Context) ->
     Policy = maps:get(rate_limit, Settings),
     Key = value(maps:get(effective_client_ip, Request, maps:get(remote_ip, Request, undefined))),
     case maps:get(enabled, Policy) andalso not (maps:get(rate_limit, Hooks))(Key, maps:get(capacity, Policy), maps:get(refill_per_second, Policy)) of
-        true -> {error, problem(429, <<"rate_limited">>, <<"rate limit exceeded">>)};
+        true -> {error, rate_limit_problem(maps:get(capacity, Policy))};
         false -> prepare_fault(Config, Hooks, Request, Context)
     end.
 
@@ -311,6 +311,22 @@ maybe_compress(Settings, #{headers := RequestHeaders}, #{body := Body, headers :
         false -> Response
     end;
 maybe_compress(_Settings, _Request, Response) -> Response.
+
+rate_limit_problem(Capacity) ->
+    Policy = <<"\"ip-default\"">>,
+    Response = problem(429, <<"rate_limited">>, <<"rate limit exceeded">>),
+    Headers = maps:get(headers, Response),
+    Response#{headers => Headers#{
+        <<"ratelimit-policy">> => iolist_to_binary([Policy, <<";q=">>, integer_to_binary(Capacity), <<";w=1">>]),
+        <<"ratelimit">> => <<Policy/binary, ";r=0;t=1">>,
+        <<"ratelimit-limit">> => integer_to_binary(Capacity),
+        <<"ratelimit-remaining">> => <<"0">>,
+        <<"ratelimit-reset">> => <<"1">>,
+        <<"retry-after">> => <<"1">>,
+        <<"x-ores-rate-limit-policy">> => <<"ip-default">>,
+        <<"x-ores-rate-limit-layer">> => <<"application">>,
+        <<"x-ores-rate-limit-decision">> => <<"denied">>
+    }}.
 
 problem(Status, Code, Detail) -> #{status => Status, headers => #{<<"content-type">> => <<"application/problem+json">>}, body => iolist_to_binary(json:encode(#{type => <<"urn:ores:middleware:", Code/binary>>, title => Code, status => Status, detail => Detail}))}.
 
