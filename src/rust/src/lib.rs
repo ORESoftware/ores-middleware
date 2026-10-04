@@ -40,6 +40,7 @@ pub mod runtime_manifest;
 pub mod runtime_manifest_evidence;
 pub mod security;
 pub mod shared_auth;
+pub mod shared_auth_service;
 pub mod shutdown;
 pub mod stage;
 pub mod validation;
@@ -182,6 +183,9 @@ pub use shared_auth::{
     NEON_ADMIN_DATABASE_URL_ENV, NEON_AUTH_DATABASE_URL_ENV, SUPABASE_ADMIN_DATABASE_URL_ENV,
     SUPABASE_AUTH_DATABASE_URL_ENV,
 };
+pub use shared_auth_service::{
+    SharedAuthServiceReadyStack, SharedAuthServiceStackError, SharedAuthServiceTopology,
+};
 pub use shutdown::{
     DrainGuard, DrainOutcome, ShutdownCoordinator, ShutdownPhase, ShutdownRejection,
     DEFAULT_DRAIN_TIMEOUT, DEFAULT_RETRY_AFTER, SHUTDOWN_HTTP_STATUS,
@@ -202,7 +206,6 @@ pub const CAPABILITIES: &[&str] = &[
     "deadline-timeout",
     "payload-limit",
     "rate-limit",
-    "quota-admission",
     "auth",
     "sync-observer",
     "json",
@@ -310,6 +313,10 @@ mod tests {
         let value = descriptor();
         assert_eq!(value.operation_symbols.len(), 7);
         assert_eq!(value.capabilities.len(), CAPABILITIES.len());
+        assert!(!value.capabilities.iter().any(|capability| capability == "quota-admission"));
+        assert!(
+            BILLABLE_QUOTA_MIDDLEWARE_ORDER.contains(&MiddlewareStage::QuotaAdmission)
+        );
     }
 
     #[test]

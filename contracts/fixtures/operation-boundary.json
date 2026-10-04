@@ -1,0 +1,20 @@
+{
+  "schema": "ores.middleware.operation-boundary.conformance/v1",
+  "issue": 255,
+  "valid": [
+    {"operation_name":"http_get","transport":"http","scope":"request"},
+    {"operation_name":"lambda_handler","transport":"lambda","scope":"callback"},
+    {"operation_name":"tcp_session","transport":"tcp","scope":"connection"},
+    {"operation_name":"ws_message","transport":"websocket","scope":"message"}
+  ],
+  "invalid": [
+    {"case":"unknown_transport","value":{"operation_name":"bad","transport":"grpc","scope":"request"}},
+    {"case":"unknown_scope","value":{"operation_name":"bad","transport":"http","scope":"process"}},
+    {"case":"empty_operation_name","value":{"operation_name":"","transport":"lambda","scope":"callback"}}
+  ],
+  "invariants": {
+    "peer_authorities": ["TypeSpec", "JSON Schema Draft 2020-12"],
+    "generated_schema_is_authority": false,
+    "callback_implies_http_auth_capability": false
+  }
+}

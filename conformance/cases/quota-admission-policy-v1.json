@@ -1,0 +1,65 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "quota-admission-policy-v1",
+  "version": 1,
+  "input": {
+    "max_windows": 8,
+    "cases": [
+      {
+        "id": "bounded-policy",
+        "policy": {
+          "policy": "free-v3",
+          "windows": [{"id": "minute", "limit": 60, "window_seconds": 60}],
+          "concurrency_limit": 4,
+          "queue_limit": 100,
+          "default_cost": 1
+        }
+      },
+      {
+        "id": "duplicate-window-id",
+        "policy": {
+          "policy": "bad",
+          "windows": [
+            {"id": "minute", "limit": 60, "window_seconds": 60},
+            {"id": "minute", "limit": 300, "window_seconds": 600}
+          ]
+        }
+      },
+      {
+        "id": "zero-limit",
+        "policy": {
+          "policy": "bad",
+          "windows": [{"id": "minute", "limit": 0, "window_seconds": 60}]
+        }
+      },
+      {
+        "id": "secret-bearing-policy",
+        "policy": {
+          "policy": "bad",
+          "redis_url": "redis://user:secret@example.invalid/0"
+        }
+      },
+      {
+        "id": "request-overrides-operation-cost",
+        "policy": {
+          "policy": "free-v3",
+          "operation_cost": 20,
+          "request_operation_cost": 1
+        }
+      }
+    ]
+  },
+  "expected": {
+    "results": [
+      {"id": "bounded-policy", "admitted": true},
+      {"id": "duplicate-window-id", "admitted": false, "reason": "duplicate_window_id"},
+      {"id": "zero-limit", "admitted": false, "reason": "invalid_limit"},
+      {"id": "secret-bearing-policy", "admitted": false, "reason": "secret_or_backend_coordinate_forbidden"},
+      {"id": "request-overrides-operation-cost", "admitted": false, "reason": "request_cost_override_forbidden"}
+    ]
+  },
+  "notes": [
+    "The repository admits one behavior-case envelope per JSON document; this matrix keeps the quota policy vectors together without adding a second conformance schema."
+  ]
+}
