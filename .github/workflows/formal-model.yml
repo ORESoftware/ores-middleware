@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'conformance/formal_model.rs'
+      - 'conformance/revocation_formal_model.rs'
       - '.github/workflows/formal-model.yml'
       - 'src/**'
       - 'packages/**'
@@ -35,3 +36,7 @@ jobs:
         run: |
           rustc --edition=2021 -D warnings conformance/formal_model.rs -o /tmp/formal-model
           /tmp/formal-model
+      - name: Exhaust authority revocation, reacquisition and stale tokens
+        run: |
+          rustc --edition=2021 -D warnings conformance/revocation_formal_model.rs -o /tmp/revocation-formal-model
+          /tmp/revocation-formal-model
